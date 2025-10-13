@@ -1,0 +1,129 @@
+<?php
+
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\AuthController;
+use App\Http\Controllers\BranchController;
+use App\Http\Controllers\DepartmentController;
+use App\Http\Controllers\SubjectController;
+use App\Http\Controllers\ExamController;
+use App\Http\Controllers\FeeController;
+use App\Http\Controllers\AttendanceController;
+use App\Http\Controllers\LibraryController;
+use App\Http\Controllers\TransportController;
+use App\Http\Controllers\EventController;
+use App\Http\Controllers\TimetableController;
+use App\Http\Controllers\TeacherController;
+use App\Http\Controllers\DashboardController;
+
+/*
+|--------------------------------------------------------------------------
+| API Routes
+|--------------------------------------------------------------------------
+*/
+
+// Public Routes
+Route::post('/register', [AuthController::class, 'register']);
+Route::post('/login', [AuthController::class, 'login']);
+Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
+Route::post('/reset-password', [AuthController::class, 'resetPassword']);
+
+// Health Check
+Route::get('/health', function () {
+    return response()->json([
+        'status' => 'ok',
+        'timestamp' => now(),
+        'service' => 'MySchool API'
+    ]);
+});
+
+// Protected Routes with rate limiting
+Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
+    
+    // Auth Routes
+    Route::get('/me', [AuthController::class, 'me']);
+    Route::post('/logout', [AuthController::class, 'logout']);
+    Route::put('/profile', [AuthController::class, 'updateProfile']);
+    Route::put('/change-password', [AuthController::class, 'changePassword']);
+    
+    // Branch Routes
+    Route::apiResource('branches', BranchController::class);
+    Route::get('branches/{id}/stats', [BranchController::class, 'stats']);
+    Route::put('branches/{id}/toggle-status', [BranchController::class, 'toggleStatus']);
+    
+    // Department Routes
+    Route::apiResource('departments', DepartmentController::class);
+    Route::put('departments/{id}/toggle-status', [DepartmentController::class, 'toggleStatus']);
+    
+    // Subject Routes
+    Route::apiResource('subjects', SubjectController::class);
+    Route::get('subjects/by-grade/{grade}', [SubjectController::class, 'byGrade']);
+    Route::get('subjects/by-department/{departmentId}', [SubjectController::class, 'byDepartment']);
+    
+    // Teacher Routes
+    Route::get('teachers', [TeacherController::class, 'index']);
+    Route::get('teachers/{id}', [TeacherController::class, 'show']);
+    
+    // Exam Routes
+    Route::apiResource('exams', ExamController::class);
+    Route::get('exams/{id}/statistics', [ExamController::class, 'statistics']);
+    Route::post('exam-results', [ExamController::class, 'storeResult']);
+    Route::get('exams/{id}/results', [ExamController::class, 'getResults']);
+    Route::get('students/{studentId}/results', [ExamController::class, 'getStudentResults']);
+    
+    // Fee Routes
+    Route::get('fee-structures', [FeeController::class, 'indexStructures']);
+    Route::post('fee-structures', [FeeController::class, 'storeStructure']);
+    Route::put('fee-structures/{id}', [FeeController::class, 'updateStructure']);
+    Route::delete('fee-structures/{id}', [FeeController::class, 'destroyStructure']);
+    
+    Route::get('fee-payments', [FeeController::class, 'indexPayments']);
+    Route::post('fee-payments', [FeeController::class, 'recordPayment']);
+    Route::get('students/{studentId}/fees', [FeeController::class, 'getStudentFees']);
+    
+    // Attendance Routes
+    Route::apiResource('attendance', AttendanceController::class);
+    Route::post('attendance/bulk', [AttendanceController::class, 'markBulk']);
+    Route::get('attendance/report', [AttendanceController::class, 'getReport']);
+    Route::get('attendance/student/{studentId}', [AttendanceController::class, 'getStudentAttendance']);
+    Route::get('attendance/class/{grade}/{section}', [AttendanceController::class, 'getClassAttendance']);
+    Route::get('attendance/report/{studentId}', [AttendanceController::class, 'generateReport']);
+    
+    // Library Routes
+    Route::apiResource('books', LibraryController::class);
+    Route::post('books/{id}/issue', [LibraryController::class, 'issueBook']);
+    Route::post('book-issues/{id}/return', [LibraryController::class, 'returnBook']);
+    Route::get('book-issues/active', [LibraryController::class, 'getActiveIssues']);
+    Route::get('book-issues/overdue', [LibraryController::class, 'getOverdueIssues']);
+    Route::get('students/{studentId}/book-issues', [LibraryController::class, 'getStudentIssues']);
+    
+    // Transport Routes
+    Route::apiResource('transport-routes', TransportController::class);
+    Route::apiResource('vehicles', TransportController::class);
+    Route::get('transport-routes/{id}/students', [TransportController::class, 'getRouteStudents']);
+    
+    // Event Routes
+    Route::apiResource('events', EventController::class);
+    Route::get('events/upcoming', [EventController::class, 'getUpcoming']);
+    Route::get('events/by-type/{type}', [EventController::class, 'getByType']);
+    
+    // Holiday Routes
+    Route::apiResource('holidays', EventController::class);
+    Route::get('holidays/year/{year}', [EventController::class, 'getHolidaysByYear']);
+    
+    // Timetable Routes
+    Route::apiResource('timetables', TimetableController::class);
+    Route::get('timetables/class/{grade}/{section}', [TimetableController::class, 'getByClass']);
+    
+    // Dashboard Routes (Secure - Role-Based Access)
+    Route::prefix('dashboard')->group(function () {
+        Route::get('/stats', [DashboardController::class, 'getStats']);
+        Route::get('/attendance', [DashboardController::class, 'getAttendance']);
+        Route::get('/top-performers', [DashboardController::class, 'getTopPerformers']);
+        Route::get('/low-attendance', [DashboardController::class, 'getLowAttendance']);
+        Route::get('/upcoming-exams', [DashboardController::class, 'getUpcomingExams']);
+        Route::get('/student-results', [DashboardController::class, 'getStudentResults']);
+        Route::get('/children-performance/{parentId}', [DashboardController::class, 'getChildrenPerformance']);
+    });
+});
+
