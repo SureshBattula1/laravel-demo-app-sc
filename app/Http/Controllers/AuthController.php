@@ -101,7 +101,13 @@ class AuthController extends Controller
                 ], 429);
             }
 
-            $validator = Validator::make($request->all(), [
+            // Accept both 'email' and 'login' fields for compatibility
+            $loginInput = $request->input('email') ?? $request->input('login');
+
+            $validator = Validator::make([
+                'login' => $loginInput,
+                'password' => $request->password
+            ], [
                 'login' => 'required|string',
                 'password' => 'required|string'
             ]);
@@ -114,7 +120,7 @@ class AuthController extends Controller
             }
 
             // Sanitize input
-            $login = strip_tags($request->login);
+            $login = strip_tags($loginInput);
             
             // Determine if login is email or phone
             $loginField = filter_var($login, FILTER_VALIDATE_EMAIL) ? 'email' : 'phone';

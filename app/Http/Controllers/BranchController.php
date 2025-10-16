@@ -13,22 +13,76 @@ class BranchController extends Controller
     public function index(Request $request)
     {
         try {
-            $query = Branch::query();
+            $query = Branch::with(['parentBranch', 'childBranches']);
 
+            // Filter by active status
             if ($request->has('is_active')) {
-                $query->where('is_active', filter_var($request->is_active, FILTER_VALIDATE_BOOLEAN));
+                $query->where('is_active', $request->boolean('is_active'));
             }
 
-            if ($request->search) {
+            // Filter by status
+            if ($request->has('status')) {
+                $query->where('status', $request->status);
+            }
+
+            // Filter by branch type
+            if ($request->has('branch_type')) {
+                $query->where('branch_type', $request->branch_type);
+            }
+
+            // Filter by region
+            if ($request->has('region')) {
+                $query->where('region', $request->region);
+            }
+
+            // Filter by city
+            if ($request->has('city')) {
+                $query->where('city', $request->city);
+            }
+
+            // Filter by parent branch
+            if ($request->has('parent_id')) {
+                if ($request->parent_id === 'null' || $request->parent_id === '0') {
+                    $query->whereNull('parent_branch_id');
+                } else {
+                    $query->where('parent_branch_id', $request->parent_id);
+                }
+            }
+
+            // Search functionality
+            if ($request->has('search')) {
                 $search = strip_tags($request->search);
                 $query->where(function($q) use ($search) {
                     $q->where('name', 'like', '%' . $search . '%')
                       ->orWhere('code', 'like', '%' . $search . '%')
-                      ->orWhere('city', 'like', '%' . $search . '%');
+                      ->orWhere('city', 'like', '%' . $search . '%')
+                      ->orWhere('region', 'like', '%' . $search . '%');
                 });
             }
 
-            $branches = $query->orderBy('name', 'asc')->get();
+            // Hierarchical view (nested structure)
+            if ($request->boolean('hierarchical')) {
+                $branches = $query->whereNull('parent_branch_id')
+                    ->with('allDescendants')
+                    ->orderBy('name')
+                    ->get();
+            } else {
+                // Pagination
+                if ($request->boolean('paginate')) {
+                    $perPage = $request->input('per_page', 15);
+                    $branches = $query->orderBy('name', 'asc')->paginate($perPage);
+                } else {
+                    $branches = $query->orderBy('name', 'asc')->get();
+                }
+            }
+
+            // Add computed fields
+            if (!$request->boolean('paginate')) {
+                $branches->each(function($branch) {
+                    $branch->capacity_utilization = $branch->getCapacityUtilization();
+                    $branch->has_children = $branch->hasChildren();
+                });
+            }
 
             return response()->json([
                 'success' => true,
@@ -51,21 +105,71 @@ class BranchController extends Controller
     {
         try {
             $validator = Validator::make($request->all(), [
-                'name' => 'required|string|max:255|regex:/^[a-zA-Z0-9\s\-&]+$/',
-                'code' => 'required|string|max:50|unique:branches|regex:/^[A-Z0-9\-]+$/',
+                // Basic Information
+                'name' => 'required|string|max:255',
+                'code' => 'required|string|max:50|unique:branches',
+                'branch_type' => 'required|in:HeadOffice,RegionalOffice,School,Campus,SubBranch',
+                'parent_branch_id' => 'nullable|exists:branches,id',
+                
+                // Location
                 'address' => 'required|string|max:500',
-                'city' => 'required|string|max:100|regex:/^[a-zA-Z\s]+$/',
-                'state' => 'required|string|max:100|regex:/^[a-zA-Z\s]+$/',
-                'country' => 'required|string|max:100|regex:/^[a-zA-Z\s]+$/',
-                'pincode' => 'required|string|max:10|regex:/^[0-9]+$/',
-                'phone' => 'required|string|max:20|unique:branches|regex:/^[0-9+\-\s()]+$/',
+                'city' => 'required|string|max:100',
+                'state' => 'required|string|max:100',
+                'country' => 'required|string|max:100',
+                'region' => 'nullable|string|max:100',
+                'pincode' => 'required|string|max:10',
+                'latitude' => 'nullable|numeric|between:-90,90',
+                'longitude' => 'nullable|numeric|between:-180,180',
+                'timezone' => 'nullable|string|max:50',
+                
+                // Contact Information
+                'phone' => 'required|string|max:20|unique:branches',
                 'email' => 'required|email|max:255|unique:branches',
-                'principal_name' => 'nullable|string|max:255|regex:/^[a-zA-Z\s]+$/',
-                'principal_contact' => 'nullable|string|max:20|regex:/^[0-9+\-\s()]+$/',
+                'website' => 'nullable|url|max:255',
+                'fax' => 'nullable|string|max:20',
+                'emergency_contact' => 'nullable|string|max:20',
+                
+                // Principal Information
+                'principal_name' => 'nullable|string|max:255',
+                'principal_contact' => 'nullable|string|max:20',
                 'principal_email' => 'nullable|email|max:255',
+                
+                // Dates
                 'established_date' => 'nullable|date|before_or_equal:today',
+                'opening_date' => 'nullable|date',
+                'closing_date' => 'nullable|date|after:opening_date',
+                
+                // Academic Information
+                'board' => 'nullable|string|max:100',
                 'affiliation_number' => 'nullable|string|max:100',
+                'accreditations' => 'nullable|array',
+                'grades_offered' => 'nullable|array',
+                'academic_year_start' => 'nullable|string|max:5',
+                'academic_year_end' => 'nullable|string|max:5',
+                'current_academic_year' => 'nullable|string|max:20',
+                
+                // Capacity
+                'total_capacity' => 'nullable|integer|min:0',
+                'facilities' => 'nullable|array',
+                
+                // Financial
+                'tax_id' => 'nullable|string|max:50',
+                'bank_name' => 'nullable|string|max:100',
+                'bank_account_number' => 'nullable|string|max:50',
+                'ifsc_code' => 'nullable|string|max:20',
+                
+                // Flags
                 'is_main_branch' => 'boolean',
+                'is_residential' => 'boolean',
+                'has_hostel' => 'boolean',
+                'has_transport' => 'boolean',
+                'has_library' => 'boolean',
+                'has_lab' => 'boolean',
+                'has_canteen' => 'boolean',
+                'has_sports' => 'boolean',
+                
+                // Status
+                'status' => 'nullable|in:Active,Inactive,UnderConstruction,Maintenance,Closed',
                 'is_active' => 'boolean',
                 'settings' => 'nullable|array'
             ]);
@@ -79,36 +183,36 @@ class BranchController extends Controller
 
             DB::beginTransaction();
 
-            $sanitizedData = [
-                'name' => strip_tags($request->name),
-                'code' => strtoupper(strip_tags($request->code)),
-                'address' => strip_tags($request->address),
-                'city' => strip_tags($request->city),
-                'state' => strip_tags($request->state),
-                'country' => strip_tags($request->country),
-                'pincode' => preg_replace('/[^0-9]/', '', $request->pincode),
-                'phone' => preg_replace('/[^0-9+\-\s()]/', '', $request->phone),
-                'email' => filter_var($request->email, FILTER_SANITIZE_EMAIL),
-                'principal_name' => strip_tags($request->principal_name),
-                'principal_contact' => preg_replace('/[^0-9+\-\s()]/', '', $request->principal_contact),
-                'principal_email' => filter_var($request->principal_email, FILTER_SANITIZE_EMAIL),
-                'established_date' => $request->established_date,
-                'affiliation_number' => strip_tags($request->affiliation_number),
-                'is_main_branch' => $request->is_main_branch ?? false,
-                'is_active' => $request->is_active ?? true,
-                'settings' => $request->settings
-            ];
+            $branchData = $request->except(['logo']);
+            $branchData['code'] = strtoupper($branchData['code'] ?? '');
+            $branchData['status'] = $branchData['status'] ?? 'Active';
+            $branchData['current_enrollment'] = 0;
+            
+            // Sanitize text fields
+            if (isset($branchData['name'])) $branchData['name'] = strip_tags($branchData['name']);
+            if (isset($branchData['address'])) $branchData['address'] = strip_tags($branchData['address']);
+            if (isset($branchData['city'])) $branchData['city'] = strip_tags($branchData['city']);
+            if (isset($branchData['email'])) $branchData['email'] = filter_var($branchData['email'], FILTER_SANITIZE_EMAIL);
 
-            $branch = Branch::create($sanitizedData);
+            // Handle logo upload if present
+            if ($request->hasFile('logo')) {
+                $logoPath = $request->file('logo')->store('branch-logos', 'public');
+                $branchData['logo'] = $logoPath;
+            }
+
+            $branch = Branch::create($branchData);
 
             DB::commit();
 
-            Log::info('Branch created', ['branch_id' => $branch->id]);
+            Log::info('Branch created', [
+                'branch_id' => $branch->id,
+                'user_id' => auth()->id()
+            ]);
 
             return response()->json([
                 'success' => true,
                 'message' => 'Branch created successfully',
-                'data' => $branch
+                'data' => $branch->load('parentBranch')
             ], 201);
 
         } catch (\Exception $e) {
@@ -133,7 +237,21 @@ class BranchController extends Controller
                 ], 400);
             }
 
-            $branch = Branch::with(['departments', 'users'])->findOrFail($id);
+            $branch = Branch::with([
+                'parentBranch',
+                'childBranches',
+                'departments',
+                'users',
+                'branchSettings'
+            ])->findOrFail($id);
+            
+            // Add computed fields
+            $branch->capacity_utilization = $branch->getCapacityUtilization();
+            $branch->has_children = $branch->hasChildren();
+            $branch->has_parent = $branch->hasParent();
+            $branch->total_users = $branch->users()->count();
+            $branch->total_students = $branch->students()->count();
+            $branch->total_teachers = $branch->teachers()->count();
             
             return response()->json([
                 'success' => true,
@@ -169,21 +287,74 @@ class BranchController extends Controller
             $branch = Branch::findOrFail($id);
 
             $validator = Validator::make($request->all(), [
-                'name' => 'sometimes|string|max:255|regex:/^[a-zA-Z0-9\s\-&]+$/',
-                'code' => 'sometimes|string|max:50|unique:branches,code,' . $id . '|regex:/^[A-Z0-9\-]+$/',
+                // Basic Information
+                'name' => 'sometimes|string|max:255',
+                'code' => 'sometimes|string|max:50|unique:branches,code,' . $id,
+                'branch_type' => 'sometimes|in:HeadOffice,RegionalOffice,School,Campus,SubBranch',
+                'parent_branch_id' => 'nullable|exists:branches,id',
+                
+                // Location
                 'address' => 'sometimes|string|max:500',
-                'city' => 'sometimes|string|max:100|regex:/^[a-zA-Z\s]+$/',
-                'state' => 'sometimes|string|max:100|regex:/^[a-zA-Z\s]+$/',
-                'country' => 'sometimes|string|max:100|regex:/^[a-zA-Z\s]+$/',
-                'pincode' => 'sometimes|string|max:10|regex:/^[0-9]+$/',
-                'phone' => 'sometimes|string|max:20|unique:branches,phone,' . $id . '|regex:/^[0-9+\-\s()]+$/',
+                'city' => 'sometimes|string|max:100',
+                'state' => 'sometimes|string|max:100',
+                'country' => 'sometimes|string|max:100',
+                'region' => 'nullable|string|max:100',
+                'pincode' => 'sometimes|string|max:10',
+                'latitude' => 'nullable|numeric|between:-90,90',
+                'longitude' => 'nullable|numeric|between:-180,180',
+                'timezone' => 'nullable|string|max:50',
+                
+                // Contact Information
+                'phone' => 'sometimes|string|max:20|unique:branches,phone,' . $id,
                 'email' => 'sometimes|email|max:255|unique:branches,email,' . $id,
-                'principal_name' => 'nullable|string|max:255|regex:/^[a-zA-Z\s]+$/',
-                'principal_contact' => 'nullable|string|max:20|regex:/^[0-9+\-\s()]+$/',
+                'website' => 'nullable|url|max:255',
+                'fax' => 'nullable|string|max:20',
+                'emergency_contact' => 'nullable|string|max:20',
+                
+                // Principal Information
+                'principal_name' => 'nullable|string|max:255',
+                'principal_contact' => 'nullable|string|max:20',
                 'principal_email' => 'nullable|email|max:255',
+                
+                // Dates
                 'established_date' => 'nullable|date|before_or_equal:today',
+                'opening_date' => 'nullable|date',
+                'closing_date' => 'nullable|date|after:opening_date',
+                
+                // Academic Information
+                'board' => 'nullable|string|max:100',
+                'affiliation_number' => 'nullable|string|max:100',
+                'accreditations' => 'nullable|array',
+                'grades_offered' => 'nullable|array',
+                'academic_year_start' => 'nullable|string|max:5',
+                'academic_year_end' => 'nullable|string|max:5',
+                'current_academic_year' => 'nullable|string|max:20',
+                
+                // Capacity
+                'total_capacity' => 'nullable|integer|min:0',
+                'current_enrollment' => 'nullable|integer|min:0',
+                'facilities' => 'nullable|array',
+                
+                // Financial
+                'tax_id' => 'nullable|string|max:50',
+                'bank_name' => 'nullable|string|max:100',
+                'bank_account_number' => 'nullable|string|max:50',
+                'ifsc_code' => 'nullable|string|max:20',
+                
+                // Flags
                 'is_main_branch' => 'sometimes|boolean',
-                'is_active' => 'sometimes|boolean'
+                'is_residential' => 'sometimes|boolean',
+                'has_hostel' => 'sometimes|boolean',
+                'has_transport' => 'sometimes|boolean',
+                'has_library' => 'sometimes|boolean',
+                'has_lab' => 'sometimes|boolean',
+                'has_canteen' => 'sometimes|boolean',
+                'has_sports' => 'sometimes|boolean',
+                
+                // Status
+                'status' => 'sometimes|in:Active,Inactive,UnderConstruction,Maintenance,Closed',
+                'is_active' => 'sometimes|boolean',
+                'settings' => 'nullable|array'
             ]);
 
             if ($validator->fails()) {
@@ -195,37 +366,42 @@ class BranchController extends Controller
 
             DB::beginTransaction();
 
-            $updateData = [];
-            foreach (['name', 'address', 'city', 'state', 'country', 'principal_name'] as $field) {
-                if ($request->has($field)) {
-                    $updateData[$field] = strip_tags($request->$field);
-                }
+            $updateData = $request->except(['logo', 'id', 'created_at', 'updated_at', 'deleted_at']);
+            
+            // Sanitize code field
+            if (isset($updateData['code'])) {
+                $updateData['code'] = strtoupper($updateData['code']);
             }
-            if ($request->has('code')) {
-                $updateData['code'] = strtoupper(strip_tags($request->code));
-            }
-            if ($request->has('email')) {
-                $updateData['email'] = filter_var($request->email, FILTER_SANITIZE_EMAIL);
-            }
-            if ($request->has('phone')) {
-                $updateData['phone'] = preg_replace('/[^0-9+\-\s()]/', '', $request->phone);
-            }
+            
+            // Sanitize text fields
+            if (isset($updateData['name'])) $updateData['name'] = strip_tags($updateData['name']);
+            if (isset($updateData['address'])) $updateData['address'] = strip_tags($updateData['address']);
+            if (isset($updateData['city'])) $updateData['city'] = strip_tags($updateData['city']);
+            if (isset($updateData['email'])) $updateData['email'] = filter_var($updateData['email'], FILTER_SANITIZE_EMAIL);
 
-            $updateData = array_merge($updateData, $request->only([
-                'pincode', 'principal_contact', 'principal_email', 'established_date',
-                'affiliation_number', 'is_main_branch', 'is_active', 'settings'
-            ]));
+            // Handle logo upload if present
+            if ($request->hasFile('logo')) {
+                // Delete old logo if exists
+                if ($branch->logo && \Storage::disk('public')->exists($branch->logo)) {
+                    \Storage::disk('public')->delete($branch->logo);
+                }
+                $logoPath = $request->file('logo')->store('branch-logos', 'public');
+                $updateData['logo'] = $logoPath;
+            }
 
             $branch->update($updateData);
 
             DB::commit();
 
-            Log::info('Branch updated', ['branch_id' => $branch->id]);
+            Log::info('Branch updated', [
+                'branch_id' => $branch->id,
+                'user_id' => auth()->id()
+            ]);
 
             return response()->json([
                 'success' => true,
                 'message' => 'Branch updated successfully',
-                'data' => $branch
+                'data' => $branch->fresh(['parentBranch', 'childBranches'])
             ]);
 
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
@@ -245,6 +421,10 @@ class BranchController extends Controller
         }
     }
 
+    /**
+     * Soft delete branch by updating status to "Closed"
+     * This keeps the record in database but marks it as deleted
+     */
     public function destroy($id)
     {
         try {
@@ -259,24 +439,35 @@ class BranchController extends Controller
 
             $branch = Branch::findOrFail($id);
             
-            // Check if branch has users or departments
-            if ($branch->users()->count() > 0 || $branch->departments()->count() > 0) {
-                DB::rollBack();
+            // Check if already deleted (status is Closed)
+            if ($branch->status === 'Closed') {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Cannot delete branch with existing users or departments'
+                    'message' => 'Branch is already deleted'
                 ], 400);
             }
 
-            $branch->delete();
+            // Update status to Closed and set is_active to false
+            $branch->update([
+                'status' => 'Closed',
+                'is_active' => false,
+                'closing_date' => now()
+            ]);
+
+            // Also deactivate all child branches recursively
+            $this->deactivateChildBranches($branch);
 
             DB::commit();
 
-            Log::info('Branch deleted', ['branch_id' => $id]);
+            Log::info('Branch soft deleted (status updated to Closed)', [
+                'branch_id' => $id,
+                'user_id' => auth()->id()
+            ]);
 
             return response()->json([
                 'success' => true,
-                'message' => 'Branch deleted successfully'
+                'message' => 'Branch deleted successfully',
+                'data' => $branch->fresh()
             ]);
 
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
@@ -293,6 +484,293 @@ class BranchController extends Controller
                 'message' => 'Failed to delete branch',
                 'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
             ], 500);
+        }
+    }
+
+    /**
+     * Restore a deleted branch (change status from Closed to Active)
+     */
+    public function restore($id)
+    {
+        try {
+            if (!is_numeric($id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Invalid branch ID'
+                ], 400);
+            }
+
+            DB::beginTransaction();
+
+            $branch = Branch::findOrFail($id);
+
+            if ($branch->status !== 'Closed') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Branch is not deleted. Only closed branches can be restored.'
+                ], 400);
+            }
+
+            // Check if parent branch is active
+            if ($branch->parent_branch_id) {
+                $parent = Branch::find($branch->parent_branch_id);
+                if (!$parent || $parent->status === 'Closed' || !$parent->is_active) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Cannot restore branch: Parent branch is not active'
+                    ], 400);
+                }
+            }
+
+            // Restore the branch
+            $branch->update([
+                'status' => 'Active',
+                'is_active' => true,
+                'closing_date' => null
+            ]);
+
+            DB::commit();
+
+            Log::info('Branch restored', [
+                'branch_id' => $id,
+                'user_id' => auth()->id()
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Branch restored successfully',
+                'data' => $branch->fresh(['parentBranch', 'childBranches'])
+            ]);
+
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Branch not found'
+            ], 404);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Restore branch error', ['error' => $e->getMessage()]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to restore branch',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Get deleted branches (status = Closed)
+     */
+    public function getDeleted(Request $request)
+    {
+        try {
+            $query = Branch::with(['parentBranch', 'childBranches'])
+                ->where('status', 'Closed');
+
+            // Search in deleted branches
+            if ($request->has('search')) {
+                $search = strip_tags($request->search);
+                $query->where(function($q) use ($search) {
+                    $q->where('name', 'like', '%' . $search . '%')
+                      ->orWhere('code', 'like', '%' . $search . '%')
+                      ->orWhere('city', 'like', '%' . $search . '%');
+                });
+            }
+
+            // Filter by branch type
+            if ($request->has('branch_type')) {
+                $query->where('branch_type', $request->branch_type);
+            }
+
+            $deletedBranches = $query->orderBy('closing_date', 'desc')->get();
+
+            return response()->json([
+                'success' => true,
+                'data' => $deletedBranches,
+                'count' => $deletedBranches->count()
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Get deleted branches error', ['error' => $e->getMessage()]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch deleted branches',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Bulk delete branches (update status to Closed)
+     */
+    public function bulkDelete(Request $request)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'branch_ids' => 'required|array|min:1',
+                'branch_ids.*' => 'required|integer|exists:branches,id'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            DB::beginTransaction();
+
+            $deletedCount = 0;
+            $failedIds = [];
+
+            foreach ($request->branch_ids as $branchId) {
+                $branch = Branch::find($branchId);
+                
+                if ($branch && $branch->status !== 'Closed') {
+                    $branch->update([
+                        'status' => 'Closed',
+                        'is_active' => false,
+                        'closing_date' => now()
+                    ]);
+                    
+                    // Deactivate child branches
+                    $this->deactivateChildBranches($branch);
+                    
+                    $deletedCount++;
+                } else {
+                    $failedIds[] = [
+                        'id' => $branchId,
+                        'reason' => 'Already deleted or not found'
+                    ];
+                }
+            }
+
+            DB::commit();
+
+            Log::info('Bulk delete branches', [
+                'deleted_count' => $deletedCount,
+                'failed_count' => count($failedIds),
+                'user_id' => auth()->id()
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => "Successfully deleted {$deletedCount} branch(es)",
+                'deleted_count' => $deletedCount,
+                'failed' => $failedIds
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Bulk delete error', ['error' => $e->getMessage()]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Bulk delete failed',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Bulk restore branches
+     */
+    public function bulkRestore(Request $request)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'branch_ids' => 'required|array|min:1',
+                'branch_ids.*' => 'required|integer|exists:branches,id'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            DB::beginTransaction();
+
+            $restoredCount = 0;
+            $failedIds = [];
+
+            foreach ($request->branch_ids as $branchId) {
+                $branch = Branch::find($branchId);
+                
+                if ($branch && $branch->status === 'Closed') {
+                    // Check if parent is active
+                    if ($branch->parent_branch_id) {
+                        $parent = Branch::find($branch->parent_branch_id);
+                        if (!$parent || $parent->status === 'Closed' || !$parent->is_active) {
+                            $failedIds[] = [
+                                'id' => $branchId,
+                                'reason' => 'Parent branch is not active'
+                            ];
+                            continue;
+                        }
+                    }
+                    
+                    $branch->update([
+                        'status' => 'Active',
+                        'is_active' => true,
+                        'closing_date' => null
+                    ]);
+                    $restoredCount++;
+                } else {
+                    $failedIds[] = [
+                        'id' => $branchId,
+                        'reason' => 'Not deleted or not found'
+                    ];
+                }
+            }
+
+            DB::commit();
+
+            Log::info('Bulk restore branches', [
+                'restored_count' => $restoredCount,
+                'failed_count' => count($failedIds),
+                'user_id' => auth()->id()
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => "Successfully restored {$restoredCount} branch(es)",
+                'restored_count' => $restoredCount,
+                'failed' => $failedIds
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Bulk restore error', ['error' => $e->getMessage()]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Bulk restore failed',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Helper method to recursively deactivate child branches
+     */
+    private function deactivateChildBranches($branch)
+    {
+        $children = $branch->childBranches;
+        
+        foreach ($children as $child) {
+            if ($child->status !== 'Closed') {
+                $child->update([
+                    'status' => 'Inactive',
+                    'is_active' => false
+                ]);
+                
+                // Recursively deactivate children's children
+                $this->deactivateChildBranches($child);
+            }
         }
     }
 

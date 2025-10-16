@@ -20,9 +20,12 @@ class User extends Authenticatable
         'mobile',
         'password',
         'role',
+        'user_type',
+        'user_type_id',
         'branch_id',
         'avatar',
         'is_active',
+        'last_login',
     ];
 
     protected $hidden = [

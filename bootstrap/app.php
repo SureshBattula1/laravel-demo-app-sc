@@ -15,6 +15,8 @@ return Application::configure(basePath: dirname(__DIR__))
         // Register custom middleware
         $middleware->alias([
             'role' => \App\Http\Middleware\CheckRole::class,
+            'branch.access' => \App\Http\Middleware\CheckBranchAccess::class,
+            'api.logger' => \App\Http\Middleware\ApiLogger::class,
         ]);
         
         // Enable CORS

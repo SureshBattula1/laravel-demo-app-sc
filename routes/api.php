@@ -4,6 +4,8 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BranchController;
+use App\Http\Controllers\EnhancedBranchController;
+use App\Http\Controllers\BranchTransferController;
 use App\Http\Controllers\DepartmentController;
 use App\Http\Controllers\SubjectController;
 use App\Http\Controllers\ExamController;
@@ -14,6 +16,7 @@ use App\Http\Controllers\TransportController;
 use App\Http\Controllers\EventController;
 use App\Http\Controllers\TimetableController;
 use App\Http\Controllers\TeacherController;
+use App\Http\Controllers\StudentController;
 use App\Http\Controllers\DashboardController;
 
 /*
@@ -46,10 +49,48 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     Route::put('/profile', [AuthController::class, 'updateProfile']);
     Route::put('/change-password', [AuthController::class, 'changePassword']);
     
-    // Branch Routes
-    Route::apiResource('branches', BranchController::class);
-    Route::get('branches/{id}/stats', [BranchController::class, 'stats']);
-    Route::put('branches/{id}/toggle-status', [BranchController::class, 'toggleStatus']);
+    // Branch Routes - Enhanced Multi-Branch Management
+    Route::prefix('branches')->group(function () {
+        // List and create
+        Route::get('/', [BranchController::class, 'index']);
+        Route::post('/', [BranchController::class, 'store']);
+        
+        // Deleted branches (soft deleted - status = Closed)
+        Route::get('deleted', [BranchController::class, 'getDeleted']);
+        
+        // Bulk operations
+        Route::post('bulk-delete', [BranchController::class, 'bulkDelete']);
+        Route::post('bulk-restore', [BranchController::class, 'bulkRestore']);
+        
+        // Hierarchy and analytics
+        Route::get('hierarchy', [BranchController::class, 'getHierarchy']);
+        Route::get('hierarchy/{id}', [BranchController::class, 'getHierarchy']);
+        Route::get('locations', [BranchController::class, 'getBranchLocations']);
+        Route::get('comparative-analytics', [BranchController::class, 'getComparativeAnalytics']);
+        
+        // Single branch operations
+        Route::get('{id}', [BranchController::class, 'show']);
+        Route::put('{id}', [BranchController::class, 'update']);
+        Route::delete('{id}', [BranchController::class, 'destroy']);
+        Route::post('{id}/restore', [BranchController::class, 'restore']);
+        Route::get('{id}/stats', [BranchController::class, 'stats']);
+        Route::put('{id}/toggle-status', [BranchController::class, 'toggleStatus']);
+        Route::put('{id}/capacity', [BranchController::class, 'updateCapacity']);
+        Route::get('{id}/settings', [BranchController::class, 'getSettings']);
+        Route::post('{id}/settings', [BranchController::class, 'updateSettings']);
+    });
+
+    // Branch Transfer Routes
+    Route::prefix('branch-transfers')->group(function () {
+        Route::get('/', [BranchTransferController::class, 'index']);
+        Route::post('/', [BranchTransferController::class, 'store']);
+        Route::get('statistics', [BranchTransferController::class, 'getStatistics']);
+        Route::get('{id}', [BranchTransferController::class, 'show']);
+        Route::post('{id}/approve', [BranchTransferController::class, 'approve']);
+        Route::post('{id}/reject', [BranchTransferController::class, 'reject']);
+        Route::post('{id}/complete', [BranchTransferController::class, 'complete']);
+        Route::post('{id}/cancel', [BranchTransferController::class, 'cancel']);
+    });
     
     // Department Routes
     Route::apiResource('departments', DepartmentController::class);
@@ -63,6 +104,14 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     // Teacher Routes
     Route::get('teachers', [TeacherController::class, 'index']);
     Route::get('teachers/{id}', [TeacherController::class, 'show']);
+    
+    // Student Routes
+    Route::get('students', [StudentController::class, 'index']);
+    Route::post('students', [StudentController::class, 'store']);
+    Route::get('students/{id}', [StudentController::class, 'show']);
+    Route::put('students/{id}', [StudentController::class, 'update']);
+    Route::delete('students/{id}', [StudentController::class, 'destroy']);
+    Route::post('students/promote', [StudentController::class, 'promote']);
     
     // Exam Routes
     Route::apiResource('exams', ExamController::class);
@@ -116,14 +165,15 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     Route::get('timetables/class/{grade}/{section}', [TimetableController::class, 'getByClass']);
     
     // Dashboard Routes (Secure - Role-Based Access)
+    Route::get('dashboard', [DashboardController::class, 'getStats']); // Main dashboard endpoint
     Route::prefix('dashboard')->group(function () {
-        Route::get('/stats', [DashboardController::class, 'getStats']);
-        Route::get('/attendance', [DashboardController::class, 'getAttendance']);
-        Route::get('/top-performers', [DashboardController::class, 'getTopPerformers']);
-        Route::get('/low-attendance', [DashboardController::class, 'getLowAttendance']);
-        Route::get('/upcoming-exams', [DashboardController::class, 'getUpcomingExams']);
-        Route::get('/student-results', [DashboardController::class, 'getStudentResults']);
-        Route::get('/children-performance/{parentId}', [DashboardController::class, 'getChildrenPerformance']);
+        Route::get('stats', [DashboardController::class, 'getStats']);
+        Route::get('attendance', [DashboardController::class, 'getAttendance']);
+        Route::get('top-performers', [DashboardController::class, 'getTopPerformers']);
+        Route::get('low-attendance', [DashboardController::class, 'getLowAttendance']);
+        Route::get('upcoming-exams', [DashboardController::class, 'getUpcomingExams']);
+        Route::get('student-results', [DashboardController::class, 'getStudentResults']);
+        Route::get('children-performance/{parentId}', [DashboardController::class, 'getChildrenPerformance']);
     });
 });
 

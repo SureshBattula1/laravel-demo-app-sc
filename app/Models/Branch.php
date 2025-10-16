@@ -11,30 +11,91 @@ class Branch extends Model
     use HasFactory, SoftDeletes;
 
     protected $fillable = [
-        'name', 'code', 'address', 'city', 'state', 'country', 'pincode',
-        'phone', 'email', 'principal_name', 'principal_contact', 'principal_email',
-        'established_date', 'affiliation_number', 'logo', 'is_main_branch',
-        'is_active', 'settings'
+        'name', 'code', 'parent_branch_id', 'branch_type', 'address', 'city', 'state', 
+        'country', 'pincode', 'latitude', 'longitude', 'timezone', 'region',
+        'phone', 'email', 'website', 'fax', 'emergency_contact',
+        'principal_name', 'principal_contact', 'principal_email',
+        'established_date', 'opening_date', 'closing_date',
+        'affiliation_number', 'board', 'accreditations', 'logo',
+        'total_capacity', 'current_enrollment', 'facilities',
+        'academic_year_start', 'academic_year_end', 'current_academic_year', 'grades_offered',
+        'tax_id', 'bank_name', 'bank_account_number', 'ifsc_code',
+        'is_main_branch', 'is_residential', 'has_hostel', 'has_transport', 
+        'has_library', 'has_lab', 'has_canteen', 'has_sports',
+        'is_active', 'status', 'settings'
     ];
 
     protected function casts(): array
     {
         return [
             'is_main_branch' => 'boolean',
+            'is_residential' => 'boolean',
+            'has_hostel' => 'boolean',
+            'has_transport' => 'boolean',
+            'has_library' => 'boolean',
+            'has_lab' => 'boolean',
+            'has_canteen' => 'boolean',
+            'has_sports' => 'boolean',
             'is_active' => 'boolean',
             'settings' => 'array',
+            'facilities' => 'array',
+            'grades_offered' => 'array',
+            'accreditations' => 'array',
             'established_date' => 'date',
+            'opening_date' => 'date',
+            'closing_date' => 'date',
+            'latitude' => 'decimal:8',
+            'longitude' => 'decimal:8',
         ];
     }
 
+    // Hierarchical relationships
+    public function parentBranch()
+    {
+        return $this->belongsTo(Branch::class, 'parent_branch_id');
+    }
+
+    public function childBranches()
+    {
+        return $this->hasMany(Branch::class, 'parent_branch_id');
+    }
+
+    public function allDescendants()
+    {
+        return $this->childBranches()->with('allDescendants');
+    }
+
+    // Get all ancestor branches (recursive)
+    public function getAncestors()
+    {
+        $ancestors = collect();
+        $parent = $this->parentBranch;
+        
+        while ($parent) {
+            $ancestors->push($parent);
+            $parent = $parent->parentBranch;
+        }
+        
+        return $ancestors;
+    }
+
+    // Get all descendant branch IDs (including self)
+    public function getDescendantIds($includesSelf = true)
+    {
+        $ids = $includesSelf ? [$this->id] : [];
+        
+        foreach ($this->childBranches as $child) {
+            $ids[] = $child->id;
+            $ids = array_merge($ids, $child->getDescendantIds(false));
+        }
+        
+        return array_unique($ids);
+    }
+
+    // User relationships
     public function users()
     {
         return $this->hasMany(User::class);
-    }
-
-    public function departments()
-    {
-        return $this->hasMany(Department::class);
     }
 
     public function students()
@@ -45,5 +106,104 @@ class Branch extends Model
     public function teachers()
     {
         return $this->hasMany(User::class)->where('role', 'Teacher');
+    }
+
+    public function staff()
+    {
+        return $this->hasMany(User::class)->whereIn('role', ['Staff', 'BranchAdmin']);
+    }
+
+    public function parents()
+    {
+        return $this->hasMany(User::class)->where('role', 'Parent');
+    }
+
+    // Other relationships
+    public function departments()
+    {
+        return $this->hasMany(Department::class);
+    }
+
+    public function branchSettings()
+    {
+        return $this->hasMany(BranchSetting::class);
+    }
+
+    public function analytics()
+    {
+        return $this->hasMany(BranchAnalytic::class);
+    }
+
+    public function transfersFrom()
+    {
+        return $this->hasMany(BranchTransfer::class, 'from_branch_id');
+    }
+
+    public function transfersTo()
+    {
+        return $this->hasMany(BranchTransfer::class, 'to_branch_id');
+    }
+
+    // Helper methods
+    public function isHeadOffice()
+    {
+        return $this->branch_type === 'HeadOffice';
+    }
+
+    public function isSchool()
+    {
+        return $this->branch_type === 'School';
+    }
+
+    public function hasParent()
+    {
+        return !is_null($this->parent_branch_id);
+    }
+
+    public function hasChildren()
+    {
+        return $this->childBranches()->count() > 0;
+    }
+
+    public function isActive()
+    {
+        return $this->is_active && $this->status === 'Active';
+    }
+
+    public function getCapacityUtilization()
+    {
+        if ($this->total_capacity == 0) return 0;
+        return round(($this->current_enrollment / $this->total_capacity) * 100, 2);
+    }
+
+    // Scopes
+    public function scopeActive($query)
+    {
+        return $query->where('is_active', true)->where('status', 'Active');
+    }
+
+    public function scopeHeadOffices($query)
+    {
+        return $query->where('branch_type', 'HeadOffice');
+    }
+
+    public function scopeSchools($query)
+    {
+        return $query->where('branch_type', 'School');
+    }
+
+    public function scopeTopLevel($query)
+    {
+        return $query->whereNull('parent_branch_id');
+    }
+
+    public function scopeInRegion($query, $region)
+    {
+        return $query->where('region', $region);
+    }
+
+    public function scopeInCity($query, $city)
+    {
+        return $query->where('city', $city);
     }
 }
