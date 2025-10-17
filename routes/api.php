@@ -156,11 +156,13 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     // Fee Routes
     Route::get('fee-structures', [FeeController::class, 'indexStructures']);
     Route::post('fee-structures', [FeeController::class, 'storeStructure']);
+    Route::get('fee-structures/{id}', [FeeController::class, 'show']);
     Route::put('fee-structures/{id}', [FeeController::class, 'updateStructure']);
     Route::delete('fee-structures/{id}', [FeeController::class, 'destroyStructure']);
     
     Route::get('fee-payments', [FeeController::class, 'indexPayments']);
     Route::post('fee-payments', [FeeController::class, 'recordPayment']);
+    Route::get('fee-payments/{id}', [FeeController::class, 'showPayment']);
     Route::get('students/{studentId}/fees', [FeeController::class, 'getStudentFees']);
     
     // Attendance Routes
