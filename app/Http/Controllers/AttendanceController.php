@@ -309,16 +309,27 @@ class AttendanceController extends Controller
     public function getStudentAttendance($studentId)
     {
         try {
-            $attendance = DB::table('student_attendance')
-                ->where('student_id', $studentId)
-                ->orderBy('date', 'desc')
-                ->get();
+            // Apply date filters if provided
+            $query = DB::table('student_attendance')
+                ->where('student_id', $studentId);
+            
+            if (request()->has('from_date')) {
+                $query->whereDate('date', '>=', request('from_date'));
+            }
+            
+            if (request()->has('to_date')) {
+                $query->whereDate('date', '<=', request('to_date'));
+            }
+            
+            $attendance = $query->orderBy('date', 'desc')->get();
 
             $summary = [
                 'total_days' => $attendance->count(),
                 'present' => $attendance->where('status', 'Present')->count(),
                 'absent' => $attendance->where('status', 'Absent')->count(),
                 'late' => $attendance->where('status', 'Late')->count(),
+                'leaves' => $attendance->whereIn('status', ['Sick Leave', 'Leave'])->count(),
+                'half_day' => $attendance->where('status', 'Half-Day')->count(),
                 'percentage' => $attendance->count() > 0 
                     ? round(($attendance->where('status', 'Present')->count() / $attendance->count()) * 100, 2)
                     : 0

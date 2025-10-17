@@ -55,7 +55,7 @@ class FeeController extends Controller
         DB::beginTransaction();
         try {
             $validator = Validator::make($request->all(), [
-                'branch_id' => 'required|uuid|exists:branches,id',
+                'branch_id' => 'required|exists:branches,id',
                 'grade' => 'required|string|max:50',
                 'fee_type' => 'required|string|in:Tuition,Library,Laboratory,Sports,Transport,Exam,Other',
                 'amount' => 'required|numeric|min:0',
@@ -227,8 +227,8 @@ class FeeController extends Controller
         DB::beginTransaction();
         try {
             $validator = Validator::make($request->all(), [
-                'fee_structure_id' => 'required|uuid|exists:fee_structures,id',
-                'student_id' => 'required|uuid|exists:users,id',
+                'fee_structure_id' => 'required|exists:fee_structures,id',
+                'student_id' => 'required|exists:users,id',
                 'amount_paid' => 'required|numeric|min:0',
                 'payment_date' => 'required|date',
                 'payment_method' => 'required|string|in:Cash,Card,Online,Cheque,Other',
@@ -306,10 +306,49 @@ class FeeController extends Controller
         }
     }
 
+    // Show single fee structure
+    public function show(string $id)
+    {
+        try {
+            $structure = FeeStructure::with(['branch', 'creator', 'updater'])->findOrFail($id);
+            
+            return response()->json([
+                'success' => true,
+                'data' => $structure
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error fetching fee structure: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Fee structure not found',
+                'error' => $e->getMessage()
+            ], 404);
+        }
+    }
+    
+    // Show single fee payment
+    public function showPayment(string $id)
+    {
+        try {
+            $payment = FeePayment::with(['feeStructure', 'student', 'creator'])->findOrFail($id);
+            
+            return response()->json([
+                'success' => true,
+                'data' => $payment
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error fetching fee payment: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Fee payment not found',
+                'error' => $e->getMessage()
+            ], 404);
+        }
+    }
+
     // Legacy methods for compatibility
     public function index() { return $this->indexStructures(request()); }
     public function store(Request $request) { return $this->storeStructure($request); }
-    public function show(string $id) { return FeeStructure::with(['branch', 'payments'])->findOrFail($id); }
     public function update(Request $request, string $id) { return $this->updateStructure($request, $id); }
     public function destroy(string $id) { return $this->destroyStructure($id); }
 }

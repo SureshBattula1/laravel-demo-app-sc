@@ -147,6 +147,7 @@ class TeacherController extends Controller
                 'email' => 'sometimes|email|unique:users,email,' . $id,
                 'phone' => 'nullable|string|max:20',
                 'password' => 'nullable|string|min:8',
+                'branch_id' => 'sometimes|exists:branches,id',
                 'is_active' => 'sometimes|boolean'
             ]);
 
@@ -159,7 +160,7 @@ class TeacherController extends Controller
 
             DB::beginTransaction();
 
-            $updateData = $request->only(['first_name', 'last_name', 'email', 'phone', 'is_active']);
+            $updateData = $request->only(['first_name', 'last_name', 'email', 'phone', 'branch_id', 'is_active']);
             
             foreach (['first_name', 'last_name'] as $field) {
                 if (isset($updateData[$field])) {
@@ -183,11 +184,12 @@ class TeacherController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            Log::error('Update teacher error', ['error' => $e->getMessage()]);
+            Log::error('Update teacher error', ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
             
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to update teacher'
+                'message' => 'Failed to update teacher',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
             ], 500);
         }
     }
