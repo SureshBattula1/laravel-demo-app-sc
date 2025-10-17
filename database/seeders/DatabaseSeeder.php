@@ -19,9 +19,10 @@ class DatabaseSeeder extends Seeder
 
         try {
             // Create Main Branch
-            $mainBranch = Branch::create([
+            $mainBranch = Branch::firstOrCreate(
+                ['code' => 'MAIN001'],
+                [
                 'name' => 'Main Campus',
-                'code' => 'MAIN001',
                 'address' => '123 Education Street',
                 'city' => 'New York',
                 'state' => 'New York',
@@ -48,12 +49,14 @@ class DatabaseSeeder extends Seeder
                     'language' => 'English',
                     'timezone' => 'America/New_York'
                 ]
-            ]);
+                ]
+            );
 
             // Create Second Branch
-            $secondBranch = Branch::create([
+            $secondBranch = Branch::firstOrCreate(
+                ['code' => 'EAST001'],
+                [
                 'name' => 'East Campus',
-                'code' => 'EAST001',
                 'address' => '456 Learning Avenue',
                 'city' => 'Boston',
                 'state' => 'Massachusetts',
@@ -80,10 +83,13 @@ class DatabaseSeeder extends Seeder
                     'language' => 'English',
                     'timezone' => 'America/New_York'
                 ]
-            ]);
+                ]
+            );
 
             // Create Super Admin User
-            User::create([
+            User::firstOrCreate(
+                ['email' => 'admin@myschool.com'],
+                [
                 'first_name' => 'Super',
                 'last_name' => 'Admin',
                 'email' => 'admin@myschool.com',
@@ -93,10 +99,13 @@ class DatabaseSeeder extends Seeder
                 'branch_id' => $mainBranch->id,
                 'is_active' => true,
                 'email_verified_at' => now()
-            ]);
+                ]
+            );
 
             // Create Branch Admin for Main Campus
-            User::create([
+            User::firstOrCreate(
+                ['email' => 'manager@myschool.com'],
+                [
                 'first_name' => 'John',
                 'last_name' => 'Manager',
                 'email' => 'manager@myschool.com',
@@ -106,10 +115,13 @@ class DatabaseSeeder extends Seeder
                 'branch_id' => $mainBranch->id,
                 'is_active' => true,
                 'email_verified_at' => now()
-            ]);
+                ]
+            );
 
             // Create Sample Teacher
-            User::create([
+            User::firstOrCreate(
+                ['email' => 'teacher@myschool.com'],
+                [
                 'first_name' => 'Sarah',
                 'last_name' => 'Teacher',
                 'email' => 'teacher@myschool.com',
@@ -119,10 +131,13 @@ class DatabaseSeeder extends Seeder
                 'branch_id' => $mainBranch->id,
                 'is_active' => true,
                 'email_verified_at' => now()
-            ]);
+                ]
+            );
 
             // Create Sample Student
-            User::create([
+            User::firstOrCreate(
+                ['email' => 'student@myschool.com'],
+                [
                 'first_name' => 'Alice',
                 'last_name' => 'Student',
                 'email' => 'student@myschool.com',
@@ -132,10 +147,13 @@ class DatabaseSeeder extends Seeder
                 'branch_id' => $mainBranch->id,
                 'is_active' => true,
                 'email_verified_at' => now()
-            ]);
+                ]
+            );
 
             // Create Sample Parent
-            User::create([
+            User::firstOrCreate(
+                ['email' => 'parent@myschool.com'],
+                [
                 'first_name' => 'Bob',
                 'last_name' => 'Parent',
                 'email' => 'parent@myschool.com',
@@ -145,7 +163,8 @@ class DatabaseSeeder extends Seeder
                 'branch_id' => $mainBranch->id,
                 'is_active' => true,
                 'email_verified_at' => now()
-            ]);
+                ]
+            );
 
             DB::commit();
 

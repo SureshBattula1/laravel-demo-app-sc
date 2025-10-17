@@ -8,20 +8,24 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::table('student_groups', function (Blueprint $table) {
-            if (!Schema::hasColumn('student_groups', 'description')) {
-                $table->text('description')->nullable()->after('academic_year');
-            }
-        });
+        if (Schema::hasTable('student_groups')) {
+            Schema::table('student_groups', function (Blueprint $table) {
+                if (!Schema::hasColumn('student_groups', 'description')) {
+                    $table->text('description')->nullable()->after('academic_year');
+                }
+            });
+        }
     }
 
     public function down(): void
     {
-        Schema::table('student_groups', function (Blueprint $table) {
-            if (Schema::hasColumn('student_groups', 'description')) {
-                $table->dropColumn('description');
-            }
-        });
+        if (Schema::hasTable('student_groups')) {
+            Schema::table('student_groups', function (Blueprint $table) {
+                if (Schema::hasColumn('student_groups', 'description')) {
+                    $table->dropColumn('description');
+                }
+            });
+        }
     }
 };
 

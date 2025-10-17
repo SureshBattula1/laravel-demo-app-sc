@@ -33,10 +33,11 @@ return new class extends Migration
         }
 
         // STUDENTS TABLE
-        Schema::create('students', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('user_id')->constrained('users')->onDelete('cascade');
-            $table->foreignId('branch_id')->constrained('branches')->onDelete('restrict');
+        if (!Schema::hasTable('students')) {
+            Schema::create('students', function (Blueprint $table) {
+                $table->id();
+                $table->foreignId('user_id')->constrained('users')->onDelete('cascade');
+                $table->foreignId('branch_id')->constrained('branches')->onDelete('restrict');
             
             // Admission Details
             $table->string('admission_number')->unique();
@@ -120,10 +121,12 @@ return new class extends Migration
             $table->index('admission_number');
             $table->index(['branch_id', 'grade', 'section', 'academic_year']);
             $table->index('student_status');
-        });
+            });
+        }
 
         // TEACHERS TABLE
-        Schema::create('teachers', function (Blueprint $table) {
+        if (!Schema::hasTable('teachers')) {
+            Schema::create('teachers', function (Blueprint $table) {
             $table->id();
             $table->foreignId('user_id')->constrained('users')->onDelete('cascade');
             $table->foreignId('branch_id')->constrained('branches')->onDelete('restrict');
@@ -190,10 +193,12 @@ return new class extends Migration
             
             $table->index('employee_id');
             $table->index(['branch_id', 'teacher_status']);
-        });
+            });
+        }
 
         // PARENTS TABLE
-        Schema::create('parents', function (Blueprint $table) {
+        if (!Schema::hasTable('parents')) {
+            Schema::create('parents', function (Blueprint $table) {
             $table->id();
             $table->foreignId('user_id')->constrained('users')->onDelete('cascade');
             
@@ -218,10 +223,12 @@ return new class extends Migration
             
             $table->timestamps();
             $table->softDeletes();
-        });
+            });
+        }
 
         // STAFF TABLE
-        Schema::create('staff', function (Blueprint $table) {
+        if (!Schema::hasTable('staff')) {
+            Schema::create('staff', function (Blueprint $table) {
             $table->id();
             $table->foreignId('user_id')->constrained('users')->onDelete('cascade');
             $table->foreignId('branch_id')->constrained('branches')->onDelete('restrict');
@@ -255,10 +262,12 @@ return new class extends Migration
             
             $table->index('employee_id');
             $table->index(['branch_id', 'staff_status']);
-        });
+            });
+        }
 
         // ADMINS TABLE
-        Schema::create('admins', function (Blueprint $table) {
+        if (!Schema::hasTable('admins')) {
+            Schema::create('admins', function (Blueprint $table) {
             $table->id();
             $table->foreignId('user_id')->constrained('users')->onDelete('cascade');
             $table->foreignId('branch_id')->nullable()->constrained('branches')->onDelete('set null');
@@ -273,7 +282,8 @@ return new class extends Migration
             $table->timestamp('last_login')->nullable();
             
             $table->timestamps();
-        });
+            });
+        }
     }
 
     /**

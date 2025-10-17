@@ -14,147 +14,153 @@ return new class extends Migration
         // Users table indexes for search performance
         Schema::table('users', function (Blueprint $table) {
             // Check if indexes don't exist before creating
-            try {
+            if (!$this->indexExists('users', 'idx_users_first_name')) {
                 $table->index('first_name', 'idx_users_first_name');
-            } catch (\Exception $e) {}
+            }
             
-            try {
+            if (!$this->indexExists('users', 'idx_users_last_name')) {
                 $table->index('last_name', 'idx_users_last_name');
-            } catch (\Exception $e) {}
+            }
             
-            try {
+            if (!$this->indexExists('users', 'idx_users_full_name')) {
                 $table->index(['first_name', 'last_name'], 'idx_users_full_name');
-            } catch (\Exception $e) {}
+            }
         });
 
         // Students table indexes for filtering and search
-        Schema::table('students', function (Blueprint $table) {
-            try {
-                $table->index(['grade', 'section'], 'idx_students_grade_section');
-            } catch (\Exception $e) {}
-            
-            try {
-                $table->index(['grade', 'section', 'student_status'], 'idx_students_grade_sec_status');
-            } catch (\Exception $e) {}
-            
-            try {
-                $table->index('student_status', 'idx_students_status');
-            } catch (\Exception $e) {}
-            
-            try {
-                $table->index(['branch_id', 'grade', 'academic_year'], 'idx_students_branch_grade_year');
-            } catch (\Exception $e) {}
-        });
+        if (Schema::hasTable('students')) {
+            Schema::table('students', function (Blueprint $table) {
+                if (!$this->indexExists('students', 'idx_students_grade_section')) {
+                    $table->index(['grade', 'section'], 'idx_students_grade_section');
+                }
+                
+                if (!$this->indexExists('students', 'idx_students_grade_sec_status')) {
+                    $table->index(['grade', 'section', 'student_status'], 'idx_students_grade_sec_status');
+                }
+                
+                if (!$this->indexExists('students', 'idx_students_status')) {
+                    $table->index('student_status', 'idx_students_status');
+                }
+                
+                if (!$this->indexExists('students', 'idx_students_branch_grade_year')) {
+                    $table->index(['branch_id', 'grade', 'academic_year'], 'idx_students_branch_grade_year');
+                }
+            });
+        }
 
         // Branches table indexes for filtering
         Schema::table('branches', function (Blueprint $table) {
-            try {
+            if (!$this->indexExists('branches', 'idx_branches_location')) {
                 $table->index(['city', 'state'], 'idx_branches_location');
-            } catch (\Exception $e) {}
+            }
             
-            try {
-                $table->index(['branch_type', 'status'], 'idx_branches_type_status');
-            } catch (\Exception $e) {}
+            if (!$this->indexExists('branches', 'idx_branches_active')) {
+                $table->index('is_active', 'idx_branches_active');
+            }
             
-            try {
-                $table->index(['is_active', 'status'], 'idx_branches_active_status');
-            } catch (\Exception $e) {}
-            
-            try {
-                $table->index('parent_branch_id', 'idx_branches_parent');
-            } catch (\Exception $e) {}
+            if (!$this->indexExists('branches', 'idx_branches_main')) {
+                $table->index('is_main_branch', 'idx_branches_main');
+            }
         });
 
         // Student Attendance indexes for better query performance
-        Schema::table('student_attendance', function (Blueprint $table) {
-            try {
-                $table->index(['date', 'status'], 'idx_st_att_date_status');
-            } catch (\Exception $e) {}
-            
-            try {
-                $table->index(['branch_id', 'date'], 'idx_st_att_branch_date');
-            } catch (\Exception $e) {}
-            
-            try {
-                $table->index(['grade_level', 'section', 'date'], 'idx_st_att_grade_sec_date');
-            } catch (\Exception $e) {}
-            
-            try {
-                $table->index(['academic_year', 'date'], 'idx_st_att_year_date');
-            } catch (\Exception $e) {}
-        });
+        if (Schema::hasTable('student_attendance')) {
+            Schema::table('student_attendance', function (Blueprint $table) {
+                if (!$this->indexExists('student_attendance', 'idx_st_att_date_status')) {
+                    $table->index(['date', 'status'], 'idx_st_att_date_status');
+                }
+                
+                if (!$this->indexExists('student_attendance', 'idx_st_att_branch_date')) {
+                    $table->index(['branch_id', 'date'], 'idx_st_att_branch_date');
+                }
+                
+                if (!$this->indexExists('student_attendance', 'idx_st_att_grade_sec_date')) {
+                    $table->index(['grade_level', 'section', 'date'], 'idx_st_att_grade_sec_date');
+                }
+                
+                if (!$this->indexExists('student_attendance', 'idx_st_att_year_date')) {
+                    $table->index(['academic_year', 'date'], 'idx_st_att_year_date');
+                }
+            });
+        }
 
         // Teacher Attendance indexes
-        Schema::table('teacher_attendance', function (Blueprint $table) {
-            try {
-                $table->index(['date', 'status'], 'idx_tch_att_date_status');
-            } catch (\Exception $e) {}
-            
-            try {
-                $table->index(['branch_id', 'date'], 'idx_tch_att_branch_date');
-            } catch (\Exception $e) {}
-        });
+        if (Schema::hasTable('teacher_attendance')) {
+            Schema::table('teacher_attendance', function (Blueprint $table) {
+                if (!$this->indexExists('teacher_attendance', 'idx_tch_att_date_status')) {
+                    $table->index(['date', 'status'], 'idx_tch_att_date_status');
+                }
+                
+                if (!$this->indexExists('teacher_attendance', 'idx_tch_att_branch_date')) {
+                    $table->index(['branch_id', 'date'], 'idx_tch_att_branch_date');
+                }
+            });
+        }
 
         // Teachers table indexes
         if (Schema::hasTable('teachers')) {
             Schema::table('teachers', function (Blueprint $table) {
-                try {
+                if (!$this->indexExists('teachers', 'idx_teachers_branch_status')) {
                     $table->index(['branch_id', 'teacher_status'], 'idx_teachers_branch_status');
-                } catch (\Exception $e) {}
+                }
                 
-                try {
+                if (!$this->indexExists('teachers', 'idx_teachers_status')) {
                     $table->index('teacher_status', 'idx_teachers_status');
-                } catch (\Exception $e) {}
+                }
             });
         }
 
         // Fee structures indexes
         if (Schema::hasTable('fee_structures')) {
             Schema::table('fee_structures', function (Blueprint $table) {
-                try {
+                if (!$this->indexExists('fee_structures', 'idx_fee_str_branch_year')) {
                     $table->index(['branch_id', 'academic_year'], 'idx_fee_str_branch_year');
-                } catch (\Exception $e) {}
+                }
                 
-                try {
+                if (!$this->indexExists('fee_structures', 'idx_fee_str_grade_year')) {
                     $table->index(['grade_level', 'academic_year'], 'idx_fee_str_grade_year');
-                } catch (\Exception $e) {}
+                }
             });
         }
 
         // Fee payments indexes
         if (Schema::hasTable('fee_payments')) {
             Schema::table('fee_payments', function (Blueprint $table) {
-                try {
+                if (!$this->indexExists('fee_payments', 'idx_fee_pay_student_status')) {
                     $table->index(['student_id', 'status'], 'idx_fee_pay_student_status');
-                } catch (\Exception $e) {}
+                }
                 
-                try {
+                if (!$this->indexExists('fee_payments', 'idx_fee_pay_branch_status')) {
                     $table->index(['branch_id', 'status'], 'idx_fee_pay_branch_status');
-                } catch (\Exception $e) {}
+                }
                 
-                try {
+                if (!$this->indexExists('fee_payments', 'idx_fee_pay_year_status')) {
                     $table->index(['academic_year', 'status'], 'idx_fee_pay_year_status');
-                } catch (\Exception $e) {}
+                }
             });
         }
 
         // Departments indexes
-        Schema::table('departments', function (Blueprint $table) {
-            try {
-                $table->index(['branch_id', 'is_active'], 'idx_dept_branch_active');
-            } catch (\Exception $e) {}
-        });
+        if (Schema::hasTable('departments')) {
+            Schema::table('departments', function (Blueprint $table) {
+                if (!$this->indexExists('departments', 'idx_dept_branch_active')) {
+                    $table->index(['branch_id', 'is_active'], 'idx_dept_branch_active');
+                }
+            });
+        }
 
         // Subjects indexes
-        Schema::table('subjects', function (Blueprint $table) {
-            try {
-                $table->index(['branch_id', 'grade_level'], 'idx_subj_branch_grade');
-            } catch (\Exception $e) {}
-            
-            try {
-                $table->index(['department_id', 'is_active'], 'idx_subj_dept_active');
-            } catch (\Exception $e) {}
-        });
+        if (Schema::hasTable('subjects')) {
+            Schema::table('subjects', function (Blueprint $table) {
+                if (!$this->indexExists('subjects', 'idx_subj_branch_grade')) {
+                    $table->index(['branch_id', 'grade_level'], 'idx_subj_branch_grade');
+                }
+                
+                if (!$this->indexExists('subjects', 'idx_subj_dept_active')) {
+                    $table->index(['department_id', 'is_active'], 'idx_subj_dept_active');
+                }
+            });
+        }
     }
 
     /**
@@ -164,125 +170,156 @@ return new class extends Migration
     {
         // Drop indexes on users table
         Schema::table('users', function (Blueprint $table) {
-            try {
+            if ($this->indexExists('users', 'idx_users_first_name')) {
                 $table->dropIndex('idx_users_first_name');
-            } catch (\Exception $e) {}
-            try {
+            }
+            if ($this->indexExists('users', 'idx_users_last_name')) {
                 $table->dropIndex('idx_users_last_name');
-            } catch (\Exception $e) {}
-            try {
+            }
+            if ($this->indexExists('users', 'idx_users_full_name')) {
                 $table->dropIndex('idx_users_full_name');
-            } catch (\Exception $e) {}
+            }
         });
 
         // Drop indexes on students table
-        Schema::table('students', function (Blueprint $table) {
-            try {
-                $table->dropIndex('idx_students_grade_section');
-            } catch (\Exception $e) {}
-            try {
-                $table->dropIndex('idx_students_grade_sec_status');
-            } catch (\Exception $e) {}
-            try {
-                $table->dropIndex('idx_students_status');
-            } catch (\Exception $e) {}
-            try {
-                $table->dropIndex('idx_students_branch_grade_year');
-            } catch (\Exception $e) {}
-        });
+        if (Schema::hasTable('students')) {
+            Schema::table('students', function (Blueprint $table) {
+                if ($this->indexExists('students', 'idx_students_grade_section')) {
+                    $table->dropIndex('idx_students_grade_section');
+                }
+                if ($this->indexExists('students', 'idx_students_grade_sec_status')) {
+                    $table->dropIndex('idx_students_grade_sec_status');
+                }
+                if ($this->indexExists('students', 'idx_students_status')) {
+                    $table->dropIndex('idx_students_status');
+                }
+                if ($this->indexExists('students', 'idx_students_branch_grade_year')) {
+                    $table->dropIndex('idx_students_branch_grade_year');
+                }
+            });
+        }
 
         // Drop indexes on branches table
         Schema::table('branches', function (Blueprint $table) {
-            try {
+            if ($this->indexExists('branches', 'idx_branches_location')) {
                 $table->dropIndex('idx_branches_location');
-            } catch (\Exception $e) {}
-            try {
-                $table->dropIndex('idx_branches_type_status');
-            } catch (\Exception $e) {}
-            try {
-                $table->dropIndex('idx_branches_active_status');
-            } catch (\Exception $e) {}
-            try {
-                $table->dropIndex('idx_branches_parent');
-            } catch (\Exception $e) {}
+            }
+            if ($this->indexExists('branches', 'idx_branches_active')) {
+                $table->dropIndex('idx_branches_active');
+            }
+            if ($this->indexExists('branches', 'idx_branches_main')) {
+                $table->dropIndex('idx_branches_main');
+            }
         });
 
         // Drop indexes on student_attendance table
-        Schema::table('student_attendance', function (Blueprint $table) {
-            try {
-                $table->dropIndex('idx_st_att_date_status');
-            } catch (\Exception $e) {}
-            try {
-                $table->dropIndex('idx_st_att_branch_date');
-            } catch (\Exception $e) {}
-            try {
-                $table->dropIndex('idx_st_att_grade_sec_date');
-            } catch (\Exception $e) {}
-            try {
-                $table->dropIndex('idx_st_att_year_date');
-            } catch (\Exception $e) {}
-        });
+        if (Schema::hasTable('student_attendance')) {
+            Schema::table('student_attendance', function (Blueprint $table) {
+                if ($this->indexExists('student_attendance', 'idx_st_att_date_status')) {
+                    $table->dropIndex('idx_st_att_date_status');
+                }
+                if ($this->indexExists('student_attendance', 'idx_st_att_branch_date')) {
+                    $table->dropIndex('idx_st_att_branch_date');
+                }
+                if ($this->indexExists('student_attendance', 'idx_st_att_grade_sec_date')) {
+                    $table->dropIndex('idx_st_att_grade_sec_date');
+                }
+                if ($this->indexExists('student_attendance', 'idx_st_att_year_date')) {
+                    $table->dropIndex('idx_st_att_year_date');
+                }
+            });
+        }
 
         // Drop indexes on teacher_attendance table
-        Schema::table('teacher_attendance', function (Blueprint $table) {
-            try {
-                $table->dropIndex('idx_tch_att_date_status');
-            } catch (\Exception $e) {}
-            try {
-                $table->dropIndex('idx_tch_att_branch_date');
-            } catch (\Exception $e) {}
-        });
+        if (Schema::hasTable('teacher_attendance')) {
+            Schema::table('teacher_attendance', function (Blueprint $table) {
+                if ($this->indexExists('teacher_attendance', 'idx_tch_att_date_status')) {
+                    $table->dropIndex('idx_tch_att_date_status');
+                }
+                if ($this->indexExists('teacher_attendance', 'idx_tch_att_branch_date')) {
+                    $table->dropIndex('idx_tch_att_branch_date');
+                }
+            });
+        }
 
         // Drop other indexes if tables exist
         if (Schema::hasTable('teachers')) {
             Schema::table('teachers', function (Blueprint $table) {
-                try {
+                if ($this->indexExists('teachers', 'idx_teachers_branch_status')) {
                     $table->dropIndex('idx_teachers_branch_status');
-                } catch (\Exception $e) {}
-                try {
+                }
+                if ($this->indexExists('teachers', 'idx_teachers_status')) {
                     $table->dropIndex('idx_teachers_status');
-                } catch (\Exception $e) {}
+                }
             });
         }
 
         if (Schema::hasTable('fee_structures')) {
             Schema::table('fee_structures', function (Blueprint $table) {
-                try {
+                if ($this->indexExists('fee_structures', 'idx_fee_str_branch_year')) {
                     $table->dropIndex('idx_fee_str_branch_year');
-                } catch (\Exception $e) {}
-                try {
+                }
+                if ($this->indexExists('fee_structures', 'idx_fee_str_grade_year')) {
                     $table->dropIndex('idx_fee_str_grade_year');
-                } catch (\Exception $e) {}
+                }
             });
         }
 
         if (Schema::hasTable('fee_payments')) {
             Schema::table('fee_payments', function (Blueprint $table) {
-                try {
+                if ($this->indexExists('fee_payments', 'idx_fee_pay_student_status')) {
                     $table->dropIndex('idx_fee_pay_student_status');
-                } catch (\Exception $e) {}
-                try {
+                }
+                if ($this->indexExists('fee_payments', 'idx_fee_pay_branch_status')) {
                     $table->dropIndex('idx_fee_pay_branch_status');
-                } catch (\Exception $e) {}
-                try {
+                }
+                if ($this->indexExists('fee_payments', 'idx_fee_pay_year_status')) {
                     $table->dropIndex('idx_fee_pay_year_status');
-                } catch (\Exception $e) {}
+                }
             });
         }
 
-        Schema::table('departments', function (Blueprint $table) {
-            try {
-                $table->dropIndex('idx_dept_branch_active');
-            } catch (\Exception $e) {}
-        });
+        if (Schema::hasTable('departments')) {
+            Schema::table('departments', function (Blueprint $table) {
+                if ($this->indexExists('departments', 'idx_dept_branch_active')) {
+                    $table->dropIndex('idx_dept_branch_active');
+                }
+            });
+        }
 
-        Schema::table('subjects', function (Blueprint $table) {
-            try {
-                $table->dropIndex('idx_subj_branch_grade');
-            } catch (\Exception $e) {}
-            try {
-                $table->dropIndex('idx_subj_dept_active');
-            } catch (\Exception $e) {}
-        });
+        if (Schema::hasTable('subjects')) {
+            Schema::table('subjects', function (Blueprint $table) {
+                if ($this->indexExists('subjects', 'idx_subj_branch_grade')) {
+                    $table->dropIndex('idx_subj_branch_grade');
+                }
+                if ($this->indexExists('subjects', 'idx_subj_dept_active')) {
+                    $table->dropIndex('idx_subj_dept_active');
+                }
+            });
+        }
+    }
+
+    /**
+     * Check if an index exists on a table.
+     *
+     * @param string $tableName
+     * @param string $indexName
+     * @return bool
+     */
+    private function indexExists(string $tableName, string $indexName): bool
+    {
+        $connection = Schema::getConnection();
+        $databaseName = $connection->getDatabaseName();
+        
+        $result = $connection->select(
+            "SELECT COUNT(*) as count 
+             FROM information_schema.statistics 
+             WHERE table_schema = ? 
+             AND table_name = ? 
+             AND index_name = ?",
+            [$databaseName, $tableName, $indexName]
+        );
+        
+        return $result[0]->count > 0;
     }
 };

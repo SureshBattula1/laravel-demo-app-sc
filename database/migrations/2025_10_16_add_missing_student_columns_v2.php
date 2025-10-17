@@ -8,8 +8,9 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::table('students', function (Blueprint $table) {
-            // Add columns without referencing other columns that might not exist
+        if (Schema::hasTable('students')) {
+            Schema::table('students', function (Blueprint $table) {
+                // Add columns without referencing other columns that might not exist
             
             if (!Schema::hasColumn('students', 'permanent_address')) {
                 $table->text('permanent_address')->nullable();
@@ -134,13 +135,15 @@ return new class extends Migration
             if (!Schema::hasColumn('students', 'registration_number')) {
                 $table->string('registration_number')->nullable();
             }
-        });
+            });
+        }
     }
 
     public function down(): void
     {
-        Schema::table('students', function (Blueprint $table) {
-            $columns = [
+        if (Schema::hasTable('students')) {
+            Schema::table('students', function (Blueprint $table) {
+                $columns = [
                 'permanent_address', 'religion', 'category', 'nationality', 'mother_tongue',
                 'stream', 'elective_subjects', 'father_email', 'father_occupation', 'father_annual_income',
                 'mother_email', 'mother_occupation', 'mother_annual_income', 'guardian_name', 
@@ -155,7 +158,8 @@ return new class extends Migration
                     $table->dropColumn($column);
                 }
             }
-        });
+            });
+        }
     }
 };
 
