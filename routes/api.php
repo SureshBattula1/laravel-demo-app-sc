@@ -22,6 +22,7 @@ use App\Http\Controllers\ClassSectionController;
 use App\Http\Controllers\StudentGroupController;
 use App\Http\Controllers\ClassController;
 use App\Http\Controllers\SectionController;
+use App\Http\Controllers\GradeController;
 
 /*
 |--------------------------------------------------------------------------
@@ -125,11 +126,17 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
         Route::get('/', [ClassController::class, 'index']);
         Route::post('/', [ClassController::class, 'store']);
         Route::get('grades', [ClassController::class, 'getGrades']);
+        Route::get('grade/{grade}/stats', [ClassController::class, 'getGradeStats']);
         Route::get('sections', [ClassController::class, 'getSections']);
         Route::get('{id}', [ClassController::class, 'show']);
         Route::put('{id}', [ClassController::class, 'update']);
         Route::delete('{id}', [ClassController::class, 'destroy']);
     });
+    
+    // Grade Routes - Full CRUD
+    Route::apiResource('grades', GradeController::class)->parameters([
+        'grades' => 'value'  // Use grade value instead of id
+    ]);
     
     // Student Group Routes
     Route::apiResource('student-groups', StudentGroupController::class);

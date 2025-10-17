@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Facades\DB;
 
 class Section extends Model
 {
@@ -32,6 +33,53 @@ class Section extends Model
         ];
     }
 
+    /**
+     * Attributes to append to JSON
+     */
+    protected $appends = ['grade_label'];
+
+    /**
+     * Get grade label (e.g., "Grade 5" instead of "5")
+     */
+    public function getGradeLabelAttribute(): ?string
+    {
+        if ($this->grade_level) {
+            // Get grade details from grades table
+            $grade = DB::table('grades')->where('value', $this->grade_level)->first();
+            if ($grade) {
+                return $grade->label;
+            }
+            return 'Grade ' . $this->grade_level;
+        }
+        return 'All Grades';
+    }
+
+    /**
+     * Get full grade details
+     */
+    public function getGradeDetailsAttribute(): ?array
+    {
+        if ($this->grade_level) {
+            $grade = DB::table('grades')->where('value', $this->grade_level)->first();
+            if ($grade) {
+                return [
+                    'value' => $grade->value,
+                    'label' => $grade->label,
+                    'description' => $grade->description ?? null,
+                    'is_active' => (bool) $grade->is_active
+                ];
+            }
+            // Fallback if grade not found in grades table
+            return [
+                'value' => $this->grade_level,
+                'label' => 'Grade ' . $this->grade_level,
+                'description' => null,
+                'is_active' => true
+            ];
+        }
+        return null;
+    }
+
     // Relationships
     public function branch()
     {
@@ -46,6 +94,16 @@ class Section extends Model
     public function students()
     {
         return $this->hasMany(User::class, 'section_id')->where('user_type', 'Student');
+    }
+
+    /**
+     * Get associated class (if exists)
+     */
+    public function class()
+    {
+        return $this->hasOne(\App\Models\ClassModel::class, 'section', 'name')
+            ->where('grade', $this->grade_level)
+            ->where('branch_id', $this->branch_id);
     }
 
     // Helper methods

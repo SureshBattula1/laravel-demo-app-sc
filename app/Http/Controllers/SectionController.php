@@ -16,7 +16,7 @@ class SectionController extends Controller
     public function index(Request $request)
     {
         try {
-            $query = Section::with(['branch', 'classTeacher']);
+            $query = Section::with(['branch', 'classTeacher', 'class']);
 
             // Filters
             if ($request->has('branch_id')) {
@@ -41,6 +41,12 @@ class SectionController extends Controller
             }
 
             $sections = $query->orderBy('name', 'asc')->get();
+
+            // Enhance each section with grade details
+            $sections->each(function ($section) {
+                // Append grade_details accessor data
+                $section->append('grade_details');
+            });
 
             return response()->json([
                 'success' => true,
@@ -140,8 +146,11 @@ class SectionController extends Controller
     public function show($id)
     {
         try {
-            $section = Section::with(['branch', 'classTeacher'])
+            $section = Section::with(['branch', 'classTeacher', 'class'])
                 ->findOrFail($id);
+
+            // Append grade details
+            $section->append('grade_details');
 
             return response()->json([
                 'success' => true,

@@ -307,49 +307,199 @@ class ClassController extends Controller
     }
 
     /**
-     * Get available grades
+     * Get available grades with statistics
      */
     public function getGrades()
     {
-        $grades = [
-            ['value' => '1', 'label' => 'Grade 1'],
-            ['value' => '2', 'label' => 'Grade 2'],
-            ['value' => '3', 'label' => 'Grade 3'],
-            ['value' => '4', 'label' => 'Grade 4'],
-            ['value' => '5', 'label' => 'Grade 5'],
-            ['value' => '6', 'label' => 'Grade 6'],
-            ['value' => '7', 'label' => 'Grade 7'],
-            ['value' => '8', 'label' => 'Grade 8'],
-            ['value' => '9', 'label' => 'Grade 9'],
-            ['value' => '10', 'label' => 'Grade 10'],
-            ['value' => '11', 'label' => 'Grade 11'],
-            ['value' => '12', 'label' => 'Grade 12'],
-        ];
+        try {
+            // Get grades from the grades table
+            $gradesFromDb = DB::table('grades')->orderBy('value', 'asc')->get();
+            
+            $grades = [];
+            
+            foreach ($gradesFromDb as $gradeRecord) {
+                // Get classes for this grade
+                $classes = ClassModel::where('grade', $gradeRecord->value)
+                    ->where('is_active', true)
+                    ->get();
+                
+                // Get unique sections for this grade
+                $sections = $classes->pluck('section')
+                    ->filter()
+                    ->unique()
+                    ->values()
+                    ->toArray();
+                
+                // Count total students in this grade
+                $studentsCount = DB::table('students')
+                    ->where('grade', $gradeRecord->value)
+                    ->where('student_status', 'Active')
+                    ->count();
+                
+                $grades[] = [
+                    'value' => $gradeRecord->value,
+                    'label' => $gradeRecord->label,
+                    'description' => $gradeRecord->description ?? null,
+                    'students_count' => $studentsCount,
+                    'sections' => $sections,
+                    'classes_count' => $classes->count(),
+                    'is_active' => (bool) $gradeRecord->is_active
+                ];
+            }
 
-        return response()->json([
-            'success' => true,
-            'data' => $grades
-        ]);
+            return response()->json([
+                'success' => true,
+                'data' => $grades,
+                'count' => count($grades)
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Get grades error', ['error' => $e->getMessage()]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch grades',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+            ], 500);
+        }
     }
 
     /**
-     * Get available sections
+     * Get statistics for a specific grade
      */
-    public function getSections()
+    public function getGradeStats($grade)
     {
-        $sections = [
-            ['value' => 'A', 'label' => 'Section A'],
-            ['value' => 'B', 'label' => 'Section B'],
-            ['value' => 'C', 'label' => 'Section C'],
-            ['value' => 'D', 'label' => 'Section D'],
-            ['value' => 'E', 'label' => 'Section E'],
-            ['value' => 'F', 'label' => 'Section F'],
-        ];
+        try {
+            // Get total students in this grade
+            $totalStudents = DB::table('students')
+                ->where('grade', $grade)
+                ->where('student_status', 'Active')
+                ->count();
+            
+            // Get total sections (classes) in this grade
+            $totalSections = ClassModel::where('grade', $grade)
+                ->where('is_active', true)
+                ->count();
+            
+            // Get teachers teaching this grade
+            $totalTeachers = ClassModel::where('grade', $grade)
+                ->where('is_active', true)
+                ->whereNotNull('class_teacher_id')
+                ->distinct('class_teacher_id')
+                ->count('class_teacher_id');
+            
+            // Calculate average attendance for this grade (last 30 days)
+            $averageAttendance = DB::table('attendance')
+                ->join('students', 'attendance.student_id', '=', 'students.id')
+                ->where('students.grade', $grade)
+                ->where('attendance.date', '>=', now()->subDays(30))
+                ->where('attendance.status', 'Present')
+                ->count();
+            
+            $totalAttendanceRecords = DB::table('attendance')
+                ->join('students', 'attendance.student_id', '=', 'students.id')
+                ->where('students.grade', $grade)
+                ->where('attendance.date', '>=', now()->subDays(30))
+                ->count();
+            
+            $attendancePercentage = $totalAttendanceRecords > 0 
+                ? round(($averageAttendance / $totalAttendanceRecords) * 100, 2) 
+                : 0;
 
-        return response()->json([
-            'success' => true,
-            'data' => $sections
-        ]);
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'total_students' => $totalStudents,
+                    'total_sections' => $totalSections,
+                    'total_teachers' => $totalTeachers,
+                    'average_attendance' => $attendancePercentage,
+                    'pass_percentage' => 0 // Placeholder - implement when exam results are available
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Get grade stats error', [
+                'grade' => $grade,
+                'error' => $e->getMessage()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch grade statistics',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Get available sections (with dynamic filtering by grade and branch)
+     */
+    public function getSections(Request $request)
+    {
+        try {
+            $grade = $request->query('grade');
+            $branchId = $request->query('branch_id');
+
+            // If grade and/or branch specified, return sections from existing classes
+            if ($grade || $branchId) {
+                $query = ClassModel::select('section')
+                    ->whereNotNull('section')
+                    ->where('is_active', true)
+                    ->distinct();
+
+                if ($grade) {
+                    $query->where('grade', $grade);
+                }
+
+                if ($branchId) {
+                    $query->where('branch_id', $branchId);
+                }
+
+                $existingSections = $query->pluck('section')
+                    ->filter()
+                    ->unique()
+                    ->sort()
+                    ->values()
+                    ->map(function ($section) {
+                        return [
+                            'value' => $section,
+                            'label' => 'Section ' . $section
+                        ];
+                    });
+
+                // If we found existing sections, return them
+                if ($existingSections->isNotEmpty()) {
+                    return response()->json([
+                        'success' => true,
+                        'data' => $existingSections
+                    ]);
+                }
+            }
+
+            // Default: Return all standard sections (A-F)
+            $sections = [
+                ['value' => 'A', 'label' => 'Section A'],
+                ['value' => 'B', 'label' => 'Section B'],
+                ['value' => 'C', 'label' => 'Section C'],
+                ['value' => 'D', 'label' => 'Section D'],
+                ['value' => 'E', 'label' => 'Section E'],
+                ['value' => 'F', 'label' => 'Section F'],
+            ];
+
+            return response()->json([
+                'success' => true,
+                'data' => $sections
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Get sections error', ['error' => $e->getMessage()]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch sections',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+            ], 500);
+        }
     }
 }
 
