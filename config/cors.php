@@ -14,10 +14,15 @@ return [
 
     'allowed_origins' => [
         'http://localhost:4200',
+        'http://localhost:63993',
         'http://127.0.0.1:4200',
+        'http://127.0.0.1:63993',
     ],
 
-    'allowed_origins_patterns' => [],
+    'allowed_origins_patterns' => [
+        '/^http:\/\/localhost:\d+$/',
+        '/^http:\/\/127\.0\.0\.1:\d+$/',
+    ],
 
     'allowed_headers' => ['Content-Type', 'X-Requested-With', 'Authorization', 'Accept', 'Origin'],
 

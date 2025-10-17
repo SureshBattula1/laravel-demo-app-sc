@@ -18,6 +18,10 @@ use App\Http\Controllers\TimetableController;
 use App\Http\Controllers\TeacherController;
 use App\Http\Controllers\StudentController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\ClassSectionController;
+use App\Http\Controllers\StudentGroupController;
+use App\Http\Controllers\ClassController;
+use App\Http\Controllers\SectionController;
 
 /*
 |--------------------------------------------------------------------------
@@ -103,7 +107,10 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     
     // Teacher Routes
     Route::get('teachers', [TeacherController::class, 'index']);
+    Route::post('teachers', [TeacherController::class, 'store']);
     Route::get('teachers/{id}', [TeacherController::class, 'show']);
+    Route::put('teachers/{id}', [TeacherController::class, 'update']);
+    Route::delete('teachers/{id}', [TeacherController::class, 'destroy']);
     
     // Student Routes
     Route::get('students', [StudentController::class, 'index']);
@@ -112,6 +119,32 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     Route::put('students/{id}', [StudentController::class, 'update']);
     Route::delete('students/{id}', [StudentController::class, 'destroy']);
     Route::post('students/promote', [StudentController::class, 'promote']);
+    
+    // Class & Section Routes - Full CRUD
+    Route::prefix('classes')->group(function () {
+        Route::get('/', [ClassController::class, 'index']);
+        Route::post('/', [ClassController::class, 'store']);
+        Route::get('grades', [ClassController::class, 'getGrades']);
+        Route::get('sections', [ClassController::class, 'getSections']);
+        Route::get('{id}', [ClassController::class, 'show']);
+        Route::put('{id}', [ClassController::class, 'update']);
+        Route::delete('{id}', [ClassController::class, 'destroy']);
+    });
+    
+    // Student Group Routes
+    Route::apiResource('student-groups', StudentGroupController::class);
+    Route::post('student-groups/{id}/add-member', [StudentGroupController::class, 'addMember']);
+    Route::delete('student-groups/{id}/members/{studentId}', [StudentGroupController::class, 'removeMember']);
+    
+    // Section Routes - Full CRUD
+    Route::prefix('sections')->group(function () {
+        Route::get('/', [SectionController::class, 'index']);
+        Route::post('/', [SectionController::class, 'store']);
+        Route::get('{id}', [SectionController::class, 'show']);
+        Route::put('{id}', [SectionController::class, 'update']);
+        Route::delete('{id}', [SectionController::class, 'destroy']);
+        Route::put('{id}/toggle-status', [SectionController::class, 'toggleStatus']);
+    });
     
     // Exam Routes
     Route::apiResource('exams', ExamController::class);

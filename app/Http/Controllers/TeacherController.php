@@ -82,5 +82,140 @@ class TeacherController extends Controller
             ], 500);
         }
     }
+
+    public function store(Request $request)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'first_name' => 'required|string|max:255',
+                'last_name' => 'required|string|max:255',
+                'email' => 'required|email|unique:users,email',
+                'phone' => 'nullable|string|max:20',
+                'password' => 'required|string|min:8',
+                'branch_id' => 'required|exists:branches,id'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            DB::beginTransaction();
+
+            $teacher = User::create([
+                'first_name' => strip_tags($request->first_name),
+                'last_name' => strip_tags($request->last_name),
+                'email' => $request->email,
+                'phone' => $request->phone,
+                'password' => bcrypt($request->password),
+                'role' => 'Teacher',
+                'user_type' => 'Teacher',
+                'branch_id' => $request->branch_id,
+                'is_active' => $request->is_active ?? true
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Teacher created successfully',
+                'data' => $teacher->load('branch')
+            ], 201);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Create teacher error', ['error' => $e->getMessage()]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to create teacher',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+            ], 500);
+        }
+    }
+
+    public function update(Request $request, $id)
+    {
+        try {
+            $teacher = User::where('role', 'Teacher')->findOrFail($id);
+
+            $validator = Validator::make($request->all(), [
+                'first_name' => 'sometimes|string|max:255',
+                'last_name' => 'sometimes|string|max:255',
+                'email' => 'sometimes|email|unique:users,email,' . $id,
+                'phone' => 'nullable|string|max:20',
+                'password' => 'nullable|string|min:8',
+                'is_active' => 'sometimes|boolean'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            DB::beginTransaction();
+
+            $updateData = $request->only(['first_name', 'last_name', 'email', 'phone', 'is_active']);
+            
+            foreach (['first_name', 'last_name'] as $field) {
+                if (isset($updateData[$field])) {
+                    $updateData[$field] = strip_tags($updateData[$field]);
+                }
+            }
+
+            if ($request->filled('password')) {
+                $updateData['password'] = bcrypt($request->password);
+            }
+
+            $teacher->update($updateData);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Teacher updated successfully',
+                'data' => $teacher->fresh(['branch'])
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Update teacher error', ['error' => $e->getMessage()]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update teacher'
+            ], 500);
+        }
+    }
+
+    public function destroy($id)
+    {
+        try {
+            DB::beginTransaction();
+
+            $teacher = User::where('role', 'Teacher')->findOrFail($id);
+            $teacher->update(['is_active' => false]);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Teacher deactivated successfully'
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Delete teacher error', ['error' => $e->getMessage()]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to delete teacher'
+            ], 500);
+        }
+    }
 }
 
