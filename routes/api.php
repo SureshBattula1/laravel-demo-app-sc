@@ -23,6 +23,10 @@ use App\Http\Controllers\StudentGroupController;
 use App\Http\Controllers\ClassController;
 use App\Http\Controllers\SectionController;
 use App\Http\Controllers\GradeController;
+use App\Http\Controllers\AccountController;
+use App\Http\Controllers\TransactionController;
+use App\Http\Controllers\InvoiceController;
+use App\Http\Controllers\HolidayController;
 
 /*
 |--------------------------------------------------------------------------
@@ -198,9 +202,9 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     Route::get('events/upcoming', [EventController::class, 'getUpcoming']);
     Route::get('events/by-type/{type}', [EventController::class, 'getByType']);
     
-    // Holiday Routes
-    Route::apiResource('holidays', EventController::class);
-    Route::get('holidays/year/{year}', [EventController::class, 'getHolidaysByYear']);
+    // OLD Holiday Routes - DISABLED (using HolidayController below instead)
+    // Route::apiResource('holidays', EventController::class);
+    // Route::get('holidays/year/{year}', [EventController::class, 'getHolidaysByYear']);
     
     // Timetable Routes
     Route::apiResource('timetables', TimetableController::class);
@@ -216,6 +220,42 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
         Route::get('upcoming-exams', [DashboardController::class, 'getUpcomingExams']);
         Route::get('student-results', [DashboardController::class, 'getStudentResults']);
         Route::get('children-performance/{parentId}', [DashboardController::class, 'getChildrenPerformance']);
+    });
+    
+    // Accounts Module Routes - Income & Expense Tracking
+    Route::prefix('accounts')->group(function () {
+        Route::get('dashboard', [AccountController::class, 'getDashboard']);
+        Route::get('categories', [AccountController::class, 'getCategories']);
+    });
+    
+    // Transaction Routes - Full CRUD
+    Route::apiResource('transactions', TransactionController::class);
+    Route::post('transactions/{id}/approve', [TransactionController::class, 'approve']);
+    Route::post('transactions/{id}/reject', [TransactionController::class, 'reject']);
+    
+    // Invoice Routes - Advanced with transaction integration
+    Route::prefix('invoices')->group(function () {
+        Route::get('/', [InvoiceController::class, 'index']);
+        Route::post('/', [InvoiceController::class, 'store']); // Manual invoice
+        Route::get('stats', [InvoiceController::class, 'getStats']);
+        Route::get('search-transactions', [InvoiceController::class, 'searchTransactions']); // Search transactions
+        Route::post('generate-from-transactions', [InvoiceController::class, 'generateFromTransactions']); // Generate from transactions
+        Route::get('{id}', [InvoiceController::class, 'show']);
+        Route::put('{id}', [InvoiceController::class, 'update']);
+        Route::delete('{id}', [InvoiceController::class, 'destroy']);
+        Route::post('{id}/payment', [InvoiceController::class, 'recordPayment']);
+        Route::post('{id}/send', [InvoiceController::class, 'sendInvoice']);
+    });
+    
+    // Holiday Routes - with role-based access
+    Route::prefix('holidays')->group(function () {
+        Route::get('/', [HolidayController::class, 'index']);
+        Route::post('/', [HolidayController::class, 'store']);
+        Route::get('upcoming', [HolidayController::class, 'getUpcoming']);
+        Route::get('calendar/{year}/{month}', [HolidayController::class, 'getCalendarData']);
+        Route::get('{id}', [HolidayController::class, 'show']);
+        Route::put('{id}', [HolidayController::class, 'update']);
+        Route::delete('{id}', [HolidayController::class, 'destroy']);
     });
 });
 
