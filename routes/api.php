@@ -27,6 +27,10 @@ use App\Http\Controllers\AccountController;
 use App\Http\Controllers\TransactionController;
 use App\Http\Controllers\InvoiceController;
 use App\Http\Controllers\HolidayController;
+use App\Http\Controllers\UserController;
+use App\Http\Controllers\RoleController;
+use App\Http\Controllers\PermissionManagementController;
+use App\Http\Controllers\ModuleController;
 
 /*
 |--------------------------------------------------------------------------
@@ -258,12 +262,49 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
         Route::delete('{id}', [HolidayController::class, 'destroy']);
     });
     
-    // Permission Management Routes (Public endpoints for authenticated users)
+    // Settings Module Routes - User, Role & Permission Management
+    // Users Management
+    Route::prefix('users')->group(function () {
+        Route::get('/', [UserController::class, 'index']);
+        Route::get('/all', [UserController::class, 'all']);
+        Route::get('/{id}', [UserController::class, 'show']);
+        Route::post('/', [UserController::class, 'store']);
+        Route::put('/{id}', [UserController::class, 'update']);
+        Route::delete('/{id}', [UserController::class, 'destroy']);
+        Route::patch('/{id}/toggle-status', [UserController::class, 'toggleStatus']);
+        Route::post('/{id}/reset-password', [UserController::class, 'resetPassword']);
+    });
+    
+    // Roles Management
+    Route::prefix('roles')->group(function () {
+        Route::get('/', [RoleController::class, 'index']);
+        Route::get('/all', [RoleController::class, 'all']);
+        Route::get('/{id}', [RoleController::class, 'show']);
+        Route::post('/', [RoleController::class, 'store']);
+        Route::put('/{id}', [RoleController::class, 'update']);
+        Route::delete('/{id}', [RoleController::class, 'destroy']);
+        Route::post('/{id}/permissions', [RoleController::class, 'assignPermissions']);
+        Route::get('/{id}/permissions', [RoleController::class, 'permissions']);
+    });
+    
+    // Permissions Management - Combined routes
     Route::prefix('permissions')->group(function () {
+        // Settings Module - CRUD operations
+        Route::get('/', [PermissionManagementController::class, 'index']);
+        Route::get('/all', [PermissionManagementController::class, 'all']);
+        Route::get('/by-module', [PermissionManagementController::class, 'byModule']);
+        Route::post('/', [PermissionManagementController::class, 'store']);
+        Route::put('/{id}', [PermissionManagementController::class, 'update']);
+        Route::delete('/{id}', [PermissionManagementController::class, 'destroy']);
+        
+        // Legacy permission controller endpoints
         Route::get('/roles', [App\Http\Controllers\PermissionController::class, 'getRoles']);
         Route::get('/modules', [App\Http\Controllers\PermissionController::class, 'getModules']);
-        Route::get('/permissions', [App\Http\Controllers\PermissionController::class, 'getPermissions']);
+        Route::get('/list', [App\Http\Controllers\PermissionController::class, 'getPermissions']);
         Route::get('/user/{id}/permissions', [App\Http\Controllers\PermissionController::class, 'getUserPermissions']);
+        
+        // Details endpoint for settings
+        Route::get('/{id}', [PermissionManagementController::class, 'show']);
         
         // Admin-only permission management
         Route::middleware('role:SuperAdmin,BranchAdmin')->group(function () {
@@ -273,6 +314,15 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
             Route::post('/roles', [App\Http\Controllers\PermissionController::class, 'createRole']);
             Route::post('/modules', [App\Http\Controllers\PermissionController::class, 'createModule']);
         });
+    });
+    
+    // Modules Management
+    Route::prefix('modules')->group(function () {
+        Route::get('/', [ModuleController::class, 'index']);
+        Route::get('/{id}', [ModuleController::class, 'show']);
+        Route::post('/', [ModuleController::class, 'store']);
+        Route::put('/{id}', [ModuleController::class, 'update']);
+        Route::delete('/{id}', [ModuleController::class, 'destroy']);
     });
 });
 
