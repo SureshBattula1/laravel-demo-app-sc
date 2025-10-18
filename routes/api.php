@@ -257,5 +257,22 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
         Route::put('{id}', [HolidayController::class, 'update']);
         Route::delete('{id}', [HolidayController::class, 'destroy']);
     });
+    
+    // Permission Management Routes (Public endpoints for authenticated users)
+    Route::prefix('permissions')->group(function () {
+        Route::get('/roles', [App\Http\Controllers\PermissionController::class, 'getRoles']);
+        Route::get('/modules', [App\Http\Controllers\PermissionController::class, 'getModules']);
+        Route::get('/permissions', [App\Http\Controllers\PermissionController::class, 'getPermissions']);
+        Route::get('/user/{id}/permissions', [App\Http\Controllers\PermissionController::class, 'getUserPermissions']);
+        
+        // Admin-only permission management
+        Route::middleware('role:SuperAdmin,BranchAdmin')->group(function () {
+            Route::post('/role/{roleId}/sync', [App\Http\Controllers\PermissionController::class, 'syncRolePermissions']);
+            Route::post('/user/{userId}/grant', [App\Http\Controllers\PermissionController::class, 'grantUserPermission']);
+            Route::post('/user/{userId}/revoke', [App\Http\Controllers\PermissionController::class, 'revokeUserPermission']);
+            Route::post('/roles', [App\Http\Controllers\PermissionController::class, 'createRole']);
+            Route::post('/modules', [App\Http\Controllers\PermissionController::class, 'createModule']);
+        });
+    });
 });
 
