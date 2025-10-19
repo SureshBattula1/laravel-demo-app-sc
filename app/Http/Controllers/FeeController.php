@@ -57,7 +57,7 @@ class FeeController extends Controller
             $validator = Validator::make($request->all(), [
                 'branch_id' => 'required|exists:branches,id',
                 'grade' => 'required|string|max:50',
-                'fee_type' => 'required|string|in:Tuition,Library,Laboratory,Sports,Transport,Exam,Other',
+                'fee_type' => 'required|string|max:255',
                 'amount' => 'required|numeric|min:0',
                 'academic_year' => 'required|string|max:20',
                 'due_date' => 'nullable|date',
@@ -107,7 +107,7 @@ class FeeController extends Controller
 
             $validator = Validator::make($request->all(), [
                 'grade' => 'string|max:50',
-                'fee_type' => 'string|in:Tuition,Library,Laboratory,Sports,Transport,Exam,Other',
+                'fee_type' => 'string|max:255',
                 'amount' => 'numeric|min:0',
                 'academic_year' => 'string|max:20',
                 'due_date' => 'nullable|date',
