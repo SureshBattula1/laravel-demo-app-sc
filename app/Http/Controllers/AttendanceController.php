@@ -35,8 +35,8 @@ class AttendanceController extends Controller
                     );
             } else {
                 $query = DB::table('teacher_attendance')
-                    ->join('teachers', 'teacher_attendance.teacher_id', '=', 'teachers.user_id')
-                    ->join('users', 'teachers.user_id', '=', 'users.id')
+                    ->join('users', 'teacher_attendance.teacher_id', '=', 'users.id')
+                    ->leftJoin('teachers', 'users.id', '=', 'teachers.user_id')
                     ->select(
                         'teacher_attendance.*',
                         'users.first_name',
