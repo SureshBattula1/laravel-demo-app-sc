@@ -4,7 +4,6 @@ namespace Database\Seeders;
 
 use Illuminate\Database\Seeder;
 use App\Models\User;
-use App\Models\Branch;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\DB;
 
@@ -15,188 +14,183 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
+        $this->command->info('');
+        $this->command->info('════════════════════════════════════════════════════════════════');
+        $this->command->info('  🚀 MySchool Management System - Database Seeder');
+        $this->command->info('════════════════════════════════════════════════════════════════');
+        $this->command->info('');
+        
+        $choice = $this->command->choice(
+            'Which seeder would you like to run?',
+            [
+                '1' => 'Quick Seeder (Admin + 2 Branches + Sample Data)',
+                '2' => 'Comprehensive Seeder (1 Main + 5 Branches + Full Realistic Data)',
+                '3' => 'Both (Quick first, then Comprehensive)'
+            ],
+            '2' // Default to comprehensive
+        );
+        
         DB::beginTransaction();
-
+        
         try {
-            // Create Main Branch
-            $mainBranch = Branch::firstOrCreate(
-                ['code' => 'MAIN001'],
-                [
-                'name' => 'Main Campus',
-                'address' => '123 Education Street',
-                'city' => 'New York',
-                'state' => 'New York',
-                'country' => 'USA',
-                'pincode' => '10001',
-                'phone' => '+1234567890',
-                'email' => 'main@myschool.com',
-                'principal_name' => 'Dr. John Smith',
-                'principal_contact' => '+1234567891',
-                'principal_email' => 'principal@myschool.com',
-                'established_date' => '2010-01-01',
-                'affiliation_number' => 'AFF-2010-001',
-                'is_main_branch' => true,
-                'is_active' => true,
-                'settings' => [
-                    'academicYearStart' => 'April',
-                    'academicYearEnd' => 'March',
-                    'workingDays' => ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
-                    'schoolTimings' => [
-                        'startTime' => '08:00',
-                        'endTime' => '15:00'
-                    ],
-                    'currency' => 'USD',
-                    'language' => 'English',
-                    'timezone' => 'America/New_York'
-                ]
-                ]
-            );
-
-            // Create Second Branch
-            $secondBranch = Branch::firstOrCreate(
-                ['code' => 'EAST001'],
-                [
-                'name' => 'East Campus',
-                'address' => '456 Learning Avenue',
-                'city' => 'Boston',
-                'state' => 'Massachusetts',
-                'country' => 'USA',
-                'pincode' => '02101',
-                'phone' => '+1234567892',
-                'email' => 'east@myschool.com',
-                'principal_name' => 'Dr. Jane Doe',
-                'principal_contact' => '+1234567893',
-                'principal_email' => 'principal.east@myschool.com',
-                'established_date' => '2015-06-01',
-                'affiliation_number' => 'AFF-2015-002',
-                'is_main_branch' => false,
-                'is_active' => true,
-                'settings' => [
-                    'academicYearStart' => 'April',
-                    'academicYearEnd' => 'March',
-                    'workingDays' => ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
-                    'schoolTimings' => [
-                        'startTime' => '08:30',
-                        'endTime' => '15:30'
-                    ],
-                    'currency' => 'USD',
-                    'language' => 'English',
-                    'timezone' => 'America/New_York'
-                ]
-                ]
-            );
-
-            // Create Super Admin User
-            User::firstOrCreate(
-                ['email' => 'admin@myschool.com'],
-                [
+            if ($choice === '1' || $choice === '3') {
+                $this->runQuickSeeder();
+            }
+            
+            if ($choice === '2' || $choice === '3') {
+                $this->call([
+                    RealtimeComprehensiveSeeder::class,
+                ]);
+            }
+            
+            DB::commit();
+            
+        } catch (\Exception $e) {
+            DB::rollBack();
+            $this->command->error('Seeding failed: ' . $e->getMessage());
+            throw $e;
+        }
+    }
+    
+    private function runQuickSeeder()
+    {
+        $this->command->info('');
+        $this->command->info('📍 Running Quick Seeder...');
+        $this->command->info('');
+        
+        // Create Main Branch
+        $mainBranch = DB::table('branches')->insertGetId([
+            'name' => 'MySchool Headquarters',
+            'code' => 'MS-HQ',
+            'branch_type' => 'Headquarters',
+            'parent_id' => null,
+            'address' => '123 Education Street',
+            'city' => 'New York',
+            'state' => 'NY',
+            'country' => 'United States',
+            'postal_code' => '10001',
+            'phone' => '+1234567890',
+            'email' => 'hq@myschool.com',
+            'website' => 'www.myschool.com',
+            'principal_name' => 'Dr. John Smith',
+            'principal_email' => 'principal@myschool.com',
+            'principal_phone' => '+1234567891',
+            'established_date' => '2010-01-01',
+            'student_capacity' => 2000,
+            'current_strength' => 0,
+            'affiliation_board' => 'International Baccalaureate',
+            'status' => 'Active',
+            'is_active' => true,
+            'timezone' => 'America/New_York',
+            'created_at' => now(),
+            'updated_at' => now()
+        ]);
+        
+        // Create East Branch
+        DB::table('branches')->insert([
+            'name' => 'MySchool East Campus',
+            'code' => 'MS-EAST',
+            'branch_type' => 'Branch',
+            'parent_id' => $mainBranch,
+            'address' => '456 Learning Avenue',
+            'city' => 'Boston',
+            'state' => 'MA',
+            'country' => 'United States',
+            'postal_code' => '02101',
+            'phone' => '+1234567892',
+            'email' => 'east@myschool.com',
+            'website' => 'www.myschool.com/east',
+            'principal_name' => 'Dr. Jane Doe',
+            'principal_email' => 'principal.east@myschool.com',
+            'principal_phone' => '+1234567893',
+            'established_date' => '2015-06-01',
+            'student_capacity' => 1500,
+            'current_strength' => 0,
+            'affiliation_board' => 'Cambridge International',
+            'status' => 'Active',
+            'is_active' => true,
+            'timezone' => 'America/New_York',
+            'created_at' => now(),
+            'updated_at' => now()
+        ]);
+        
+        // Create admin users
+        DB::table('users')->insert([
+            [
                 'first_name' => 'Super',
                 'last_name' => 'Admin',
                 'email' => 'admin@myschool.com',
                 'phone' => '+1234567899',
                 'password' => Hash::make('Admin@123'),
                 'role' => 'SuperAdmin',
-                'branch_id' => $mainBranch->id,
+                'branch_id' => $mainBranch,
                 'is_active' => true,
-                'email_verified_at' => now()
-                ]
-            );
-
-            // Create Branch Admin for Main Campus
-            User::firstOrCreate(
-                ['email' => 'manager@myschool.com'],
-                [
+                'email_verified_at' => now(),
+                'created_at' => now(),
+                'updated_at' => now()
+            ],
+            [
                 'first_name' => 'John',
                 'last_name' => 'Manager',
                 'email' => 'manager@myschool.com',
                 'phone' => '+1234567898',
                 'password' => Hash::make('Manager@123'),
                 'role' => 'BranchAdmin',
-                'branch_id' => $mainBranch->id,
+                'branch_id' => $mainBranch,
                 'is_active' => true,
-                'email_verified_at' => now()
-                ]
-            );
-
-            // Create Sample Teacher
-            User::firstOrCreate(
-                ['email' => 'teacher@myschool.com'],
-                [
+                'email_verified_at' => now(),
+                'created_at' => now(),
+                'updated_at' => now()
+            ],
+            [
                 'first_name' => 'Sarah',
                 'last_name' => 'Teacher',
                 'email' => 'teacher@myschool.com',
                 'phone' => '+1234567897',
                 'password' => Hash::make('Teacher@123'),
                 'role' => 'Teacher',
-                'branch_id' => $mainBranch->id,
+                'branch_id' => $mainBranch,
                 'is_active' => true,
-                'email_verified_at' => now()
-                ]
-            );
-
-            // Create Sample Student
-            User::firstOrCreate(
-                ['email' => 'student@myschool.com'],
-                [
+                'email_verified_at' => now(),
+                'created_at' => now(),
+                'updated_at' => now()
+            ],
+            [
                 'first_name' => 'Alice',
                 'last_name' => 'Student',
                 'email' => 'student@myschool.com',
                 'phone' => '+1234567896',
                 'password' => Hash::make('Student@123'),
                 'role' => 'Student',
-                'branch_id' => $mainBranch->id,
+                'branch_id' => $mainBranch,
                 'is_active' => true,
-                'email_verified_at' => now()
-                ]
-            );
-
-            // Create Sample Parent
-            User::firstOrCreate(
-                ['email' => 'parent@myschool.com'],
-                [
+                'email_verified_at' => now(),
+                'created_at' => now(),
+                'updated_at' => now()
+            ],
+            [
                 'first_name' => 'Bob',
                 'last_name' => 'Parent',
                 'email' => 'parent@myschool.com',
                 'phone' => '+1234567895',
                 'password' => Hash::make('Parent@123'),
                 'role' => 'Parent',
-                'branch_id' => $mainBranch->id,
+                'branch_id' => $mainBranch,
                 'is_active' => true,
-                'email_verified_at' => now()
-                ]
-            );
-
-            DB::commit();
-
-            // Seed dashboard data
-            $this->call([
-                DashboardDataSeeder::class,
-            ]);
-
-            $this->command->info('✅ Database seeded successfully!');
-            $this->command->info('');
-            $this->command->info('Default Login Credentials:');
-            $this->command->info('================================');
-            $this->command->info('Super Admin:');
-            $this->command->info('Email: admin@myschool.com');
-            $this->command->info('Password: Admin@123');
-            $this->command->info('');
-            $this->command->info('Branch Admin:');
-            $this->command->info('Email: manager@myschool.com');
-            $this->command->info('Password: Manager@123');
-            $this->command->info('');
-            $this->command->info('Teacher:');
-            $this->command->info('Email: teacher@myschool.com');
-            $this->command->info('Password: Teacher@123');
-            $this->command->info('');
-            $this->command->info('Student:');
-            $this->command->info('Email: student@myschool.com');
-            $this->command->info('Password: Student@123');
-
-        } catch (\Exception $e) {
-            DB::rollBack();
-            $this->command->error('Seeding failed: ' . $e->getMessage());
-            throw $e;
-        }
+                'email_verified_at' => now(),
+                'created_at' => now(),
+                'updated_at' => now()
+            ]
+        ]);
+        
+        $this->command->info('✅ Quick seeder completed!');
+        $this->command->info('');
+        $this->command->info('Quick Login Credentials:');
+        $this->command->info('  Admin: admin@myschool.com / Admin@123');
+        $this->command->info('  Manager: manager@myschool.com / Manager@123');
+        $this->command->info('  Teacher: teacher@myschool.com / Teacher@123');
+        $this->command->info('  Student: student@myschool.com / Student@123');
+        $this->command->info('  Parent: parent@myschool.com / Parent@123');
+        $this->command->info('');
     }
 }
