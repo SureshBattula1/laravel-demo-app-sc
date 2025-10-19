@@ -22,6 +22,7 @@ class AttendanceController extends Controller
                 $query = DB::table('student_attendance')
                     ->join('students', 'student_attendance.student_id', '=', 'students.user_id')
                     ->join('users', 'students.user_id', '=', 'users.id')
+                    ->leftJoin('grades', 'students.grade', '=', 'grades.value')
                     ->select(
                         'student_attendance.*',
                         'users.first_name',
@@ -29,6 +30,7 @@ class AttendanceController extends Controller
                         'users.email',
                         'students.admission_number',
                         'students.grade',
+                        'grades.label as grade_label',
                         'students.section'
                     );
             } else {
@@ -72,6 +74,21 @@ class AttendanceController extends Controller
                 if ($request->has('section')) {
                     $query->where('students.section', $request->section);
                 }
+            }
+
+            // Search filter
+            if ($request->has('search') && !empty($request->search)) {
+                $search = strip_tags($request->search);
+                $query->where(function($q) use ($search, $type) {
+                    $q->where('users.first_name', 'like', '%' . $search . '%')
+                      ->orWhere('users.last_name', 'like', '%' . $search . '%')
+                      ->orWhere('users.email', 'like', '%' . $search . '%');
+                    
+                    // Add type-specific search fields
+                    if ($type === 'student') {
+                        $q->orWhere('students.admission_number', 'like', '%' . $search . '%');
+                    }
+                });
             }
 
             $attendance = $query->orderBy($type . '_attendance.date', 'desc')
@@ -309,6 +326,33 @@ class AttendanceController extends Controller
     public function getStudentAttendance($studentId)
     {
         try {
+            // Get student info first
+            $student = DB::table('students')
+                ->join('users', 'students.user_id', '=', 'users.id')
+                ->leftJoin('grades', 'students.grade', '=', 'grades.value')
+                ->leftJoin('branches', 'students.branch_id', '=', 'branches.id')
+                ->where('students.user_id', $studentId)
+                ->select(
+                    'students.id as student_db_id',
+                    'students.user_id',
+                    'students.admission_number',
+                    'students.grade',
+                    'grades.label as grade_label',
+                    'students.section',
+                    'users.first_name',
+                    'users.last_name',
+                    'users.email',
+                    'branches.name as branch_name'
+                )
+                ->first();
+            
+            if (!$student) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Student not found'
+                ], 404);
+            }
+            
             // Apply date filters if provided
             $query = DB::table('student_attendance')
                 ->where('student_id', $studentId);
@@ -338,7 +382,8 @@ class AttendanceController extends Controller
             return response()->json([
                 'success' => true,
                 'data' => $attendance,
-                'summary' => $summary
+                'summary' => $summary,
+                'student' => $student // Include student info
             ]);
         } catch (\Exception $e) {
             Log::error('Error fetching student attendance: ' . $e->getMessage());
@@ -515,11 +560,137 @@ class AttendanceController extends Controller
 
     // Dummy methods for resource routes
     public function show($id) {
-        return $this->getStudentAttendance($id);
+        try {
+            // Get single attendance record by ID
+            $attendance = DB::table('student_attendance')
+                ->join('students', 'student_attendance.student_id', '=', 'students.user_id')
+                ->join('users', 'students.user_id', '=', 'users.id')
+                ->leftJoin('grades', 'students.grade', '=', 'grades.value')
+                ->where('student_attendance.id', $id)
+                ->select(
+                    'student_attendance.*',
+                    'users.first_name',
+                    'users.last_name',
+                    'users.email',
+                    'students.admission_number',
+                    'students.grade',
+                    'grades.label as grade_label',
+                    'students.section'
+                )
+                ->first();
+            
+            if (!$attendance) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Attendance record not found'
+                ], 404);
+            }
+            
+            return response()->json([
+                'success' => true,
+                'data' => $attendance
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error fetching attendance record: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Error fetching attendance record',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+            ], 500);
+        }
     }
 
     public function update(Request $request, $id) {
-        return response()->json(['message' => 'Use markBulk or store methods'], 400);
+        try {
+            // Validate the request
+            $validated = $request->validate([
+                'status' => 'required|in:Present,Absent,Late,Half-Day,Sick Leave,Leave',
+                'remarks' => 'nullable|string|max:500',
+                'date' => 'nullable|date',
+                'marked_by' => 'nullable|string|max:255'
+            ]);
+
+            // Check if attendance record exists
+            $attendance = DB::table('student_attendance')
+                ->where('id', $id)
+                ->first();
+
+            if (!$attendance) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Attendance record not found'
+                ], 404);
+            }
+
+            // Prepare update data
+            $updateData = [
+                'status' => $validated['status'],
+                'remarks' => $validated['remarks'] ?? null,
+                'updated_at' => now()
+            ];
+
+            // Add optional fields if provided
+            if (isset($validated['date'])) {
+                $updateData['date'] = $validated['date'];
+            }
+
+            if (isset($validated['marked_by'])) {
+                $updateData['marked_by'] = $validated['marked_by'];
+            }
+
+            // Update the attendance record
+            DB::table('student_attendance')
+                ->where('id', $id)
+                ->update($updateData);
+
+            // Fetch the updated record with student details
+            $updatedAttendance = DB::table('student_attendance')
+                ->join('students', 'student_attendance.student_id', '=', 'students.user_id')
+                ->join('users', 'students.user_id', '=', 'users.id')
+                ->leftJoin('grades', 'students.grade', '=', 'grades.value')
+                ->where('student_attendance.id', $id)
+                ->select(
+                    'student_attendance.*',
+                    'users.first_name',
+                    'users.last_name',
+                    'users.email',
+                    'students.admission_number',
+                    'students.grade',
+                    'grades.label as grade_label',
+                    'students.section'
+                )
+                ->first();
+
+            Log::info('Attendance updated successfully', [
+                'id' => $id,
+                'status' => $validated['status'],
+                'updated_by' => auth()->user()->email ?? 'system'
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Attendance updated successfully',
+                'data' => $updatedAttendance
+            ]);
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            Log::error('Error updating attendance: ' . $e->getMessage(), [
+                'id' => $id,
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Error updating attendance',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+            ], 500);
+        }
     }
 
     public function destroy($id) {
