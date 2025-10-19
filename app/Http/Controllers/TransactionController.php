@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Traits\PaginatesAndSorts;
 use App\Models\Transaction;
 use App\Models\SalaryPayment;
 use Illuminate\Http\Request;
@@ -12,8 +13,10 @@ use Illuminate\Support\Facades\Auth;
 
 class TransactionController extends Controller
 {
+    use PaginatesAndSorts;
+
     /**
-     * Get all transactions
+     * Get all transactions with server-side pagination and sorting
      */
     public function index(Request $request)
     {
@@ -58,14 +61,37 @@ class TransactionController extends Controller
                 });
             }
 
-            $transactions = $query->orderBy('transaction_date', 'desc')
-                                 ->orderBy('id', 'desc')
-                                 ->get();
+            // Define sortable columns
+            $sortableColumns = [
+                'id',
+                'transaction_number',
+                'transaction_date',
+                'type',
+                'category_id',
+                'amount',
+                'status',
+                'payment_method',
+                'financial_year',
+                'created_at'
+            ];
 
+            // Apply pagination and sorting (default: 25 per page, sorted by transaction_date desc)
+            $transactions = $this->paginateAndSort($query, $request, $sortableColumns, 'transaction_date', 'desc');
+
+            // Return standardized paginated response
             return response()->json([
                 'success' => true,
-                'data' => $transactions,
-                'count' => $transactions->count()
+                'message' => 'Transactions retrieved successfully',
+                'data' => $transactions->items(),
+                'meta' => [
+                    'current_page' => $transactions->currentPage(),
+                    'per_page' => $transactions->perPage(),
+                    'total' => $transactions->total(),
+                    'last_page' => $transactions->lastPage(),
+                    'from' => $transactions->firstItem(),
+                    'to' => $transactions->lastItem(),
+                    'has_more_pages' => $transactions->hasMorePages()
+                ]
             ]);
 
         } catch (\Exception $e) {

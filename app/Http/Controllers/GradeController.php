@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Traits\PaginatesAndSorts;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
@@ -9,31 +10,49 @@ use Illuminate\Support\Facades\Log;
 
 class GradeController extends Controller
 {
+    use PaginatesAndSorts;
+
     /**
-     * Get all grades (stored in a configuration table or cached)
+     * Get all grades with server-side pagination and sorting
      */
     public function index(Request $request)
     {
         try {
-            // Get grades from the grades table or return predefined list
-            $grades = DB::table('grades')
-                ->orderBy('value', 'asc')
-                ->get()
-                ->map(function ($grade) {
-                    return [
-                        'value' => $grade->value,
-                        'label' => $grade->label,
-                        'description' => $grade->description ?? null,
-                        'is_active' => (bool) $grade->is_active,
-                        'created_at' => $grade->created_at,
-                        'updated_at' => $grade->updated_at
-                    ];
-                });
+            // Get grades from the grades table
+            $query = DB::table('grades');
 
+            // Define sortable columns
+            $sortableColumns = ['value', 'label', 'is_active', 'created_at', 'updated_at'];
+
+            // Apply pagination and sorting (default: 25 per page, sorted by value asc)
+            $grades = $this->paginateAndSort($query, $request, $sortableColumns, 'value', 'asc');
+
+            // Transform the paginated data
+            $transformedData = collect($grades->items())->map(function ($grade) {
+                return [
+                    'value' => $grade->value,
+                    'label' => $grade->label,
+                    'description' => $grade->description ?? null,
+                    'is_active' => (bool) $grade->is_active,
+                    'created_at' => $grade->created_at,
+                    'updated_at' => $grade->updated_at
+                ];
+            });
+
+            // Return standardized paginated response
             return response()->json([
                 'success' => true,
-                'data' => $grades,
-                'count' => $grades->count()
+                'message' => 'Grades retrieved successfully',
+                'data' => $transformedData,
+                'meta' => [
+                    'current_page' => $grades->currentPage(),
+                    'per_page' => $grades->perPage(),
+                    'total' => $grades->total(),
+                    'last_page' => $grades->lastPage(),
+                    'from' => $grades->firstItem(),
+                    'to' => $grades->lastItem(),
+                    'has_more_pages' => $grades->hasMorePages()
+                ]
             ]);
 
         } catch (\Exception $e) {

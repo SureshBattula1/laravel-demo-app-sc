@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Traits\PaginatesAndSorts;
 use App\Models\StudentGroup;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
@@ -10,8 +11,10 @@ use Illuminate\Support\Facades\Log;
 
 class StudentGroupController extends Controller
 {
+    use PaginatesAndSorts;
+
     /**
-     * Get all student groups
+     * Get all student groups with server-side pagination and sorting
      */
     public function index(Request $request)
     {
@@ -43,17 +46,41 @@ class StudentGroupController extends Controller
                 });
             }
 
-            $groups = $query->orderBy('name', 'asc')->get();
+            // Define sortable columns
+            $sortableColumns = [
+                'id',
+                'code',
+                'name',
+                'type',
+                'academic_year',
+                'is_active',
+                'created_at',
+                'updated_at'
+            ];
 
-            // Add member count
-            $groups->each(function($group) {
+            // Apply pagination and sorting (default: 25 per page, sorted by name asc)
+            $groups = $this->paginateAndSort($query, $request, $sortableColumns, 'name', 'asc');
+
+            // Add member count to each group
+            $groups->getCollection()->transform(function($group) {
                 $group->member_count = $group->members()->where('is_active', true)->count();
+                return $group;
             });
 
+            // Return standardized paginated response
             return response()->json([
                 'success' => true,
-                'data' => $groups,
-                'count' => $groups->count()
+                'message' => 'Student groups retrieved successfully',
+                'data' => $groups->items(),
+                'meta' => [
+                    'current_page' => $groups->currentPage(),
+                    'per_page' => $groups->perPage(),
+                    'total' => $groups->total(),
+                    'last_page' => $groups->lastPage(),
+                    'from' => $groups->firstItem(),
+                    'to' => $groups->lastItem(),
+                    'has_more_pages' => $groups->hasMorePages()
+                ]
             ]);
 
         } catch (\Exception $e) {

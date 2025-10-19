@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Traits\PaginatesAndSorts;
 use App\Models\Section;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
@@ -10,8 +11,10 @@ use Illuminate\Support\Facades\Log;
 
 class SectionController extends Controller
 {
+    use PaginatesAndSorts;
+
     /**
-     * Get all sections
+     * Get all sections with server-side pagination and sorting
      */
     public function index(Request $request)
     {
@@ -40,20 +43,47 @@ class SectionController extends Controller
                 });
             }
 
-            $sections = $query->orderBy('name', 'asc')->get();
+            // Define sortable columns
+            $sortableColumns = [
+                'id',
+                'code',
+                'name',
+                'branch_id',
+                'grade_level',
+                'capacity',
+                'current_strength',
+                'room_number',
+                'is_active',
+                'created_at',
+                'updated_at'
+            ];
+
+            // Apply pagination and sorting (default: 25 per page, sorted by name asc)
+            $sections = $this->paginateAndSort($query, $request, $sortableColumns, 'name', 'asc');
 
             // Enhance each section with grade details and actual student count
-            $sections->each(function ($section) {
+            $sections->getCollection()->transform(function ($section) {
                 // Append grade_details accessor data
                 $section->append('grade_details');
                 // Override current_strength with actual count from students table
                 $section->current_strength = $section->actual_strength;
+                return $section;
             });
 
+            // Return standardized paginated response
             return response()->json([
                 'success' => true,
-                'data' => $sections,
-                'count' => $sections->count()
+                'message' => 'Sections retrieved successfully',
+                'data' => $sections->items(),
+                'meta' => [
+                    'current_page' => $sections->currentPage(),
+                    'per_page' => $sections->perPage(),
+                    'total' => $sections->total(),
+                    'last_page' => $sections->lastPage(),
+                    'from' => $sections->firstItem(),
+                    'to' => $sections->lastItem(),
+                    'has_more_pages' => $sections->hasMorePages()
+                ]
             ]);
 
         } catch (\Exception $e) {

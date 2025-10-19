@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Traits\PaginatesAndSorts;
 use App\Models\FeeType;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -9,8 +10,10 @@ use Illuminate\Validation\Rule;
 
 class FeeTypeController extends Controller
 {
+    use PaginatesAndSorts;
+
     /**
-     * Display a listing of fee types
+     * Display a listing of fee types with server-side pagination
      */
     public function index(Request $request): JsonResponse
     {
@@ -42,17 +45,26 @@ class FeeTypeController extends Controller
                 $query->where('is_mandatory', filter_var($request->is_mandatory, FILTER_VALIDATE_BOOLEAN));
             }
 
-            // Sorting
-            $sortBy = $request->get('sort_by', 'name');
-            $sortOrder = $request->get('sort_order', 'asc');
-            $query->orderBy($sortBy, $sortOrder);
+            // Define sortable columns
+            $sortableColumns = ['id', 'name', 'code', 'is_active', 'is_mandatory', 'is_refundable', 'created_at'];
 
-            $feeTypes = $query->get();
+            // Apply pagination and sorting (default: 25 per page, sorted by name asc)
+            $feeTypes = $this->paginateAndSort($query, $request, $sortableColumns, 'name', 'asc');
 
+            // Return standardized paginated response
             return response()->json([
                 'success' => true,
                 'message' => 'Fee types retrieved successfully',
-                'data' => $feeTypes
+                'data' => $feeTypes->items(),
+                'meta' => [
+                    'current_page' => $feeTypes->currentPage(),
+                    'per_page' => $feeTypes->perPage(),
+                    'total' => $feeTypes->total(),
+                    'last_page' => $feeTypes->lastPage(),
+                    'from' => $feeTypes->firstItem(),
+                    'to' => $feeTypes->lastItem(),
+                    'has_more_pages' => $feeTypes->hasMorePages()
+                ]
             ]);
         } catch (\Exception $e) {
             return response()->json([

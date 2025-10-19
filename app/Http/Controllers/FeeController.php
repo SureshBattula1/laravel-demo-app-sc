@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Traits\PaginatesAndSorts;
 use App\Models\FeeStructure;
 use App\Models\FeePayment;
 use Illuminate\Http\Request;
@@ -11,7 +12,9 @@ use Illuminate\Support\Facades\Validator;
 
 class FeeController extends Controller
 {
-    // Fee Structures
+    use PaginatesAndSorts;
+
+    // Fee Structures with server-side pagination
     public function indexStructures(Request $request)
     {
         try {
@@ -33,12 +36,35 @@ class FeeController extends Controller
                 $query->where('fee_type', $request->fee_type);
             }
 
-            $structures = $query->orderBy('grade')->orderBy('fee_type')->get();
+            if ($request->has('search')) {
+                $search = strip_tags($request->search);
+                $query->where(function($q) use ($search) {
+                    $q->where('grade', 'like', '%' . $search . '%')
+                      ->orWhere('fee_type', 'like', '%' . $search . '%')
+                      ->orWhere('academic_year', 'like', '%' . $search . '%');
+                });
+            }
 
+            // Define sortable columns
+            $sortableColumns = ['id', 'grade', 'fee_type', 'amount', 'academic_year', 'due_date', 'is_active', 'created_at'];
+
+            // Apply pagination and sorting (default: 25 per page)
+            $structures = $this->paginateAndSort($query, $request, $sortableColumns, 'grade', 'asc');
+
+            // Return standardized paginated response
             return response()->json([
                 'success' => true,
-                'data' => $structures,
-                'message' => 'Fee structures retrieved successfully'
+                'message' => 'Fee structures retrieved successfully',
+                'data' => $structures->items(),
+                'meta' => [
+                    'current_page' => $structures->currentPage(),
+                    'per_page' => $structures->perPage(),
+                    'total' => $structures->total(),
+                    'last_page' => $structures->lastPage(),
+                    'from' => $structures->firstItem(),
+                    'to' => $structures->lastItem(),
+                    'has_more_pages' => $structures->hasMorePages()
+                ]
             ]);
         } catch (\Exception $e) {
             Log::error('Error fetching fee structures: ' . $e->getMessage());
@@ -205,12 +231,33 @@ class FeeController extends Controller
                 $query->whereDate('payment_date', '<=', $request->to_date);
             }
 
-            $payments = $query->orderBy('payment_date', 'desc')->get();
+            if ($request->has('search')) {
+                $search = strip_tags($request->search);
+                $query->where(function($q) use ($search) {
+                    $q->where('transaction_id', 'like', '%' . $search . '%')
+                      ->orWhere('payment_method', 'like', '%' . $search . '%');
+                });
+            }
+
+            // Define sortable columns
+            $sortableColumns = ['id', 'student_id', 'payment_date', 'amount_paid', 'payment_method', 'payment_status', 'created_at'];
+
+            // Apply pagination and sorting
+            $payments = $this->paginateAndSort($query, $request, $sortableColumns, 'payment_date', 'desc');
 
             return response()->json([
                 'success' => true,
-                'data' => $payments,
-                'message' => 'Fee payments retrieved successfully'
+                'message' => 'Fee payments retrieved successfully',
+                'data' => $payments->items(),
+                'meta' => [
+                    'current_page' => $payments->currentPage(),
+                    'per_page' => $payments->perPage(),
+                    'total' => $payments->total(),
+                    'last_page' => $payments->lastPage(),
+                    'from' => $payments->firstItem(),
+                    'to' => $payments->lastItem(),
+                    'has_more_pages' => $payments->hasMorePages()
+                ]
             ]);
         } catch (\Exception $e) {
             Log::error('Error fetching fee payments: ' . $e->getMessage());
