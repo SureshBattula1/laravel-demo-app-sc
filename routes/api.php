@@ -10,6 +10,7 @@ use App\Http\Controllers\DepartmentController;
 use App\Http\Controllers\SubjectController;
 use App\Http\Controllers\ExamController;
 use App\Http\Controllers\FeeController;
+use App\Http\Controllers\FeeTypeController;
 use App\Http\Controllers\AttendanceController;
 use App\Http\Controllers\LibraryController;
 use App\Http\Controllers\TransportController;
@@ -169,6 +170,14 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     Route::get('students/{studentId}/results', [ExamController::class, 'getStudentResults']);
     
     // Fee Routes
+    // Fee Types Routes
+    Route::get('fee-types', [FeeTypeController::class, 'index']);
+    Route::post('fee-types', [FeeTypeController::class, 'store']);
+    Route::get('fee-types/{id}', [FeeTypeController::class, 'show']);
+    Route::put('fee-types/{id}', [FeeTypeController::class, 'update']);
+    Route::delete('fee-types/{id}', [FeeTypeController::class, 'destroy']);
+    Route::put('fee-types/{id}/toggle-status', [FeeTypeController::class, 'toggleStatus']);
+    
     Route::get('fee-structures', [FeeController::class, 'indexStructures']);
     Route::post('fee-structures', [FeeController::class, 'storeStructure']);
     Route::get('fee-structures/{id}', [FeeController::class, 'show']);
