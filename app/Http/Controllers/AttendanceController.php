@@ -321,6 +321,77 @@ class AttendanceController extends Controller
     }
 
     /**
+     * Get teacher attendance
+     */
+    public function getTeacherAttendance($teacherId)
+    {
+        try {
+            // Get teacher info first
+            $teacher = DB::table('users')
+                ->leftJoin('teachers', 'users.id', '=', 'teachers.user_id')
+                ->where('users.id', $teacherId)
+                ->select(
+                    'users.id as user_id',
+                    'users.first_name',
+                    'users.last_name',
+                    'users.email',
+                    'users.phone',
+                    'teachers.employee_id',
+                    'teachers.designation',
+                    'teachers.employee_type'
+                )
+                ->first();
+            
+            if (!$teacher) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Teacher not found'
+                ], 404);
+            }
+            
+            // Apply date filters if provided
+            $query = DB::table('teacher_attendance')
+                ->where('teacher_id', $teacherId);
+            
+            if (request()->has('from_date')) {
+                $query->whereDate('date', '>=', request('from_date'));
+            }
+            
+            if (request()->has('to_date')) {
+                $query->whereDate('date', '<=', request('to_date'));
+            }
+            
+            $attendance = $query->orderBy('date', 'desc')->get();
+
+            $summary = [
+                'total_days' => $attendance->count(),
+                'present' => $attendance->where('status', 'Present')->count(),
+                'absent' => $attendance->where('status', 'Absent')->count(),
+                'late' => $attendance->where('status', 'Late')->count(),
+                'leaves' => $attendance->whereIn('status', ['Sick Leave', 'Leave'])->count(),
+                'half_day' => $attendance->where('status', 'Half-Day')->count(),
+                'percentage' => $attendance->count() > 0 
+                    ? round(($attendance->where('status', 'Present')->count() / $attendance->count()) * 100, 2)
+                    : 0
+            ];
+
+            return response()->json([
+                'success' => true,
+                'data' => $attendance,
+                'summary' => $summary,
+                'teacher' => $teacher // Include teacher info
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error fetching teacher attendance: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Error fetching teacher attendance',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+            ], 500);
+        }
+    }
+
+    /**
      * Get student attendance
      */
     public function getStudentAttendance($studentId)

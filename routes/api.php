@@ -184,6 +184,7 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     Route::post('attendance/bulk', [AttendanceController::class, 'markBulk']);
     Route::get('attendance/report', [AttendanceController::class, 'getReport']);
     Route::get('attendance/student/{studentId}', [AttendanceController::class, 'getStudentAttendance']);
+    Route::get('attendance/teacher/{teacherId}', [AttendanceController::class, 'getTeacherAttendance']);
     Route::get('attendance/class/{grade}/{section}', [AttendanceController::class, 'getClassAttendance']);
     Route::get('attendance/report/{studentId}', [AttendanceController::class, 'generateReport']);
     Route::apiResource('attendance', AttendanceController::class);
