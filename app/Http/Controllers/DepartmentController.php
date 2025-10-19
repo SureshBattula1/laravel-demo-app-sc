@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Traits\PaginatesAndSorts;
 use App\Models\Department;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
@@ -10,8 +11,10 @@ use Illuminate\Support\Facades\Log;
 
 class DepartmentController extends Controller
 {
+    use PaginatesAndSorts;
+
     /**
-     * Display a listing of departments with security filters
+     * Display a listing of departments with server-side pagination and sorting
      */
     public function index(Request $request)
     {
@@ -19,7 +22,7 @@ class DepartmentController extends Controller
             $query = Department::with(['branch', 'headOfDepartment']);
 
             // Branch filter (required for multi-branch security)
-            if ($request->branch_id) {
+            if ($request->has('branch_id')) {
                 $query->where('branch_id', $request->branch_id);
             }
 
@@ -29,20 +32,46 @@ class DepartmentController extends Controller
             }
 
             // Secure search
-            if ($request->search) {
+            if ($request->has('search')) {
                 $search = strip_tags($request->search);
                 $query->where(function($q) use ($search) {
                     $q->where('name', 'like', '%' . $search . '%')
-                      ->orWhere('head', 'like', '%' . $search . '%');
+                      ->orWhere('head', 'like', '%' . $search . '%')
+                      ->orWhere('description', 'like', '%' . $search . '%');
                 });
             }
 
-            $departments = $query->orderBy('name', 'asc')->get();
+            // Define sortable columns
+            $sortableColumns = [
+                'id',
+                'name',
+                'head',
+                'branch_id',
+                'is_active',
+                'students_count',
+                'teachers_count',
+                'established_date',
+                'created_at',
+                'updated_at'
+            ];
 
+            // Apply pagination and sorting (default: 25 per page, sorted by name asc)
+            $departments = $this->paginateAndSort($query, $request, $sortableColumns, 'name', 'asc');
+
+            // Return standardized paginated response
             return response()->json([
                 'success' => true,
-                'data' => $departments,
-                'count' => $departments->count()
+                'message' => 'Departments retrieved successfully',
+                'data' => $departments->items(),
+                'meta' => [
+                    'current_page' => $departments->currentPage(),
+                    'per_page' => $departments->perPage(),
+                    'total' => $departments->total(),
+                    'last_page' => $departments->lastPage(),
+                    'from' => $departments->firstItem(),
+                    'to' => $departments->lastItem(),
+                    'has_more_pages' => $departments->hasMorePages()
+                ]
             ]);
 
         } catch (\Exception $e) {

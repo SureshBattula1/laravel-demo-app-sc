@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Traits\PaginatesAndSorts;
 use App\Models\Subject;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
@@ -10,6 +11,11 @@ use Illuminate\Support\Facades\Log;
 
 class SubjectController extends Controller
 {
+    use PaginatesAndSorts;
+
+    /**
+     * Get all subjects with server-side pagination and sorting
+     */
     public function index(Request $request)
     {
         try {
@@ -17,36 +23,66 @@ class SubjectController extends Controller
                 ->leftJoin('grades', 'subjects.grade_level', '=', 'grades.value')
                 ->select('subjects.*', 'grades.label as grade_label');
 
-            if ($request->branch_id) {
+            // Filter by branch
+            if ($request->has('branch_id')) {
                 $query->where('subjects.branch_id', $request->branch_id);
             }
 
-            if ($request->department_id) {
+            // Filter by department
+            if ($request->has('department_id')) {
                 $query->where('subjects.department_id', $request->department_id);
             }
 
-            if ($request->grade_level) {
+            // Filter by grade level
+            if ($request->has('grade_level')) {
                 $query->where('subjects.grade_level', strip_tags($request->grade_level));
             }
 
-            if ($request->type) {
+            // Filter by type
+            if ($request->has('type')) {
                 $query->where('subjects.type', strip_tags($request->type));
             }
 
-            if ($request->search) {
+            // Search functionality
+            if ($request->has('search')) {
                 $search = strip_tags($request->search);
                 $query->where(function($q) use ($search) {
                     $q->where('subjects.name', 'like', '%' . $search . '%')
-                      ->orWhere('subjects.code', 'like', '%' . $search . '%');
+                      ->orWhere('subjects.code', 'like', '%' . $search . '%')
+                      ->orWhere('subjects.description', 'like', '%' . $search . '%');
                 });
             }
 
-            $subjects = $query->orderBy('subjects.name', 'asc')->get();
+            // Define sortable columns
+            $sortableColumns = [
+                'subjects.id',
+                'subjects.name',
+                'subjects.code',
+                'subjects.grade_level',
+                'subjects.type',
+                'subjects.credits',
+                'subjects.is_active',
+                'subjects.created_at',
+                'subjects.updated_at'
+            ];
 
+            // Apply pagination and sorting (default: 25 per page, sorted by name asc)
+            $subjects = $this->paginateAndSort($query, $request, $sortableColumns, 'subjects.name', 'asc');
+
+            // Return standardized paginated response
             return response()->json([
                 'success' => true,
-                'data' => $subjects,
-                'count' => $subjects->count()
+                'message' => 'Subjects retrieved successfully',
+                'data' => $subjects->items(),
+                'meta' => [
+                    'current_page' => $subjects->currentPage(),
+                    'per_page' => $subjects->perPage(),
+                    'total' => $subjects->total(),
+                    'last_page' => $subjects->lastPage(),
+                    'from' => $subjects->firstItem(),
+                    'to' => $subjects->lastItem(),
+                    'has_more_pages' => $subjects->hasMorePages()
+                ]
             ]);
 
         } catch (\Exception $e) {

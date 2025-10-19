@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Traits\PaginatesAndSorts;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -11,8 +12,10 @@ use Illuminate\Support\Facades\Log;
 
 class StudentController extends Controller
 {
+    use PaginatesAndSorts;
+
     /**
-     * Get all students with filters
+     * Get all students with filters and server-side pagination/sorting
      */
     public function index(Request $request)
     {
@@ -35,6 +38,7 @@ class StudentController extends Controller
                     'students.date_of_birth',
                     'students.gender',
                     'students.student_status',
+                    'students.created_at',
                     'users.first_name',
                     'users.last_name',
                     'users.email',
@@ -75,9 +79,25 @@ class StudentController extends Controller
                 });
             }
 
-            $perPage = $request->get('per_page', 10);
-            $students = $query->orderBy('students.created_at', 'desc')
-                             ->paginate($perPage);
+            // Define sortable columns (whitelisted for security)
+            $sortableColumns = [
+                'students.id',
+                'students.admission_number',
+                'students.roll_number',
+                'students.grade',
+                'students.section',
+                'students.gender',
+                'students.student_status',
+                'students.created_at',
+                'students.admission_date',
+                'users.first_name',
+                'users.last_name',
+                'users.email',
+                'branches.name'
+            ];
+
+            // Apply pagination and sorting (default: 25 per page, sorted by created_at desc)
+            $students = $this->paginateAndSort($query, $request, $sortableColumns, 'students.created_at', 'desc');
 
             // Parse JSON branch field for each student
             $studentsData = collect($students->items())->map(function($student) {
@@ -87,14 +107,19 @@ class StudentController extends Controller
                 return $student;
             })->toArray();
 
+            // Return standardized paginated response
             return response()->json([
                 'success' => true,
+                'message' => 'Students retrieved successfully',
                 'data' => $studentsData,
                 'meta' => [
                     'current_page' => $students->currentPage(),
                     'per_page' => $students->perPage(),
                     'total' => $students->total(),
-                    'last_page' => $students->lastPage()
+                    'last_page' => $students->lastPage(),
+                    'from' => $students->firstItem(),
+                    'to' => $students->lastItem(),
+                    'has_more_pages' => $students->hasMorePages()
                 ]
             ]);
 

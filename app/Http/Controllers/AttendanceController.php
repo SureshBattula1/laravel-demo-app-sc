@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Traits\PaginatesAndSorts;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -10,8 +11,10 @@ use Carbon\Carbon;
 
 class AttendanceController extends Controller
 {
+    use PaginatesAndSorts;
+
     /**
-     * Get attendance records
+     * Get attendance records with server-side pagination and sorting
      */
     public function index(Request $request)
     {
@@ -91,17 +94,50 @@ class AttendanceController extends Controller
                 });
             }
 
-            $attendance = $query->orderBy($type . '_attendance.date', 'desc')
-                               ->paginate($request->get('per_page', 50));
+            // Define sortable columns
+            $sortableColumns = $type === 'student' 
+                ? [
+                    'student_attendance.id',
+                    'student_attendance.date',
+                    'student_attendance.status',
+                    'student_attendance.created_at',
+                    'users.first_name',
+                    'users.last_name',
+                    'students.admission_number',
+                    'students.grade',
+                    'students.section'
+                ]
+                : [
+                    'teacher_attendance.id',
+                    'teacher_attendance.date',
+                    'teacher_attendance.status',
+                    'teacher_attendance.created_at',
+                    'users.first_name',
+                    'users.last_name'
+                ];
 
+            // Apply pagination and sorting (default: 25 per page, sorted by date desc)
+            $attendance = $this->paginateAndSort(
+                $query, 
+                $request, 
+                $sortableColumns, 
+                $type . '_attendance.date', 
+                'desc'
+            );
+
+            // Return standardized paginated response
             return response()->json([
                 'success' => true,
+                'message' => 'Attendance records retrieved successfully',
                 'data' => $attendance->items(),
                 'meta' => [
                     'current_page' => $attendance->currentPage(),
                     'per_page' => $attendance->perPage(),
                     'total' => $attendance->total(),
-                    'last_page' => $attendance->lastPage()
+                    'last_page' => $attendance->lastPage(),
+                    'from' => $attendance->firstItem(),
+                    'to' => $attendance->lastItem(),
+                    'has_more_pages' => $attendance->hasMorePages()
                 ]
             ]);
         } catch (\Exception $e) {

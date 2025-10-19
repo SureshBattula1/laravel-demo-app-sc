@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Traits\PaginatesAndSorts;
 use App\Models\Branch;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
@@ -10,6 +11,11 @@ use Illuminate\Support\Facades\Log;
 
 class BranchController extends Controller
 {
+    use PaginatesAndSorts;
+
+    /**
+     * Get all branches with filters and server-side pagination/sorting
+     */
     public function index(Request $request)
     {
         try {
@@ -60,34 +66,68 @@ class BranchController extends Controller
                 });
             }
 
-            // Hierarchical view (nested structure)
+            // Hierarchical view (nested structure) - returns all without pagination
             if ($request->boolean('hierarchical')) {
                 $branches = $query->whereNull('parent_branch_id')
                     ->with('allDescendants')
                     ->orderBy('name')
                     ->get();
-            } else {
-                // Pagination
-                if ($request->boolean('paginate')) {
-                    $perPage = $request->input('per_page', 15);
-                    $branches = $query->orderBy('name', 'asc')->paginate($perPage);
-                } else {
-                    $branches = $query->orderBy('name', 'asc')->get();
-                }
-            }
-
-            // Add computed fields
-            if (!$request->boolean('paginate')) {
+                
+                // Add computed fields for hierarchical view
                 $branches->each(function($branch) {
                     $branch->capacity_utilization = $branch->getCapacityUtilization();
                     $branch->has_children = $branch->hasChildren();
                 });
+                
+                return response()->json([
+                    'success' => true,
+                    'data' => $branches,
+                    'count' => $branches->count()
+                ]);
             }
 
+            // Define sortable columns for security
+            $sortableColumns = [
+                'id',
+                'name',
+                'code',
+                'branch_type',
+                'city',
+                'state',
+                'region',
+                'status',
+                'is_active',
+                'total_capacity',
+                'current_enrollment',
+                'established_date',
+                'created_at',
+                'updated_at'
+            ];
+
+            // Apply pagination and sorting (default: 25 per page, sorted by name asc)
+            $branches = $this->paginateAndSort($query, $request, $sortableColumns, 'name', 'asc');
+
+            // Add computed fields to paginated results
+            $branchesData = collect($branches->items())->map(function($branch) {
+                $branch->capacity_utilization = $branch->getCapacityUtilization();
+                $branch->has_children = $branch->hasChildren();
+                return $branch;
+            })->toArray();
+
+            // Return standardized paginated response
             return response()->json([
                 'success' => true,
-                'data' => $branches,
-                'count' => $branches->count()
+                'message' => 'Branches retrieved successfully',
+                'data' => $branchesData,
+                'meta' => [
+                    'current_page' => $branches->currentPage(),
+                    'per_page' => $branches->perPage(),
+                    'total' => $branches->total(),
+                    'last_page' => $branches->lastPage(),
+                    'from' => $branches->firstItem(),
+                    'to' => $branches->lastItem(),
+                    'has_more_pages' => $branches->hasMorePages()
+                ]
             ]);
 
         } catch (\Exception $e) {

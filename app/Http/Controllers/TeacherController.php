@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Traits\PaginatesAndSorts;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
@@ -10,34 +11,67 @@ use Illuminate\Support\Facades\Log;
 
 class TeacherController extends Controller
 {
+    use PaginatesAndSorts;
+
+    /**
+     * Get all teachers with filters and server-side pagination/sorting
+     */
     public function index(Request $request)
     {
         try {
             $query = User::with('branch')->where('role', 'Teacher');
 
-            if ($request->branch_id) {
+            // Filter by branch
+            if ($request->has('branch_id')) {
                 $query->where('branch_id', $request->branch_id);
             }
 
+            // Filter by active status
             if ($request->has('is_active')) {
                 $query->where('is_active', filter_var($request->is_active, FILTER_VALIDATE_BOOLEAN));
             }
 
-            if ($request->search) {
+            // Search functionality
+            if ($request->has('search')) {
                 $search = strip_tags($request->search);
                 $query->where(function($q) use ($search) {
                     $q->where('first_name', 'like', '%' . $search . '%')
                       ->orWhere('last_name', 'like', '%' . $search . '%')
-                      ->orWhere('email', 'like', '%' . $search . '%');
+                      ->orWhere('email', 'like', '%' . $search . '%')
+                      ->orWhere('phone', 'like', '%' . $search . '%');
                 });
             }
 
-            $teachers = $query->orderBy('first_name', 'asc')->get();
+            // Define sortable columns
+            $sortableColumns = [
+                'id',
+                'first_name',
+                'last_name',
+                'email',
+                'phone',
+                'is_active',
+                'branch_id',
+                'created_at',
+                'updated_at'
+            ];
 
+            // Apply pagination and sorting (default: 25 per page, sorted by first_name asc)
+            $teachers = $this->paginateAndSort($query, $request, $sortableColumns, 'first_name', 'asc');
+
+            // Return standardized paginated response
             return response()->json([
                 'success' => true,
-                'data' => $teachers,
-                'count' => $teachers->count()
+                'message' => 'Teachers retrieved successfully',
+                'data' => $teachers->items(),
+                'meta' => [
+                    'current_page' => $teachers->currentPage(),
+                    'per_page' => $teachers->perPage(),
+                    'total' => $teachers->total(),
+                    'last_page' => $teachers->lastPage(),
+                    'from' => $teachers->firstItem(),
+                    'to' => $teachers->lastItem(),
+                    'has_more_pages' => $teachers->hasMorePages()
+                ]
             ]);
 
         } catch (\Exception $e) {
