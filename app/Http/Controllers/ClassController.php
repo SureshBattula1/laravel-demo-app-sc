@@ -309,19 +309,25 @@ class ClassController extends Controller
     /**
      * Get available grades with statistics
      */
-    public function getGrades()
+    public function getGrades(Request $request)
     {
         try {
             // Get grades from the grades table
             $gradesFromDb = DB::table('grades')->orderBy('value', 'asc')->get();
             
             $grades = [];
+            $branchId = $request->query('branch_id');
             
             foreach ($gradesFromDb as $gradeRecord) {
-                // Get classes for this grade
-                $classes = ClassModel::where('grade', $gradeRecord->value)
-                    ->where('is_active', true)
-                    ->get();
+                // Get classes for this grade with optional branch filter
+                $classesQuery = ClassModel::where('grade', $gradeRecord->value)
+                    ->where('is_active', true);
+                
+                if ($branchId) {
+                    $classesQuery->where('branch_id', $branchId);
+                }
+                
+                $classes = $classesQuery->get();
                 
                 // Get unique sections from both classes and sections tables
                 $sectionsFromClasses = $classes->pluck('section')
@@ -330,11 +336,17 @@ class ClassController extends Controller
                     ->values()
                     ->toArray();
                 
-                // Get sections from the sections table for this grade
-                $sectionsFromSectionsTable = DB::table('sections')
+                // Get sections from the sections table for this grade with optional branch filter
+                $sectionsTableQuery = DB::table('sections')
                     ->where('grade_level', $gradeRecord->value)
                     ->where('is_active', true)
-                    ->whereNull('deleted_at')
+                    ->whereNull('deleted_at');
+                
+                if ($branchId) {
+                    $sectionsTableQuery->where('branch_id', $branchId);
+                }
+                
+                $sectionsFromSectionsTable = $sectionsTableQuery
                     ->pluck('name')
                     ->filter()
                     ->unique()
@@ -347,11 +359,16 @@ class ClassController extends Controller
                     ->values()
                     ->toArray();
                 
-                // Count total students in this grade
-                $studentsCount = DB::table('students')
+                // Count total students in this grade with optional branch filter
+                $studentsQuery = DB::table('students')
                     ->where('grade', $gradeRecord->value)
-                    ->where('student_status', 'Active')
-                    ->count();
+                    ->where('student_status', 'Active');
+                
+                if ($branchId) {
+                    $studentsQuery->where('branch_id', $branchId);
+                }
+                
+                $studentsCount = $studentsQuery->count();
                 
                 $grades[] = [
                     'value' => $gradeRecord->value,
@@ -518,4 +535,5 @@ class ClassController extends Controller
         }
     }
 }
+
 

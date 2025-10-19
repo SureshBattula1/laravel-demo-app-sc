@@ -19,13 +19,15 @@ class StudentController extends Controller
         try {
             $query = DB::table('students')
                 ->join('users', 'students.user_id', '=', 'users.id')
+                ->leftJoin('branches', 'students.branch_id', '=', 'branches.id')
                 ->select(
                     'students.*',
                     'users.first_name',
                     'users.last_name',
                     'users.email',
                     'users.phone',
-                    'users.is_active'
+                    'users.is_active',
+                    DB::raw('JSON_OBJECT("id", branches.id, "name", branches.name, "code", branches.code) as branch')
                 );
 
             // Apply filters
@@ -60,9 +62,17 @@ class StudentController extends Controller
             $students = $query->orderBy('students.created_at', 'desc')
                              ->paginate($perPage);
 
+            // Parse JSON branch field for each student
+            $studentsData = collect($students->items())->map(function($student) {
+                if (isset($student->branch) && is_string($student->branch)) {
+                    $student->branch = json_decode($student->branch);
+                }
+                return $student;
+            })->toArray();
+
             return response()->json([
                 'success' => true,
-                'data' => $students->items(),
+                'data' => $studentsData,
                 'meta' => [
                     'current_page' => $students->currentPage(),
                     'per_page' => $students->perPage(),
@@ -90,13 +100,15 @@ class StudentController extends Controller
         try {
             $student = DB::table('students')
                 ->join('users', 'students.user_id', '=', 'users.id')
+                ->leftJoin('branches', 'students.branch_id', '=', 'branches.id')
                 ->where('students.id', $id)
                 ->select(
                     'students.*', 
                     'users.first_name', 
                     'users.last_name', 
                     'users.email', 
-                    'users.phone'
+                    'users.phone',
+                    DB::raw('JSON_OBJECT("id", branches.id, "name", branches.name, "code", branches.code) as branch')
                 )
                 ->first();
 
@@ -117,6 +129,10 @@ class StudentController extends Controller
             
             if (isset($studentData['documents']) && is_string($studentData['documents'])) {
                 $studentData['documents'] = json_decode($studentData['documents'], true);
+            }
+            
+            if (isset($studentData['branch']) && is_string($studentData['branch'])) {
+                $studentData['branch'] = json_decode($studentData['branch']);
             }
 
             return response()->json([
