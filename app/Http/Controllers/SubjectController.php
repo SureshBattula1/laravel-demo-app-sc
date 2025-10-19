@@ -13,33 +13,35 @@ class SubjectController extends Controller
     public function index(Request $request)
     {
         try {
-            $query = Subject::with(['department', 'teacher', 'branch']);
+            $query = Subject::with(['department', 'teacher', 'branch'])
+                ->leftJoin('grades', 'subjects.grade_level', '=', 'grades.value')
+                ->select('subjects.*', 'grades.label as grade_label');
 
             if ($request->branch_id) {
-                $query->where('branch_id', $request->branch_id);
+                $query->where('subjects.branch_id', $request->branch_id);
             }
 
             if ($request->department_id) {
-                $query->where('department_id', $request->department_id);
+                $query->where('subjects.department_id', $request->department_id);
             }
 
             if ($request->grade_level) {
-                $query->where('grade_level', strip_tags($request->grade_level));
+                $query->where('subjects.grade_level', strip_tags($request->grade_level));
             }
 
             if ($request->type) {
-                $query->where('type', strip_tags($request->type));
+                $query->where('subjects.type', strip_tags($request->type));
             }
 
             if ($request->search) {
                 $search = strip_tags($request->search);
                 $query->where(function($q) use ($search) {
-                    $q->where('name', 'like', '%' . $search . '%')
-                      ->orWhere('code', 'like', '%' . $search . '%');
+                    $q->where('subjects.name', 'like', '%' . $search . '%')
+                      ->orWhere('subjects.code', 'like', '%' . $search . '%');
                 });
             }
 
-            $subjects = $query->orderBy('name', 'asc')->get();
+            $subjects = $query->orderBy('subjects.name', 'asc')->get();
 
             return response()->json([
                 'success' => true,

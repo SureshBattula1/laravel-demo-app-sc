@@ -20,8 +20,21 @@ class StudentController extends Controller
             $query = DB::table('students')
                 ->join('users', 'students.user_id', '=', 'users.id')
                 ->leftJoin('branches', 'students.branch_id', '=', 'branches.id')
+                ->leftJoin('grades', 'students.grade', '=', 'grades.value')
                 ->select(
-                    'students.*',
+                    'students.id',
+                    'students.user_id',
+                    'students.branch_id',
+                    'students.admission_number',
+                    'students.admission_date',
+                    'students.roll_number',
+                    'students.grade',
+                    'grades.label as grade_label',
+                    'students.section',
+                    'students.academic_year',
+                    'students.date_of_birth',
+                    'students.gender',
+                    'students.student_status',
                     'users.first_name',
                     'users.last_name',
                     'users.email',
@@ -41,6 +54,10 @@ class StudentController extends Controller
 
             if ($request->has('status')) {
                 $query->where('students.student_status', $request->status);
+            }
+
+            if ($request->has('gender')) {
+                $query->where('students.gender', $request->gender);
             }
 
             if ($request->has('branch_id')) {
@@ -101,13 +118,52 @@ class StudentController extends Controller
             $student = DB::table('students')
                 ->join('users', 'students.user_id', '=', 'users.id')
                 ->leftJoin('branches', 'students.branch_id', '=', 'branches.id')
+                ->leftJoin('grades', 'students.grade', '=', 'grades.value')
                 ->where('students.id', $id)
                 ->select(
-                    'students.*', 
-                    'users.first_name', 
-                    'users.last_name', 
-                    'users.email', 
+                    'students.id',
+                    'students.user_id',
+                    'students.branch_id',
+                    'students.admission_number',
+                    'students.admission_date',
+                    'students.roll_number',
+                    'students.grade',
+                    'grades.label as grade_label',
+                    'students.section',
+                    'students.academic_year',
+                    'students.stream',
+                    'students.date_of_birth',
+                    'students.gender',
+                    'students.blood_group',
+                    'students.current_address',
+                    'students.city',
+                    'students.state',
+                    'students.country',
+                    'students.pincode',
+                    'students.parent_id',
+                    'students.father_name',
+                    'students.father_phone',
+                    'students.father_email',
+                    'students.father_occupation',
+                    'students.mother_name',
+                    'students.mother_phone',
+                    'students.mother_email',
+                    'students.mother_occupation',
+                    'students.emergency_contact_name',
+                    'students.emergency_contact_phone',
+                    'students.emergency_contact_relation',
+                    'students.previous_school',
+                    'students.previous_grade',
+                    'students.medical_history',
+                    'students.allergies',
+                    'students.student_status',
+                    'students.created_at',
+                    'students.updated_at',
+                    'users.first_name',
+                    'users.last_name',
+                    'users.email',
                     'users.phone',
+                    'users.is_active',
                     DB::raw('JSON_OBJECT("id", branches.id, "name", branches.name, "code", branches.code) as branch')
                 )
                 ->first();
@@ -122,15 +178,7 @@ class StudentController extends Controller
             // Convert to array and ensure all fields are present
             $studentData = (array) $student;
             
-            // Parse JSON fields if they exist
-            if (isset($studentData['elective_subjects']) && is_string($studentData['elective_subjects'])) {
-                $studentData['elective_subjects'] = json_decode($studentData['elective_subjects'], true);
-            }
-            
-            if (isset($studentData['documents']) && is_string($studentData['documents'])) {
-                $studentData['documents'] = json_decode($studentData['documents'], true);
-            }
-            
+            // Parse JSON branch field
             if (isset($studentData['branch']) && is_string($studentData['branch'])) {
                 $studentData['branch'] = json_decode($studentData['branch']);
             }
