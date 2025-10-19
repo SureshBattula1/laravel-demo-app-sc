@@ -91,7 +91,13 @@ class StudentController extends Controller
             $student = DB::table('students')
                 ->join('users', 'students.user_id', '=', 'users.id')
                 ->where('students.id', $id)
-                ->select('students.*', 'users.first_name', 'users.last_name', 'users.email', 'users.phone')
+                ->select(
+                    'students.*', 
+                    'users.first_name', 
+                    'users.last_name', 
+                    'users.email', 
+                    'users.phone'
+                )
                 ->first();
 
             if (!$student) {
@@ -101,13 +107,29 @@ class StudentController extends Controller
                 ], 404);
             }
 
+            // Convert to array and ensure all fields are present
+            $studentData = (array) $student;
+            
+            // Parse JSON fields if they exist
+            if (isset($studentData['elective_subjects']) && is_string($studentData['elective_subjects'])) {
+                $studentData['elective_subjects'] = json_decode($studentData['elective_subjects'], true);
+            }
+            
+            if (isset($studentData['documents']) && is_string($studentData['documents'])) {
+                $studentData['documents'] = json_decode($studentData['documents'], true);
+            }
+
             return response()->json([
                 'success' => true,
-                'data' => $student
+                'data' => $studentData
             ]);
 
         } catch (\Exception $e) {
-            Log::error('Get student error', ['error' => $e->getMessage()]);
+            Log::error('Get student error', [
+                'id' => $id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
             
             return response()->json([
                 'success' => false,

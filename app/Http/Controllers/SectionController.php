@@ -42,10 +42,12 @@ class SectionController extends Controller
 
             $sections = $query->orderBy('name', 'asc')->get();
 
-            // Enhance each section with grade details
+            // Enhance each section with grade details and actual student count
             $sections->each(function ($section) {
                 // Append grade_details accessor data
                 $section->append('grade_details');
+                // Override current_strength with actual count from students table
+                $section->current_strength = $section->actual_strength;
             });
 
             return response()->json([
@@ -149,8 +151,9 @@ class SectionController extends Controller
             $section = Section::with(['branch', 'classTeacher', 'class'])
                 ->findOrFail($id);
 
-            // Append grade details
+            // Append grade details and update current_strength with actual count
             $section->append('grade_details');
+            $section->current_strength = $section->actual_strength;
 
             return response()->json([
                 'success' => true,

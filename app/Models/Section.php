@@ -36,7 +36,7 @@ class Section extends Model
     /**
      * Attributes to append to JSON
      */
-    protected $appends = ['grade_label'];
+    protected $appends = ['grade_label', 'actual_strength'];
 
     /**
      * Get grade label (e.g., "Grade 5" instead of "5")
@@ -91,8 +91,23 @@ class Section extends Model
         return $this->belongsTo(User::class, 'class_teacher_id');
     }
 
+    /**
+     * Get actual student strength by counting students in this section
+     */
+    public function getActualStrengthAttribute(): int
+    {
+        return DB::table('students')
+            ->where('branch_id', $this->branch_id)
+            ->where('grade', $this->grade_level)
+            ->where('section', $this->name)
+            ->where('student_status', 'Active')
+            ->count();
+    }
+
     public function students()
     {
+        // Note: This relationship won't work with current schema where students have grade/section as strings
+        // Use the actualStrength accessor instead
         return $this->hasMany(User::class, 'section_id')->where('user_type', 'Student');
     }
 

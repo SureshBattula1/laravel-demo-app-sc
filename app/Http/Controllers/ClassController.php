@@ -323,9 +323,26 @@ class ClassController extends Controller
                     ->where('is_active', true)
                     ->get();
                 
-                // Get unique sections for this grade
-                $sections = $classes->pluck('section')
+                // Get unique sections from both classes and sections tables
+                $sectionsFromClasses = $classes->pluck('section')
                     ->filter()
+                    ->unique()
+                    ->values()
+                    ->toArray();
+                
+                // Get sections from the sections table for this grade
+                $sectionsFromSectionsTable = DB::table('sections')
+                    ->where('grade_level', $gradeRecord->value)
+                    ->where('is_active', true)
+                    ->whereNull('deleted_at')
+                    ->pluck('name')
+                    ->filter()
+                    ->unique()
+                    ->values()
+                    ->toArray();
+                
+                // Merge and get unique sections from both sources
+                $sections = collect(array_merge($sectionsFromClasses, $sectionsFromSectionsTable))
                     ->unique()
                     ->values()
                     ->toArray();
@@ -389,17 +406,15 @@ class ClassController extends Controller
                 ->count('class_teacher_id');
             
             // Calculate average attendance for this grade (last 30 days)
-            $averageAttendance = DB::table('attendance')
-                ->join('students', 'attendance.student_id', '=', 'students.id')
-                ->where('students.grade', $grade)
-                ->where('attendance.date', '>=', now()->subDays(30))
-                ->where('attendance.status', 'Present')
+            $averageAttendance = DB::table('student_attendance')
+                ->where('grade_level', $grade)
+                ->where('date', '>=', now()->subDays(30))
+                ->where('status', 'Present')
                 ->count();
             
-            $totalAttendanceRecords = DB::table('attendance')
-                ->join('students', 'attendance.student_id', '=', 'students.id')
-                ->where('students.grade', $grade)
-                ->where('attendance.date', '>=', now()->subDays(30))
+            $totalAttendanceRecords = DB::table('student_attendance')
+                ->where('grade_level', $grade)
+                ->where('date', '>=', now()->subDays(30))
                 ->count();
             
             $attendancePercentage = $totalAttendanceRecords > 0 
@@ -420,7 +435,8 @@ class ClassController extends Controller
         } catch (\Exception $e) {
             Log::error('Get grade stats error', [
                 'grade' => $grade,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
             ]);
             
             return response()->json([
