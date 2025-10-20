@@ -337,5 +337,19 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
         Route::put('/{id}', [ModuleController::class, 'update']);
         Route::delete('/{id}', [ModuleController::class, 'destroy']);
     });
+    
+    // Import Module - Data Import System
+    Route::prefix('imports')->group(function () {
+        Route::get('/modules', [App\Http\Controllers\ImportController::class, 'getModules']);
+        Route::get('/history', [App\Http\Controllers\ImportController::class, 'history']);
+        Route::get('/template/{entity}', [App\Http\Controllers\ImportController::class, 'downloadTemplate']);
+        
+        // Entity-specific import routes
+        Route::post('/{entity}/upload', [App\Http\Controllers\ImportController::class, 'upload']);
+        Route::post('/{entity}/validate/{batchId}', [App\Http\Controllers\ImportController::class, 'validate']);
+        Route::get('/{entity}/preview/{batchId}', [App\Http\Controllers\ImportController::class, 'preview']);
+        Route::post('/{entity}/commit/{batchId}', [App\Http\Controllers\ImportController::class, 'commit']);
+        Route::delete('/{entity}/cancel/{batchId}', [App\Http\Controllers\ImportController::class, 'cancel']);
+    });
 });
 
