@@ -65,6 +65,9 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     
     // Branch Routes - Enhanced Multi-Branch Management
     Route::prefix('branches')->group(function () {
+        // Get accessible branches for current user
+        Route::get('/accessible', [BranchController::class, 'getAccessibleBranches']);
+        
         // List and create
         Route::get('/', [BranchController::class, 'index']);
         Route::post('/', [BranchController::class, 'store']);

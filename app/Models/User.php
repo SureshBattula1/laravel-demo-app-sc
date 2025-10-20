@@ -196,4 +196,54 @@ class User extends Authenticatable
     {
         return $this->getAllPermissions($branchId)->pluck('slug')->toArray();
     }
+
+    /**
+     * Check if user has cross-branch access permission
+     * This allows them to bypass branch restrictions
+     */
+    public function hasCrossBranchAccess(): bool
+    {
+        // SuperAdmin always has cross-branch access
+        if ($this->isSuperAdmin()) {
+            return true;
+        }
+        
+        // Check for specific cross-branch permissions
+        return $this->hasAnyPermission([
+            'system.cross_branch_access',
+            'system.manage_all_branches',
+            'system.view_all_branches'
+        ]);
+    }
+    
+    /**
+     * Check if user can manage (edit/delete) across branches
+     */
+    public function canManageAllBranches(): bool
+    {
+        if ($this->isSuperAdmin()) {
+            return true;
+        }
+        
+        return $this->hasAnyPermission([
+            'system.cross_branch_access',
+            'system.manage_all_branches'
+        ]);
+    }
+    
+    /**
+     * Check if user can view all branches (read-only)
+     */
+    public function canViewAllBranches(): bool
+    {
+        if ($this->isSuperAdmin()) {
+            return true;
+        }
+        
+        return $this->hasAnyPermission([
+            'system.cross_branch_access',
+            'system.manage_all_branches',
+            'system.view_all_branches'
+        ]);
+    }
 }

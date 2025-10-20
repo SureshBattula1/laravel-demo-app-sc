@@ -22,9 +22,14 @@ class InvoiceController extends Controller
             $user = Auth::user();
             $query = Invoice::with(['branch', 'createdBy', 'items', 'transactions']);
 
-            // Role-based filtering
-            if ($user->role === 'BranchAdmin') {
-                $query->where('branch_id', $user->branch_id);
+            // 🔥 APPLY BRANCH FILTERING - Restrict to accessible branches
+            $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+            if ($accessibleBranchIds !== 'all') {
+                if (!empty($accessibleBranchIds)) {
+                    $query->whereIn('branch_id', $accessibleBranchIds);
+                } else {
+                    $query->whereRaw('1 = 0');
+                }
             }
 
             // Filters

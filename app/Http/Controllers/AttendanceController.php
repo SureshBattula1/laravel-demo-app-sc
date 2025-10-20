@@ -49,8 +49,18 @@ class AttendanceController extends Controller
                     );
             }
 
-            // Filters
-            if ($request->has('branch_id')) {
+            // 🔥 APPLY BRANCH FILTERING
+            $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+            if ($accessibleBranchIds !== 'all') {
+                if (!empty($accessibleBranchIds)) {
+                    $query->whereIn($type . '_attendance.branch_id', $accessibleBranchIds);
+                } else {
+                    $query->whereRaw('1 = 0');
+                }
+            }
+
+            // Filters (only allow if SuperAdmin/cross-branch user)
+            if ($request->has('branch_id') && $accessibleBranchIds === 'all') {
                 $query->where($type . '_attendance.branch_id', $request->branch_id);
             }
 

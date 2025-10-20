@@ -20,7 +20,17 @@ class FeeController extends Controller
         try {
             $query = FeeStructure::with(['branch', 'creator']);
 
-            if ($request->has('branch_id')) {
+            // 🔥 APPLY BRANCH FILTERING - Restrict to accessible branches
+            $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+            if ($accessibleBranchIds !== 'all') {
+                if (!empty($accessibleBranchIds)) {
+                    $query->whereIn('branch_id', $accessibleBranchIds);
+                } else {
+                    $query->whereRaw('1 = 0');
+                }
+            }
+
+            if ($request->has('branch_id') && $accessibleBranchIds === 'all') {
                 $query->where('branch_id', $request->branch_id);
             }
 

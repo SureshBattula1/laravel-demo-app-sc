@@ -23,7 +23,15 @@ class AccountController extends Controller
                 ->where('status', 'Approved')
                 ->where('financial_year', $financialYear);
 
-            if ($branchId) {
+            // 🔥 APPLY BRANCH FILTERING - Restrict to accessible branches
+            $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+            if ($accessibleBranchIds !== 'all') {
+                if (!empty($accessibleBranchIds)) {
+                    $query->whereIn('branch_id', $accessibleBranchIds);
+                } else {
+                    $query->whereRaw('1 = 0');
+                }
+            } elseif ($branchId) {
                 $query->where('branch_id', $branchId);
             }
 

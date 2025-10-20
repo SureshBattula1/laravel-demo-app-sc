@@ -23,8 +23,18 @@ class SubjectController extends Controller
                 ->leftJoin('grades', 'subjects.grade_level', '=', 'grades.value')
                 ->select('subjects.*', 'grades.label as grade_label');
 
-            // Filter by branch
-            if ($request->has('branch_id')) {
+            // 🔥 APPLY BRANCH FILTERING - Restrict to accessible branches
+            $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+            if ($accessibleBranchIds !== 'all') {
+                if (!empty($accessibleBranchIds)) {
+                    $query->whereIn('subjects.branch_id', $accessibleBranchIds);
+                } else {
+                    $query->whereRaw('1 = 0');
+                }
+            }
+
+            // Filter by branch (only allow if SuperAdmin/cross-branch user)
+            if ($request->has('branch_id') && $accessibleBranchIds === 'all') {
                 $query->where('subjects.branch_id', $request->branch_id);
             }
 

@@ -888,4 +888,55 @@ class BranchController extends Controller
             ], 500);
         }
     }
+
+    /**
+     * Get branches accessible to current user
+     * This endpoint is used by frontend to populate branch selectors
+     */
+    public function getAccessibleBranches(Request $request)
+    {
+        try {
+            $user = $request->user();
+            
+            $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+            
+            // SuperAdmin or users with cross-branch permission see all branches
+            if ($accessibleBranchIds === 'all') {
+                $branches = Branch::where('is_active', true)
+                    ->orderBy('name')
+                    ->get();
+            } else {
+                $branches = Branch::whereIn('id', $accessibleBranchIds)
+                    ->where('is_active', true)
+                    ->orderBy('name')
+                    ->get();
+            }
+            
+            // Include permission info for frontend
+            $canSelectBranch = $user->role === 'SuperAdmin' 
+                            || $user->role === 'BranchAdmin' 
+                            || $user->hasCrossBranchAccess();
+            
+            return response()->json([
+                'success' => true,
+                'data' => $branches,
+                'user_branch_id' => $user->branch_id,
+                'user_role' => $user->role,
+                'can_select_branch' => $canSelectBranch,
+                'has_cross_branch_access' => $user->hasCrossBranchAccess(),
+                'can_manage_all_branches' => $user->canManageAllBranches(),
+                'can_view_all_branches' => $user->canViewAllBranches(),
+                'accessible_branch_ids' => $accessibleBranchIds === 'all' ? 'all' : $accessibleBranchIds
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::error('Get accessible branches error', ['error' => $e->getMessage()]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch branches',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+            ], 500);
+        }
+    }
 }

@@ -47,6 +47,19 @@ class StudentController extends Controller
                     DB::raw('JSON_OBJECT("id", branches.id, "name", branches.name, "code", branches.code) as branch')
                 );
 
+            // 🔥 APPLY BRANCH FILTERING - This restricts data based on user's branch access
+            $user = $request->user();
+            $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+            
+            if ($accessibleBranchIds !== 'all') {
+                if (!empty($accessibleBranchIds)) {
+                    $query->whereIn('students.branch_id', $accessibleBranchIds);
+                } else {
+                    // No accessible branches - return empty result
+                    $query->whereRaw('1 = 0');
+                }
+            }
+
             // Apply filters
             if ($request->has('grade')) {
                 $query->where('students.grade', $request->grade);
@@ -137,15 +150,27 @@ class StudentController extends Controller
     /**
      * Get single student by ID
      */
-    public function show($id)
+    public function show(Request $request, $id)
     {
         try {
-            $student = DB::table('students')
+            // Build query
+            $query = DB::table('students')
                 ->join('users', 'students.user_id', '=', 'users.id')
                 ->leftJoin('branches', 'students.branch_id', '=', 'branches.id')
                 ->leftJoin('grades', 'students.grade', '=', 'grades.value')
-                ->where('students.id', $id)
-                ->select(
+                ->where('students.id', $id);
+            
+            // 🔥 APPLY BRANCH FILTERING - Prevent access to other branches
+            $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+            if ($accessibleBranchIds !== 'all') {
+                if (!empty($accessibleBranchIds)) {
+                    $query->whereIn('students.branch_id', $accessibleBranchIds);
+                } else {
+                    $query->whereRaw('1 = 0');
+                }
+            }
+            
+            $student = $query->select(
                     'students.id',
                     'students.user_id',
                     'students.branch_id',

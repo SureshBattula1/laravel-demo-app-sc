@@ -21,8 +21,18 @@ class TeacherController extends Controller
         try {
             $query = User::with('branch')->where('role', 'Teacher');
 
-            // Filter by branch
-            if ($request->has('branch_id')) {
+            // 🔥 APPLY BRANCH FILTERING - Restrict to accessible branches
+            $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+            if ($accessibleBranchIds !== 'all') {
+                if (!empty($accessibleBranchIds)) {
+                    $query->whereIn('branch_id', $accessibleBranchIds);
+                } else {
+                    $query->whereRaw('1 = 0');
+                }
+            }
+
+            // Filter by branch (only if SuperAdmin/cross-branch user)
+            if ($request->has('branch_id') && $accessibleBranchIds === 'all') {
                 $query->where('branch_id', $request->branch_id);
             }
 

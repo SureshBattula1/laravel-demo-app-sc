@@ -21,8 +21,18 @@ class SectionController extends Controller
         try {
             $query = Section::with(['branch', 'classTeacher', 'class']);
 
-            // Filters
-            if ($request->has('branch_id')) {
+            // 🔥 APPLY BRANCH FILTERING - Restrict to accessible branches
+            $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+            if ($accessibleBranchIds !== 'all') {
+                if (!empty($accessibleBranchIds)) {
+                    $query->whereIn('branch_id', $accessibleBranchIds);
+                } else {
+                    $query->whereRaw('1 = 0');
+                }
+            }
+
+            // Filters (only allow if SuperAdmin/cross-branch user)
+            if ($request->has('branch_id') && $accessibleBranchIds === 'all') {
                 $query->where('branch_id', $request->branch_id);
             }
 

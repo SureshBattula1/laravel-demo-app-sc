@@ -20,11 +20,12 @@ class HolidayController extends Controller
             $user = Auth::user();
             $query = Holiday::with(['branch', 'createdBy']);
 
-            // Role-based filtering
-            if ($user->role === 'BranchAdmin') {
-                // Branch admin sees: their branch holidays + national/state holidays
-                $query->where(function($q) use ($user) {
-                    $q->where('branch_id', $user->branch_id)
+            // 🔥 APPLY BRANCH FILTERING - Restrict to accessible branches
+            $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+            if ($accessibleBranchIds !== 'all') {
+                // Show: user's branch holidays + national/state holidays (no branch)
+                $query->where(function($q) use ($accessibleBranchIds) {
+                    $q->whereIn('branch_id', $accessibleBranchIds)
                       ->orWhereNull('branch_id')
                       ->orWhereIn('type', ['National', 'State']);
                 });
