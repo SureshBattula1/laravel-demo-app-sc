@@ -194,6 +194,7 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     Route::get('students/{studentId}/fees', [FeeController::class, 'getStudentFees']);
     
     // Attendance Routes (specific routes MUST come before apiResource)
+    Route::get('attendance/export', [AttendanceController::class, 'export']);
     Route::post('attendance/bulk', [AttendanceController::class, 'markBulk']);
     Route::get('attendance/report', [AttendanceController::class, 'getReport']);
     Route::get('attendance/student/{studentId}', [AttendanceController::class, 'getStudentAttendance']);

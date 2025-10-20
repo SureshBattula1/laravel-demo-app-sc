@@ -8,6 +8,11 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Carbon\Carbon;
+use App\Exports\AttendanceExport;
+use App\Services\PdfExportService;
+use App\Services\CsvExportService;
+use App\Services\ExportService;
+use Maatwebsite\Excel\Facades\Excel;
 
 class AttendanceController extends Controller
 {
@@ -812,5 +817,192 @@ class AttendanceController extends Controller
 
     public function destroy($id) {
         return response()->json(['message' => 'Attendance deletion not allowed'], 400);
+    }
+
+    /**
+     * Export attendance data
+     * Supports Excel, PDF, and CSV formats
+     * Reusable for both student and teacher attendance
+     */
+    public function export(Request $request)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'format' => 'required|in:excel,pdf,csv',
+                'type' => 'required|in:student,teacher',
+                'columns' => 'nullable|array',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            $type = $request->type; // 'student' or 'teacher'
+            $format = $request->format;
+            $columns = $request->columns; // Custom columns if provided
+
+            // Build query with same filters as index method
+            $query = $this->buildAttendanceQuery($request, $type);
+
+            // Get all matching records (respecting filters but not pagination)
+            $attendanceRecords = $query->get();
+
+            // Export based on format
+            return match($format) {
+                'excel' => $this->exportExcel($attendanceRecords, $type, $columns),
+                'pdf' => $this->exportPdf($attendanceRecords, $type, $columns),
+                'csv' => $this->exportCsv($attendanceRecords, $type, $columns),
+            };
+
+        } catch (\Exception $e) {
+            Log::error('Export attendance error', ['error' => $e->getMessage()]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to export attendance',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Build attendance query with filters (reusable for index and export)
+     */
+    protected function buildAttendanceQuery(Request $request, string $type)
+    {
+        if ($type === 'student') {
+            $query = DB::table('student_attendance')
+                ->join('students', 'student_attendance.student_id', '=', 'students.user_id')
+                ->join('users', 'students.user_id', '=', 'users.id')
+                ->leftJoin('grades', 'students.grade', '=', 'grades.value')
+                ->select(
+                    'student_attendance.*',
+                    'users.first_name',
+                    'users.last_name',
+                    'users.email',
+                    'students.admission_number',
+                    'students.grade',
+                    'grades.label as grade_label',
+                    'students.section'
+                );
+        } else {
+            $query = DB::table('teacher_attendance')
+                ->join('users', 'teacher_attendance.teacher_id', '=', 'users.id')
+                ->leftJoin('teachers', 'users.id', '=', 'teachers.user_id')
+                ->select(
+                    'teacher_attendance.*',
+                    'users.first_name',
+                    'users.last_name',
+                    'users.email',
+                    'teachers.employee_id'
+                );
+        }
+
+        // Apply branch filtering
+        $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+        if ($accessibleBranchIds !== 'all') {
+            if (!empty($accessibleBranchIds)) {
+                $query->whereIn($type . '_attendance.branch_id', $accessibleBranchIds);
+            } else {
+                $query->whereRaw('1 = 0');
+            }
+        }
+
+        // Apply filters
+        if ($request->has('branch_id') && $accessibleBranchIds === 'all') {
+            $query->where($type . '_attendance.branch_id', $request->branch_id);
+        }
+
+        if ($request->has('date')) {
+            $query->whereDate($type . '_attendance.date', $request->date);
+        }
+
+        if ($request->has('from_date')) {
+            $query->whereDate($type . '_attendance.date', '>=', $request->from_date);
+        }
+
+        if ($request->has('to_date')) {
+            $query->whereDate($type . '_attendance.date', '<=', $request->to_date);
+        }
+
+        if ($request->has('status')) {
+            $query->where($type . '_attendance.status', $request->status);
+        }
+
+        if ($type === 'student') {
+            if ($request->has('grade')) {
+                $query->where('students.grade', $request->grade);
+            }
+            if ($request->has('section')) {
+                $query->where('students.section', $request->section);
+            }
+        }
+
+        // Search filter
+        if ($request->has('search') && !empty($request->search)) {
+            $search = strip_tags($request->search);
+            $query->where(function($q) use ($search, $type) {
+                $q->where('users.first_name', 'like', '%' . $search . '%')
+                  ->orWhere('users.last_name', 'like', '%' . $search . '%')
+                  ->orWhere('users.email', 'like', '%' . $search . '%');
+                
+                if ($type === 'student') {
+                    $q->orWhere('students.admission_number', 'like', '%' . $search . '%');
+                }
+            });
+        }
+
+        return $query;
+    }
+
+    /**
+     * Export to Excel
+     */
+    protected function exportExcel($data, string $type, ?array $columns)
+    {
+        $export = new AttendanceExport(collect($data), $type, $columns);
+        $module = $type === 'student' ? 'student_attendance' : 'teacher_attendance';
+        $filename = (new ExportService($module))->generateFilename('xlsx');
+        
+        return Excel::download($export, $filename);
+    }
+
+    /**
+     * Export to PDF
+     */
+    protected function exportPdf($data, string $type, ?array $columns)
+    {
+        $module = $type === 'student' ? 'student_attendance' : 'teacher_attendance';
+        $pdfService = new PdfExportService($module);
+        
+        if ($columns) {
+            $pdfService->setColumns($columns);
+        }
+        
+        $title = $type === 'student' ? 'Student Attendance Report' : 'Teacher Attendance Report';
+        $pdf = $pdfService->generate(collect($data), $title);
+        $filename = (new ExportService($module))->generateFilename('pdf');
+        
+        return $pdf->download($filename);
+    }
+
+    /**
+     * Export to CSV
+     */
+    protected function exportCsv($data, string $type, ?array $columns)
+    {
+        $module = $type === 'student' ? 'student_attendance' : 'teacher_attendance';
+        $csvService = new CsvExportService($module);
+        
+        if ($columns) {
+            $csvService->setColumns($columns);
+        }
+        
+        $filename = (new ExportService($module))->generateFilename('csv');
+        
+        return $csvService->generate(collect($data), $filename);
     }
 }

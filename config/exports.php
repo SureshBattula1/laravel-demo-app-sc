@@ -148,6 +148,146 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Student Attendance Export Configuration
+    |--------------------------------------------------------------------------
+    */
+    
+    'student_attendance' => [
+        'columns' => [
+            'id' => [
+                'label' => 'ID',
+                'enabled' => false,
+                'width' => 10,
+            ],
+            'date' => [
+                'label' => 'Date',
+                'enabled' => true,
+                'width' => 15,
+                'format' => 'date',
+            ],
+            'admission_number' => [
+                'label' => 'Admission No.',
+                'enabled' => true,
+                'width' => 18,
+            ],
+            'first_name' => [
+                'label' => 'First Name',
+                'enabled' => true,
+                'width' => 18,
+            ],
+            'last_name' => [
+                'label' => 'Last Name',
+                'enabled' => true,
+                'width' => 18,
+            ],
+            'email' => [
+                'label' => 'Email',
+                'enabled' => true,
+                'width' => 25,
+            ],
+            'grade_label' => [
+                'label' => 'Grade',
+                'enabled' => true,
+                'width' => 15,
+            ],
+            'section' => [
+                'label' => 'Section',
+                'enabled' => true,
+                'width' => 12,
+            ],
+            'status' => [
+                'label' => 'Status',
+                'enabled' => true,
+                'width' => 15,
+            ],
+            'remarks' => [
+                'label' => 'Remarks',
+                'enabled' => true,
+                'width' => 30,
+            ],
+            'marked_by' => [
+                'label' => 'Marked By',
+                'enabled' => true,
+                'width' => 20,
+            ],
+            'academic_year' => [
+                'label' => 'Academic Year',
+                'enabled' => false,
+                'width' => 15,
+            ],
+            'created_at' => [
+                'label' => 'Created At',
+                'enabled' => false,
+                'width' => 18,
+                'format' => 'datetime',
+            ],
+        ],
+        'filename_prefix' => 'student_attendance',
+        'sheet_name' => 'Student Attendance',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Teacher Attendance Export Configuration
+    |--------------------------------------------------------------------------
+    */
+    
+    'teacher_attendance' => [
+        'columns' => [
+            'id' => [
+                'label' => 'ID',
+                'enabled' => false,
+                'width' => 10,
+            ],
+            'date' => [
+                'label' => 'Date',
+                'enabled' => true,
+                'width' => 15,
+                'format' => 'date',
+            ],
+            'employee_id' => [
+                'label' => 'Employee ID',
+                'enabled' => true,
+                'width' => 18,
+            ],
+            'first_name' => [
+                'label' => 'First Name',
+                'enabled' => true,
+                'width' => 18,
+            ],
+            'last_name' => [
+                'label' => 'Last Name',
+                'enabled' => true,
+                'width' => 18,
+            ],
+            'email' => [
+                'label' => 'Email',
+                'enabled' => true,
+                'width' => 25,
+            ],
+            'status' => [
+                'label' => 'Status',
+                'enabled' => true,
+                'width' => 15,
+            ],
+            'remarks' => [
+                'label' => 'Remarks',
+                'enabled' => true,
+                'width' => 30,
+            ],
+            'created_at' => [
+                'label' => 'Created At',
+                'enabled' => false,
+                'width' => 18,
+                'format' => 'datetime',
+            ],
+        ],
+        'filename_prefix' => 'teacher_attendance',
+        'sheet_name' => 'Teacher Attendance',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Global Export Settings
     |--------------------------------------------------------------------------
     */
