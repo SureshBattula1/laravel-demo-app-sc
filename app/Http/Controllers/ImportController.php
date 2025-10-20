@@ -74,18 +74,61 @@ class ImportController extends Controller
     public function upload(Request $request, string $entity)
     {
         try {
+            // 🔥 Debug logging
+            $file = $request->file('file');
+            Log::info('Import upload request received', [
+                'entity' => $entity,
+                'has_file' => $request->hasFile('file'),
+                'file_name' => $file ? $file->getClientOriginalName() : null,
+                'file_extension' => $file ? $file->getClientOriginalExtension() : null,
+                'file_mime' => $file ? $file->getMimeType() : null,
+                'file_size' => $file ? $file->getSize() : null,
+                'branch_id' => $request->input('branch_id'),
+                'grade' => $request->input('grade'),
+                'section' => $request->input('section'),
+                'academic_year' => $request->input('academic_year'),
+                'content_type' => $request->header('Content-Type'),
+                'all_inputs' => $request->except(['file'])
+            ]);
+
             $validator = Validator::make($request->all(), [
-                'file' => 'required|file|mimes:xlsx,xls,csv|max:10240', // 10MB max
+                'file' => 'required|file|max:10240', // 10MB max - Accept any file type for now
                 'branch_id' => 'required|exists:branches,id',
-                'grade' => $entity === 'student' ? 'required|string' : 'nullable',
+                'grade' => $entity === 'student' ? 'required|string' : 'nullable|string',
                 'section' => 'nullable|string',
-                'academic_year' => $entity === 'student' ? 'required|string' : 'nullable',
+                'academic_year' => $entity === 'student' ? 'required|string' : 'nullable|string',
+            ], [
+                'file.required' => 'Please select an Excel file to upload',
+                'file.mimes' => 'File must be Excel format (.xlsx, .xls) or CSV (.csv)',
+                'file.file' => 'The uploaded file is invalid',
+                'branch_id.required' => 'Branch is required',
+                'branch_id.exists' => 'Selected branch does not exist',
+                'grade.required' => 'Grade is required for student import',
+                'academic_year.required' => 'Academic year is required for student import',
             ]);
 
             if ($validator->fails()) {
+                Log::error('Import validation failed', [
+                    'errors' => $validator->errors()->toArray()
+                ]);
                 return response()->json([
                     'success' => false,
                     'errors' => $validator->errors(),
+                ], 422);
+            }
+
+            // 🔥 Additional file extension check (more flexible than MIME type)
+            $file = $request->file('file');
+            $extension = strtolower($file->getClientOriginalExtension());
+            $allowedExtensions = ['xlsx', 'xls', 'csv'];
+            
+            if (!in_array($extension, $allowedExtensions)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => "Invalid file type. Please upload Excel (.xlsx, .xls) or CSV (.csv) files only.",
+                    'errors' => [
+                        'file' => ["File extension '{$extension}' is not allowed. Use: " . implode(', ', $allowedExtensions)]
+                    ]
                 ], 422);
             }
 
@@ -108,15 +151,53 @@ class ImportController extends Controller
             );
 
             // Store file temporarily
-            $path = $file->storeAs('imports/temp', $importHistory->batch_id . '.' . $file->getClientOriginalExtension());
+            $storedFileName = $importHistory->batch_id . '.' . $file->getClientOriginalExtension();
+            
+            // 🔥 Get file info BEFORE moving (after move, original is gone)
+            $originalFileName = $file->getClientOriginalName();
+            $originalFileSize = $file->getSize();
+            
+            // 🔥 Ensure directory exists and is writable
+            $tempDir = storage_path('app' . DIRECTORY_SEPARATOR . 'imports' . DIRECTORY_SEPARATOR . 'temp');
+            if (!is_dir($tempDir)) {
+                mkdir($tempDir, 0775, true);
+            }
+            
+            // 🔥 Use direct file move instead of Storage facade
+            $fullPath = $tempDir . DIRECTORY_SEPARATOR . $storedFileName;
+            
+            try {
+                $file->move($tempDir, $storedFileName);
+            } catch (\Exception $e) {
+                Log::error('File move failed', [
+                    'error' => $e->getMessage(),
+                    'temp_dir' => $tempDir,
+                    'target_file' => $storedFileName,
+                    'is_writable' => is_writable($tempDir)
+                ]);
+                throw new \Exception('Failed to store file: ' . $e->getMessage());
+            }
+            
+            Log::info('File stored successfully', [
+                'batch_id' => $importHistory->batch_id,
+                'full_path' => $fullPath,
+                'file_exists' => file_exists($fullPath),
+                'file_size' => file_exists($fullPath) ? filesize($fullPath) : 0,
+                'stored_filename' => $storedFileName,
+                'directory_writable' => is_writable($tempDir)
+            ]);
+            
+            if (!file_exists($fullPath)) {
+                throw new \Exception('File upload failed - file not found after storage');
+            }
 
             return response()->json([
                 'success' => true,
                 'message' => 'File uploaded successfully',
                 'data' => [
                     'batch_id' => $importHistory->batch_id,
-                    'file_name' => $file->getClientOriginalName(),
-                    'file_size' => $file->getSize(),
+                    'file_name' => $originalFileName,
+                    'file_size' => $originalFileSize,
                     'status' => 'uploaded',
                 ],
             ], 201);
@@ -145,12 +226,35 @@ class ImportController extends Controller
             ]);
 
             // Read and parse Excel file
-            $filePath = storage_path('app/imports/temp/' . $batchId . '.' . pathinfo($importHistory->file_name, PATHINFO_EXTENSION));
+            // 🔥 Construct path properly for Windows/Linux
+            $extension = pathinfo($importHistory->file_name, PATHINFO_EXTENSION);
+            $storedFileName = $batchId . '.' . $extension;
+            $filePath = storage_path('app') . DIRECTORY_SEPARATOR . 'imports' . DIRECTORY_SEPARATOR . 'temp' . DIRECTORY_SEPARATOR . $storedFileName;
+
+            // 🔥 Debug logging
+            $tempDir = storage_path('app') . DIRECTORY_SEPARATOR . 'imports' . DIRECTORY_SEPARATOR . 'temp';
+            Log::info('Looking for import file', [
+                'batch_id' => $batchId,
+                'original_filename' => $importHistory->file_name,
+                'extension' => $extension,
+                'stored_filename' => $storedFileName,
+                'looking_at_path' => $filePath,
+                'file_exists' => file_exists($filePath),
+                'temp_directory' => $tempDir,
+                'temp_dir_exists' => is_dir($tempDir),
+                'files_in_temp' => is_dir($tempDir) ? scandir($tempDir) : 'Directory not found'
+            ]);
 
             if (!file_exists($filePath)) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Upload file not found',
+                    'debug' => [
+                        'expected_path' => $filePath,
+                        'batch_id' => $batchId,
+                        'original_filename' => $importHistory->file_name,
+                        'files_in_temp' => is_dir($tempDir) ? scandir($tempDir) : []
+                    ]
                 ], 404);
             }
 
@@ -212,17 +316,37 @@ class ImportController extends Controller
             $perPage = $request->get('per_page', 25);
             $status = $request->get('status'); // 'valid', 'invalid', 'all'
 
+            // 🔥 Debug logging
+            Log::info('Preview request received', [
+                'entity' => $entity,
+                'batch_id' => $batchId,
+                'status_filter' => $status,
+                'per_page' => $perPage,
+                'page' => $request->get('page', 1)
+            ]);
+
             $model = $entity === 'student' ? StudentImport::class : TeacherImport::class;
 
             $query = $model::where('batch_id', $batchId);
 
             if ($status === 'valid') {
                 $query->valid();
+                Log::info('Filtering for VALID records only');
             } elseif ($status === 'invalid') {
                 $query->invalid();
+                Log::info('Filtering for INVALID records only');
+            } else {
+                Log::info('Showing ALL records (no status filter)');
             }
 
             $records = $query->orderBy('row_number')->paginate($perPage);
+            
+            // 🔥 Debug the results
+            Log::info('Preview results', [
+                'status_filter_applied' => $status,
+                'records_returned' => $records->count(),
+                'total_in_page' => $records->total()
+            ]);
 
             // Get summary
             $summary = [

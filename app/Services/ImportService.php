@@ -105,12 +105,14 @@ class ImportService
 
             // Basic field validation
             $validator = Validator::make($record->toArray(), [
+                'branch_id' => 'required|exists:branches,id', // 🔥 Added branch_id validation
                 'first_name' => 'required|string|max:255',
                 'last_name' => 'required|string|max:255',
                 'email' => 'required|email|max:255',
                 'admission_number' => 'required|string|max:255',
                 'admission_date' => 'required|date',
                 'grade' => 'required|string',
+                'section' => 'nullable|string', // 🔥 Section is optional (not required)
                 'academic_year' => 'required|string',
                 'date_of_birth' => 'required|date|before:today',
                 'gender' => 'required|in:Male,Female,Other',
@@ -138,6 +140,11 @@ class ImportService
                     $errors[] = "Email '{$record->email}' already exists in the system";
                 }
 
+                // 🔥 Check phone uniqueness
+                if ($record->phone && User::where('phone', $record->phone)->exists()) {
+                    $errors[] = "Phone number '{$record->phone}' already exists in the system";
+                }
+
                 // Check admission number uniqueness
                 if (DB::table('students')->where('admission_number', $record->admission_number)->exists()) {
                     $errors[] = "Admission number '{$record->admission_number}' already exists";
@@ -150,7 +157,19 @@ class ImportService
                     ->exists();
 
                 if ($duplicateInBatch) {
-                    $errors[] = "Duplicate email '{$record->email}' found in row " . $record->row_number;
+                    $errors[] = "Duplicate email '{$record->email}' found in this import";
+                }
+                
+                // 🔥 Check phone uniqueness within this batch
+                if ($record->phone) {
+                    $duplicatePhoneInBatch = StudentImport::where('batch_id', $batchId)
+                        ->where('phone', $record->phone)
+                        ->where('id', '!=', $record->id)
+                        ->exists();
+
+                    if ($duplicatePhoneInBatch) {
+                        $errors[] = "Duplicate phone '{$record->phone}' found in this import";
+                    }
                 }
 
                 // Validate age for grade
@@ -177,9 +196,10 @@ class ImportService
                     $sectionExists = DB::table('sections')
                         ->where('branch_id', $record->branch_id)
                         ->where('name', $record->section)
+                        ->where('grade_level', $record->grade) // 🔥 Also check grade matches
                         ->exists();
                     if (!$sectionExists) {
-                        $warnings[] = "Section '{$record->section}' not found for this branch";
+                        $warnings[] = "Section '{$record->section}' not found for Branch ID {$record->branch_id}, Grade {$record->grade}";
                     }
                 }
             }
@@ -348,13 +368,13 @@ class ImportService
                     ]);
 
                     // Create student record
-                    $studentId = DB::table('students')->insertGetId([
+                    // ✅ Only include columns that exist in the students table
+                    $studentData = [
                         'user_id' => $user->id,
                         'branch_id' => $record->branch_id,
                         'admission_number' => $record->admission_number,
                         'admission_date' => $record->admission_date,
                         'roll_number' => $record->roll_number,
-                        'registration_number' => $record->registration_number,
                         'grade' => $record->grade,
                         'section' => $record->section,
                         'academic_year' => $record->academic_year,
@@ -376,33 +396,23 @@ class ImportService
                         'father_phone' => $record->father_phone,
                         'father_email' => $record->father_email,
                         'father_occupation' => $record->father_occupation,
-                        'father_annual_income' => $record->father_annual_income,
                         'mother_name' => $record->mother_name,
                         'mother_phone' => $record->mother_phone,
                         'mother_email' => $record->mother_email,
                         'mother_occupation' => $record->mother_occupation,
-                        'mother_annual_income' => $record->mother_annual_income,
-                        'guardian_name' => $record->guardian_name,
-                        'guardian_relation' => $record->guardian_relation,
-                        'guardian_phone' => $record->guardian_phone,
                         'emergency_contact_name' => $record->emergency_contact_name,
                         'emergency_contact_phone' => $record->emergency_contact_phone,
                         'emergency_contact_relation' => $record->emergency_contact_relation,
                         'previous_school' => $record->previous_school,
                         'previous_grade' => $record->previous_grade,
-                        'previous_percentage' => $record->previous_percentage,
-                        'transfer_certificate_number' => $record->transfer_certificate_number,
                         'medical_history' => $record->medical_history,
                         'allergies' => $record->allergies,
-                        'medications' => $record->medications,
-                        'height_cm' => $record->height_cm,
-                        'weight_kg' => $record->weight_kg,
                         'student_status' => 'Active',
-                        'admission_status' => 'Admitted',
-                        'remarks' => $record->remarks,
                         'created_at' => now(),
                         'updated_at' => now(),
-                    ]);
+                    ];
+                    
+                    $studentId = DB::table('students')->insertGetId($studentData);
 
                     // Update user with student ID
                     $user->update(['user_type_id' => $studentId]);
