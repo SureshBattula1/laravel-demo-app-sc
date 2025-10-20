@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Facades\DB;
 
 class Branch extends Model
 {
@@ -80,16 +81,37 @@ class Branch extends Model
     }
 
     // Get all descendant branch IDs (including self)
+    // ✅ OPTIMIZED: Uses recursive CTE for 1 query instead of N queries
     public function getDescendantIds($includesSelf = true)
     {
-        $ids = $includesSelf ? [$this->id] : [];
+        // Use recursive Common Table Expression (CTE) for efficiency
+        // This replaces the N+1 recursive approach with a single query
+        $descendants = DB::select("
+            WITH RECURSIVE branch_tree AS (
+                -- Anchor: Start with child branches
+                SELECT id, parent_branch_id
+                FROM branches
+                WHERE parent_branch_id = ?
+                AND deleted_at IS NULL
+                
+                UNION ALL
+                
+                -- Recursive: Get children of children
+                SELECT b.id, b.parent_branch_id
+                FROM branches b
+                INNER JOIN branch_tree bt ON b.parent_branch_id = bt.id
+                WHERE b.deleted_at IS NULL
+            )
+            SELECT id FROM branch_tree
+        ", [$this->id]);
         
-        foreach ($this->childBranches as $child) {
-            $ids[] = $child->id;
-            $ids = array_merge($ids, $child->getDescendantIds(false));
+        $ids = collect($descendants)->pluck('id')->toArray();
+        
+        if ($includesSelf) {
+            array_unshift($ids, $this->id);
         }
         
-        return array_unique($ids);
+        return $ids;
     }
 
     // User relationships
