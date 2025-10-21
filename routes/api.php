@@ -124,6 +124,7 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     Route::get('teachers/{id}', [TeacherController::class, 'show']);
     Route::put('teachers/{id}', [TeacherController::class, 'update']);
     Route::delete('teachers/{id}', [TeacherController::class, 'destroy']);
+    Route::post('teachers/{id}/upload-profile-picture', [TeacherController::class, 'uploadProfilePicture']);
     
     // Student Routes
     Route::get('students', [StudentController::class, 'index']);
