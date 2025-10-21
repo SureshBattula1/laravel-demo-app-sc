@@ -288,6 +288,11 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
         Route::delete('/{id}', [UserController::class, 'destroy']);
         Route::patch('/{id}/toggle-status', [UserController::class, 'toggleStatus']);
         Route::post('/{id}/reset-password', [UserController::class, 'resetPassword']);
+        
+        // Permission Management for Users
+        Route::get('/{id}/permissions', [UserController::class, 'getPermissions']);
+        Route::post('/{id}/permissions', [UserController::class, 'updatePermissions']);
+        Route::post('/{id}/roles', [UserController::class, 'assignRoles']);
     });
     
     // Roles Management

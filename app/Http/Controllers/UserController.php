@@ -276,5 +276,239 @@ class UserController extends Controller
             'message' => 'Password reset successfully'
         ]);
     }
+
+    /**
+     * Get user's permissions (from roles + user-specific overrides)
+     */
+    public function getPermissions($id)
+    {
+        $user = User::with(['roles.permissions', 'permissions'])->findOrFail($id);
+
+        // Get all permissions with their status
+        $allPermissions = DB::table('permissions')
+            ->join('modules', 'permissions.module_id', '=', 'modules.id')
+            ->select(
+                'permissions.id',
+                'permissions.name',
+                'permissions.slug',
+                'permissions.action',
+                'modules.name as module_name',
+                'modules.slug as module_slug',
+                'modules.icon as module_icon',
+                'modules.order as module_order'
+            )
+            ->orderBy('modules.order')
+            ->orderBy('permissions.id')
+            ->get();
+
+        // Get permissions from roles
+        $rolePermissionIds = DB::table('role_permissions')
+            ->join('user_roles', 'role_permissions.role_id', '=', 'user_roles.role_id')
+            ->where('user_roles.user_id', $id)
+            ->pluck('role_permissions.permission_id')
+            ->unique()
+            ->toArray();
+
+        // Get user-specific permission overrides
+        $userPermissions = DB::table('user_permissions')
+            ->where('user_id', $id)
+            ->get()
+            ->keyBy('permission_id');
+
+        // Build permission list with status
+        $permissionsData = [];
+        foreach ($allPermissions as $permission) {
+            $hasFromRole = in_array($permission->id, $rolePermissionIds);
+            $userOverride = $userPermissions->get($permission->id);
+
+            // Determine final status
+            $granted = $hasFromRole; // Default from role
+            $overridden = false;
+
+            if ($userOverride) {
+                $granted = (bool) $userOverride->granted;
+                $overridden = true;
+            }
+
+            $permissionsData[] = [
+                'id' => $permission->id,
+                'name' => $permission->name,
+                'slug' => $permission->slug,
+                'action' => $permission->action,
+                'module_name' => $permission->module_name,
+                'module_slug' => $permission->module_slug,
+                'module_icon' => $permission->module_icon,
+                'module_order' => $permission->module_order,
+                'granted' => $granted,
+                'from_role' => $hasFromRole,
+                'overridden' => $overridden,
+            ];
+        }
+
+        // Group by module
+        $groupedPermissions = [];
+        foreach ($permissionsData as $perm) {
+            $moduleSlug = $perm['module_slug'];
+            if (!isset($groupedPermissions[$moduleSlug])) {
+                $groupedPermissions[$moduleSlug] = [
+                    'module_name' => $perm['module_name'],
+                    'module_slug' => $moduleSlug,
+                    'module_icon' => $perm['module_icon'],
+                    'module_order' => $perm['module_order'],
+                    'permissions' => []
+                ];
+            }
+            $groupedPermissions[$moduleSlug]['permissions'][] = $perm;
+        }
+
+        // Sort by module order
+        usort($groupedPermissions, function($a, $b) {
+            return $a['module_order'] <=> $b['module_order'];
+        });
+
+        return response()->json([
+            'success' => true,
+            'message' => 'User permissions retrieved successfully',
+            'data' => [
+                'user' => [
+                    'id' => $user->id,
+                    'name' => $user->full_name,
+                    'email' => $user->email,
+                    'role' => $user->role,
+                    'roles' => $user->roles->map(function($role) {
+                        return [
+                            'id' => $role->id,
+                            'name' => $role->name,
+                            'slug' => $role->slug
+                        ];
+                    })
+                ],
+                'permissions' => $permissionsData,
+                'grouped_permissions' => array_values($groupedPermissions)
+            ]
+        ]);
+    }
+
+    /**
+     * Assign/Update user permissions
+     */
+    public function updatePermissions(Request $request, $id)
+    {
+        $validator = Validator::make($request->all(), [
+            'permissions' => 'required|array',
+            'permissions.*.permission_id' => 'required|exists:permissions,id',
+            'permissions.*.granted' => 'required|boolean',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        $user = User::findOrFail($id);
+
+        DB::beginTransaction();
+        try {
+            // Clear existing user permissions
+            DB::table('user_permissions')->where('user_id', $id)->delete();
+
+            // Insert new permissions
+            $permissionsToInsert = [];
+            foreach ($request->permissions as $perm) {
+                $permissionsToInsert[] = [
+                    'user_id' => $id,
+                    'permission_id' => $perm['permission_id'],
+                    'granted' => $perm['granted'],
+                    'branch_id' => $user->branch_id,
+                    'created_at' => now(),
+                    'updated_at' => now()
+                ];
+            }
+
+            if (!empty($permissionsToInsert)) {
+                DB::table('user_permissions')->insert($permissionsToInsert);
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'User permissions updated successfully'
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update permissions: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Assign roles to user
+     */
+    public function assignRoles(Request $request, $id)
+    {
+        $validator = Validator::make($request->all(), [
+            'role_ids' => 'required|array',
+            'role_ids.*' => 'exists:roles,id',
+            'primary_role_id' => 'nullable|exists:roles,id'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        $user = User::findOrFail($id);
+        $primaryRoleId = $request->primary_role_id ?? $request->role_ids[0];
+
+        DB::beginTransaction();
+        try {
+            // Clear existing user roles
+            DB::table('user_roles')->where('user_id', $id)->delete();
+
+            // Insert new roles
+            $rolesToInsert = [];
+            foreach ($request->role_ids as $roleId) {
+                $rolesToInsert[] = [
+                    'user_id' => $id,
+                    'role_id' => $roleId,
+                    'is_primary' => $roleId == $primaryRoleId,
+                    'branch_id' => $user->branch_id,
+                    'created_at' => now(),
+                    'updated_at' => now()
+                ];
+            }
+
+            DB::table('user_roles')->insert($rolesToInsert);
+
+            // Update user's role field with primary role name
+            $primaryRole = DB::table('roles')->where('id', $primaryRoleId)->first();
+            if ($primaryRole) {
+                $user->role = $primaryRole->name;
+                $user->save();
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'User roles updated successfully'
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update roles: ' . $e->getMessage()
+            ], 500);
+        }
+    }
 }
 
