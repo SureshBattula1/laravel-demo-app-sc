@@ -67,6 +67,12 @@ class PdfExportService
         $titleHtml = $title ? "<h2 style='text-align: center; margin-bottom: 20px;'>{$title}</h2>" : '';
         $date = now()->format('d-m-Y H:i:s');
         
+        // Dynamic font sizing based on column count
+        $columnCount = count($headers);
+        $fontSize = $columnCount > 12 ? '7px' : ($columnCount > 8 ? '8px' : '9px');
+        $padding = $columnCount > 12 ? '4px 5px' : ($columnCount > 8 ? '5px 6px' : '6px 8px');
+        $headerFontSize = $columnCount > 12 ? '7px' : ($columnCount > 8 ? '8px' : '9px');
+        
         $html = <<<HTML
         <!DOCTYPE html>
         <html>
@@ -80,36 +86,42 @@ class PdfExportService
                 }
                 body {
                     font-family: 'DejaVu Sans', Arial, sans-serif;
-                    font-size: 9px;
-                    padding: 15px;
+                    font-size: {$fontSize};
+                    padding: 10px;
                 }
                 h2 {
                     color: #333;
-                    margin-bottom: 10px;
+                    margin-bottom: 8px;
+                    font-size: 14px;
                 }
                 .meta {
                     text-align: right;
                     color: #666;
-                    margin-bottom: 15px;
-                    font-size: 8px;
+                    margin-bottom: 10px;
+                    font-size: 7px;
                 }
                 table {
                     width: 100%;
                     border-collapse: collapse;
-                    margin-top: 10px;
+                    margin-top: 8px;
                 }
                 thead {
                     background-color: #4CAF50;
                     color: white;
                 }
                 th, td {
-                    padding: 6px 8px;
+                    padding: {$padding};
                     text-align: left;
                     border: 1px solid #ddd;
+                    word-wrap: break-word;
+                    overflow: hidden;
                 }
                 th {
                     font-weight: bold;
-                    font-size: 9px;
+                    font-size: {$headerFontSize};
+                }
+                td {
+                    font-size: {$fontSize};
                 }
                 tbody tr:nth-child(even) {
                     background-color: #f9f9f9;
@@ -118,10 +130,10 @@ class PdfExportService
                     background-color: #f5f5f5;
                 }
                 .footer {
-                    margin-top: 20px;
+                    margin-top: 15px;
                     text-align: center;
                     color: #999;
-                    font-size: 7px;
+                    font-size: 6px;
                 }
             </style>
         </head>

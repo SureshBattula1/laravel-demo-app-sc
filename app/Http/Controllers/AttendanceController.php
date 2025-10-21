@@ -982,6 +982,10 @@ class AttendanceController extends Controller
             $pdfService->setColumns($columns);
         }
         
+        // Use A3 paper size for attendance to accommodate more columns
+        $pdfService->setPaperSize('a3');
+        $pdfService->setOrientation('landscape');
+        
         $title = $type === 'student' ? 'Student Attendance Report' : 'Teacher Attendance Report';
         $pdf = $pdfService->generate(collect($data), $title);
         $filename = (new ExportService($module))->generateFilename('pdf');

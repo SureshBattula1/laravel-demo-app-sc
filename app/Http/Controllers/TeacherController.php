@@ -6,6 +6,11 @@ use App\Http\Traits\PaginatesAndSorts;
 use App\Models\User;
 use App\Models\Teacher;
 use App\Models\TeacherAttachment;
+use App\Exports\TeachersExport;
+use App\Services\PdfExportService;
+use App\Services\CsvExportService;
+use App\Services\ExportService;
+use Maatwebsite\Excel\Facades\Excel;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
@@ -834,6 +839,218 @@ class TeacherController extends Controller
                 'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
             ], 500);
         }
+    }
+
+    /**
+     * Export teachers data
+     * Supports Excel, PDF, and CSV formats with filtering
+     */
+    public function export(Request $request)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'format' => 'required|in:excel,pdf,csv',
+                'columns' => 'nullable|array',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            // Build query with same filters as index method
+            $query = $this->buildTeacherQuery($request);
+
+            // Get all matching records (no pagination for export)
+            $teachers = $query->get();
+
+            // Transform data for export
+            $exportData = collect($teachers)->map(function($teacher) {
+                // Flatten nested relationships for easier access
+                return [
+                    'id' => $teacher->id,
+                    'employee_id' => $teacher->employee_id,
+                    'first_name' => $teacher->user->first_name ?? '',
+                    'last_name' => $teacher->user->last_name ?? '',
+                    'email' => $teacher->user->email ?? '',
+                    'phone' => $teacher->user->phone ?? '',
+                    'category_type' => $teacher->category_type,
+                    'designation' => $teacher->designation,
+                    'department_name' => $teacher->department->name ?? '',
+                    'branch_name' => $teacher->branch->name ?? '',
+                    'gender' => $teacher->gender,
+                    'date_of_birth' => $teacher->date_of_birth,
+                    'joining_date' => $teacher->joining_date,
+                    'employee_type' => $teacher->employee_type,
+                    'blood_group' => $teacher->blood_group,
+                    'pan_number' => $teacher->pan_number,
+                    'aadhaar_number' => $teacher->aadhaar_number,
+                    'basic_salary' => $teacher->basic_salary,
+                    'current_address' => $teacher->current_address,
+                    'current_city' => $teacher->current_city,
+                    'current_state' => $teacher->current_state,
+                    'current_pincode' => $teacher->current_pincode,
+                    'emergency_contact_name' => $teacher->emergency_contact_name,
+                    'emergency_contact_phone' => $teacher->emergency_contact_phone,
+                    'teacher_status' => $teacher->teacher_status,
+                    'is_active' => $teacher->user->is_active ?? false,
+                    'created_at' => $teacher->created_at,
+                ];
+            });
+
+            $format = $request->format;
+            $columns = $request->columns; // Custom columns if provided
+
+            return match($format) {
+                'excel' => $this->exportExcel($exportData, $columns),
+                'pdf' => $this->exportPdf($exportData, $columns),
+                'csv' => $this->exportCsv($exportData, $columns),
+            };
+
+        } catch (\Exception $e) {
+            Log::error('Export teachers error', ['error' => $e->getMessage()]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to export teachers',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Build teacher query with filters (reusable for index and export)
+     */
+    protected function buildTeacherQuery(Request $request)
+    {
+        $query = Teacher::with(['user', 'branch', 'department']);
+
+        // Apply branch filtering - Restrict to accessible branches
+        $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+        if ($accessibleBranchIds !== 'all') {
+            if (!empty($accessibleBranchIds)) {
+                $query->whereIn('branch_id', $accessibleBranchIds);
+            } else {
+                $query->whereRaw('1 = 0');
+            }
+        }
+
+        // Filter by branch
+        if ($request->has('branch_id') && $request->branch_id !== '') {
+            $query->where('branch_id', $request->branch_id);
+        }
+
+        // Filter by department
+        if ($request->has('department_id') && $request->department_id !== '') {
+            $query->where('department_id', $request->department_id);
+        }
+
+        // Filter by category type
+        if ($request->has('category_type') && $request->category_type !== '') {
+            $query->where('category_type', $request->category_type);
+        }
+
+        // Filter by designation
+        if ($request->has('designation') && $request->designation !== '') {
+            $query->where('designation', 'like', '%' . $request->designation . '%');
+        }
+
+        // Filter by employee type
+        if ($request->has('employee_type') && $request->employee_type !== '') {
+            $query->where('employee_type', $request->employee_type);
+        }
+
+        // Filter by teacher status
+        if ($request->has('teacher_status') && $request->teacher_status !== '') {
+            $query->where('teacher_status', $request->teacher_status);
+        }
+
+        // Filter by gender
+        if ($request->has('gender') && $request->gender !== '') {
+            $query->where('gender', $request->gender);
+        }
+
+        // Filter by employee_id
+        if ($request->has('employee_id') && $request->employee_id !== '') {
+            $query->where('employee_id', 'like', '%' . $request->employee_id . '%');
+        }
+
+        // Filter by active status
+        if ($request->has('is_active')) {
+            $query->whereHas('user', function($q) use ($request) {
+                $q->where('is_active', $request->is_active);
+            });
+        }
+
+        // Global search across multiple fields
+        if ($request->has('search') && $request->search !== '') {
+            $searchTerm = $request->search;
+            $query->where(function($q) use ($searchTerm) {
+                $q->where('employee_id', 'like', '%' . $searchTerm . '%')
+                  ->orWhere('designation', 'like', '%' . $searchTerm . '%')
+                  ->orWhereHas('user', function($userQuery) use ($searchTerm) {
+                      $userQuery->where('first_name', 'like', '%' . $searchTerm . '%')
+                                ->orWhere('last_name', 'like', '%' . $searchTerm . '%')
+                                ->orWhere('email', 'like', '%' . $searchTerm . '%')
+                                ->orWhere('phone', 'like', '%' . $searchTerm . '%');
+                  })
+                  ->orWhereHas('department', function($deptQuery) use ($searchTerm) {
+                      $deptQuery->where('name', 'like', '%' . $searchTerm . '%');
+                  });
+            });
+        }
+
+        return $query;
+    }
+
+    /**
+     * Export to Excel
+     */
+    protected function exportExcel($data, ?array $columns)
+    {
+        $export = new TeachersExport($data, $columns);
+        $filename = (new ExportService('teachers'))->generateFilename('xlsx');
+        
+        return Excel::download($export, $filename);
+    }
+
+    /**
+     * Export to PDF
+     */
+    protected function exportPdf($data, ?array $columns)
+    {
+        $pdfService = new PdfExportService('teachers');
+        
+        if ($columns) {
+            $pdfService->setColumns($columns);
+        }
+        
+        // Use A3 paper size for teachers to accommodate more columns
+        $pdfService->setPaperSize('a3');
+        $pdfService->setOrientation('landscape');
+        
+        $pdf = $pdfService->generate($data, 'Teachers Report');
+        $filename = (new ExportService('teachers'))->generateFilename('pdf');
+        
+        return $pdf->download($filename);
+    }
+
+    /**
+     * Export to CSV
+     */
+    protected function exportCsv($data, ?array $columns)
+    {
+        $csvService = new CsvExportService('teachers');
+        
+        if ($columns) {
+            $csvService->setColumns($columns);
+        }
+        
+        $filename = (new ExportService('teachers'))->generateFilename('csv');
+        
+        return $csvService->generate($data, $filename);
     }
 }
 

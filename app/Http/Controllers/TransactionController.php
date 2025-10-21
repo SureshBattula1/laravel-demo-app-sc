@@ -5,6 +5,11 @@ namespace App\Http\Controllers;
 use App\Http\Traits\PaginatesAndSorts;
 use App\Models\Transaction;
 use App\Models\SalaryPayment;
+use App\Exports\TransactionsExport;
+use App\Services\PdfExportService;
+use App\Services\CsvExportService;
+use App\Services\ExportService;
+use Maatwebsite\Excel\Facades\Excel;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
@@ -413,6 +418,195 @@ class TransactionController extends Controller
             'salary_year' => $salaryDetails['salary_year'],
             'remarks' => $salaryDetails['remarks'] ?? null
         ]);
+    }
+
+    /**
+     * Export transactions data
+     * Supports Excel, PDF, and CSV formats with filtering
+     * Works for both Income and Expense transactions
+     */
+    public function export(Request $request)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'format' => 'required|in:excel,pdf,csv',
+                'type' => 'required|in:Income,Expense',
+                'columns' => 'nullable|array',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            // Build query with same filters as index method
+            $query = $this->buildTransactionQuery($request);
+
+            // Get all matching records (no pagination for export)
+            $transactions = $query->get();
+
+            // Transform data for export
+            $exportData = collect($transactions)->map(function($transaction) {
+                $createdByName = '';
+                if ($transaction->createdBy) {
+                    $createdByName = $transaction->createdBy->first_name . ' ' . $transaction->createdBy->last_name;
+                }
+
+                $approvedByName = '';
+                if ($transaction->approvedBy) {
+                    $approvedByName = $transaction->approvedBy->first_name . ' ' . $transaction->approvedBy->last_name;
+                }
+
+                return [
+                    'id' => $transaction->id,
+                    'transaction_number' => $transaction->transaction_number,
+                    'transaction_date' => $transaction->transaction_date,
+                    'category_name' => $transaction->category->name ?? '',
+                    'description' => $transaction->description,
+                    'party_name' => $transaction->party_name,
+                    'party_type' => $transaction->party_type,
+                    'amount' => $transaction->amount,
+                    'payment_method' => $transaction->payment_method,
+                    'payment_reference' => $transaction->payment_reference,
+                    'bank_name' => $transaction->bank_name,
+                    'branch_name' => $transaction->branch->name ?? '',
+                    'status' => $transaction->status,
+                    'financial_year' => $transaction->financial_year,
+                    'month' => $transaction->month,
+                    'created_by_name' => $createdByName,
+                    'approved_by_name' => $approvedByName,
+                    'approved_at' => $transaction->approved_at,
+                    'created_at' => $transaction->created_at,
+                ];
+            });
+
+            $format = $request->format;
+            $type = strtolower($request->type); // 'income' or 'expense'
+            $columns = $request->columns;
+
+            return match($format) {
+                'excel' => $this->exportExcel($exportData, $type, $columns),
+                'pdf' => $this->exportPdf($exportData, $type, $columns),
+                'csv' => $this->exportCsv($exportData, $type, $columns),
+            };
+
+        } catch (\Exception $e) {
+            Log::error('Export transactions error', ['error' => $e->getMessage()]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to export transactions',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Build transaction query with filters (reusable for index and export)
+     */
+    protected function buildTransactionQuery(Request $request)
+    {
+        $query = Transaction::with(['category', 'branch', 'createdBy', 'approvedBy']);
+
+        // Filter by branch
+        if ($request->has('branch_id') && $request->branch_id !== '') {
+            $query->where('branch_id', $request->branch_id);
+        }
+
+        // Filter by type (Income/Expense)
+        if ($request->has('type') && $request->type !== '') {
+            $query->where('type', $request->type);
+        }
+
+        // Filter by category
+        if ($request->has('category_id') && $request->category_id !== '') {
+            $query->where('category_id', $request->category_id);
+        }
+
+        // Filter by status
+        if ($request->has('status') && $request->status !== '') {
+            $query->where('status', $request->status);
+        }
+
+        // Filter by financial year
+        if ($request->has('financial_year') && $request->financial_year !== '') {
+            $query->where('financial_year', $request->financial_year);
+        }
+
+        // Filter by date range
+        if ($request->has('from_date') && $request->from_date !== '') {
+            $query->where('transaction_date', '>=', $request->from_date);
+        }
+
+        if ($request->has('to_date') && $request->to_date !== '') {
+            $query->where('transaction_date', '<=', $request->to_date);
+        }
+
+        // Global search
+        if ($request->has('search') && $request->search !== '') {
+            $searchTerm = $request->search;
+            $query->where(function($q) use ($searchTerm) {
+                $q->where('transaction_number', 'like', '%' . $searchTerm . '%')
+                  ->orWhere('party_name', 'like', '%' . $searchTerm . '%')
+                  ->orWhere('description', 'like', '%' . $searchTerm . '%');
+            });
+        }
+
+        return $query;
+    }
+
+    /**
+     * Export to Excel
+     */
+    protected function exportExcel($data, string $type, ?array $columns)
+    {
+        $export = new TransactionsExport($data, $type, $columns);
+        $module = $type === 'income' ? 'income_transactions' : 'expense_transactions';
+        $filename = (new ExportService($module))->generateFilename('xlsx');
+        
+        return Excel::download($export, $filename);
+    }
+
+    /**
+     * Export to PDF
+     */
+    protected function exportPdf($data, string $type, ?array $columns)
+    {
+        $module = $type === 'income' ? 'income_transactions' : 'expense_transactions';
+        $pdfService = new PdfExportService($module);
+        
+        if ($columns) {
+            $pdfService->setColumns($columns);
+        }
+        
+        // Use A3 paper for transactions to accommodate more columns
+        $pdfService->setPaperSize('a3');
+        $pdfService->setOrientation('landscape');
+        
+        $title = $type === 'income' ? 'Income Transactions Report' : 'Expense Transactions Report';
+        $pdf = $pdfService->generate($data, $title);
+        $filename = (new ExportService($module))->generateFilename('pdf');
+        
+        return $pdf->download($filename);
+    }
+
+    /**
+     * Export to CSV
+     */
+    protected function exportCsv($data, string $type, ?array $columns)
+    {
+        $module = $type === 'income' ? 'income_transactions' : 'expense_transactions';
+        $csvService = new CsvExportService($module);
+        
+        if ($columns) {
+            $csvService->setColumns($columns);
+        }
+        
+        $filename = (new ExportService($module))->generateFilename('csv');
+        
+        return $csvService->generate($data, $filename);
     }
 }
 
