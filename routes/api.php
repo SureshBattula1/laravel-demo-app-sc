@@ -72,6 +72,9 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
         Route::get('/', [BranchController::class, 'index']);
         Route::post('/', [BranchController::class, 'store']);
         
+        // Export
+        Route::get('export', [BranchController::class, 'export']);
+        
         // Deleted branches (soft deleted - status = Closed)
         Route::get('deleted', [BranchController::class, 'getDeleted']);
         
@@ -121,9 +124,11 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     // Teacher Routes
     Route::get('teachers', [TeacherController::class, 'index']);
     Route::post('teachers', [TeacherController::class, 'store']);
+    Route::get('teachers/export', [TeacherController::class, 'export']);
     Route::get('teachers/{id}', [TeacherController::class, 'show']);
     Route::put('teachers/{id}', [TeacherController::class, 'update']);
     Route::delete('teachers/{id}', [TeacherController::class, 'destroy']);
+    Route::post('teachers/{id}/upload-profile-picture', [TeacherController::class, 'uploadProfilePicture']);
     
     // Student Routes
     Route::get('students', [StudentController::class, 'index']);
@@ -147,6 +152,7 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     });
     
     // Grade Routes - Full CRUD
+    Route::get('grades/export', [GradeController::class, 'export']);
     Route::apiResource('grades', GradeController::class)->parameters([
         'grades' => 'value'  // Use grade value instead of id
     ]);
@@ -160,6 +166,7 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     Route::prefix('sections')->group(function () {
         Route::get('/', [SectionController::class, 'index']);
         Route::post('/', [SectionController::class, 'store']);
+        Route::get('export', [SectionController::class, 'export']);
         Route::get('{id}', [SectionController::class, 'show']);
         Route::put('{id}', [SectionController::class, 'update']);
         Route::delete('{id}', [SectionController::class, 'destroy']);
@@ -248,6 +255,7 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     });
     
     // Transaction Routes - Full CRUD
+    Route::get('transactions/export', [TransactionController::class, 'export']);
     Route::apiResource('transactions', TransactionController::class);
     Route::post('transactions/{id}/approve', [TransactionController::class, 'approve']);
     Route::post('transactions/{id}/reject', [TransactionController::class, 'reject']);
@@ -270,6 +278,7 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     Route::prefix('holidays')->group(function () {
         Route::get('/', [HolidayController::class, 'index']);
         Route::post('/', [HolidayController::class, 'store']);
+        Route::get('export', [HolidayController::class, 'export']);
         Route::get('upcoming', [HolidayController::class, 'getUpcoming']);
         Route::get('calendar/{year}/{month}', [HolidayController::class, 'getCalendarData']);
         Route::get('{id}', [HolidayController::class, 'show']);

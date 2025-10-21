@@ -4,6 +4,11 @@ namespace App\Http\Controllers;
 
 use App\Http\Traits\PaginatesAndSorts;
 use App\Models\Branch;
+use App\Exports\BranchesExport;
+use App\Services\PdfExportService;
+use App\Services\CsvExportService;
+use App\Services\ExportService;
+use Maatwebsite\Excel\Facades\Excel;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
@@ -997,5 +1002,184 @@ class BranchController extends Controller
                 $this->addComputedFields($child, $childCounts);
             }
         }
+    }
+
+    /**
+     * Export branches data
+     * Supports Excel, PDF, and CSV formats with filtering
+     */
+    public function export(Request $request)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'format' => 'required|in:excel,pdf,csv',
+                'columns' => 'nullable|array',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            // Build query with same filters as index method
+            $query = $this->buildBranchQuery($request);
+
+            // Get all matching records (no pagination for export)
+            $branches = $query->get();
+
+            // Transform data for export
+            $exportData = collect($branches)->map(function($branch) {
+                return [
+                    'id' => $branch->id,
+                    'code' => $branch->code,
+                    'name' => $branch->name,
+                    'branch_type' => $branch->branch_type,
+                    'parent_branch_name' => $branch->parentBranch->name ?? '',
+                    'city' => $branch->city,
+                    'state' => $branch->state,
+                    'region' => $branch->region,
+                    'phone' => $branch->phone,
+                    'email' => $branch->email,
+                    'principal_name' => $branch->principal_name,
+                    'established_date' => $branch->established_date,
+                    'total_capacity' => $branch->total_capacity,
+                    'current_enrollment' => $branch->current_enrollment,
+                    'address' => $branch->address,
+                    'country' => $branch->country,
+                    'pincode' => $branch->pincode,
+                    'board' => $branch->board,
+                    'affiliation_number' => $branch->affiliation_number,
+                    'is_main_branch' => $branch->is_main_branch,
+                    'status' => $branch->status,
+                    'is_active' => $branch->is_active,
+                    'created_at' => $branch->created_at,
+                ];
+            });
+
+            $format = $request->format;
+            $columns = $request->columns; // Custom columns if provided
+
+            return match($format) {
+                'excel' => $this->exportExcel($exportData, $columns),
+                'pdf' => $this->exportPdf($exportData, $columns),
+                'csv' => $this->exportCsv($exportData, $columns),
+            };
+
+        } catch (\Exception $e) {
+            Log::error('Export branches error', ['error' => $e->getMessage()]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to export branches',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Build branch query with filters (reusable for index and export)
+     */
+    protected function buildBranchQuery(Request $request)
+    {
+        $query = Branch::with(['parentBranch', 'childBranches']);
+
+        // Filter by active status
+        if ($request->has('is_active') && $request->is_active !== '') {
+            $query->where('is_active', $request->boolean('is_active'));
+        }
+
+        // Filter by status
+        if ($request->has('status') && $request->status !== '') {
+            $query->where('status', $request->status);
+        }
+
+        // Filter by branch type
+        if ($request->has('branch_type') && $request->branch_type !== '') {
+            $query->where('branch_type', $request->branch_type);
+        }
+
+        // Filter by region
+        if ($request->has('region') && $request->region !== '') {
+            $query->where('region', $request->region);
+        }
+
+        // Filter by city
+        if ($request->has('city') && $request->city !== '') {
+            $query->where('city', $request->city);
+        }
+
+        // Filter by parent branch
+        if ($request->has('parent_id') && $request->parent_id !== '') {
+            if ($request->parent_id === 'null' || $request->parent_id === '0') {
+                $query->whereNull('parent_branch_id');
+            } else {
+                $query->where('parent_branch_id', $request->parent_id);
+            }
+        }
+
+        // Global search
+        if ($request->has('search') && $request->search !== '') {
+            $searchTerm = $request->search;
+            $query->where(function($q) use ($searchTerm) {
+                $q->where('name', 'like', '%' . $searchTerm . '%')
+                  ->orWhere('code', 'like', '%' . $searchTerm . '%')
+                  ->orWhere('city', 'like', '%' . $searchTerm . '%')
+                  ->orWhere('email', 'like', '%' . $searchTerm . '%')
+                  ->orWhere('phone', 'like', '%' . $searchTerm . '%')
+                  ->orWhere('principal_name', 'like', '%' . $searchTerm . '%');
+            });
+        }
+
+        return $query;
+    }
+
+    /**
+     * Export to Excel
+     */
+    protected function exportExcel($data, ?array $columns)
+    {
+        $export = new BranchesExport($data, $columns);
+        $filename = (new ExportService('branches'))->generateFilename('xlsx');
+        
+        return Excel::download($export, $filename);
+    }
+
+    /**
+     * Export to PDF
+     */
+    protected function exportPdf($data, ?array $columns)
+    {
+        $pdfService = new PdfExportService('branches');
+        
+        if ($columns) {
+            $pdfService->setColumns($columns);
+        }
+        
+        // Use A3 paper size for branches to accommodate more columns
+        $pdfService->setPaperSize('a3');
+        $pdfService->setOrientation('landscape');
+        
+        $pdf = $pdfService->generate($data, 'Branches Report');
+        $filename = (new ExportService('branches'))->generateFilename('pdf');
+        
+        return $pdf->download($filename);
+    }
+
+    /**
+     * Export to CSV
+     */
+    protected function exportCsv($data, ?array $columns)
+    {
+        $csvService = new CsvExportService('branches');
+        
+        if ($columns) {
+            $csvService->setColumns($columns);
+        }
+        
+        $filename = (new ExportService('branches'))->generateFilename('csv');
+        
+        return $csvService->generate($data, $filename);
     }
 }

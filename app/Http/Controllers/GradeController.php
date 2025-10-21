@@ -3,6 +3,11 @@
 namespace App\Http\Controllers;
 
 use App\Http\Traits\PaginatesAndSorts;
+use App\Exports\GradesExport;
+use App\Services\PdfExportService;
+use App\Services\CsvExportService;
+use App\Services\ExportService;
+use Maatwebsite\Excel\Facades\Excel;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
@@ -288,6 +293,108 @@ class GradeController extends Controller
                 'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
             ], 500);
         }
+    }
+
+    /**
+     * Export grades data
+     * Supports Excel, PDF, and CSV formats
+     */
+    public function export(Request $request)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'format' => 'required|in:excel,pdf,csv',
+                'columns' => 'nullable|array',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            // Get all grades (simple query, no complex filtering needed)
+            $grades = DB::table('grades')->get();
+
+            // Transform data for export
+            $exportData = collect($grades)->map(function($grade) {
+                return [
+                    'value' => $grade->value,
+                    'label' => $grade->label,
+                    'description' => $grade->description ?? '',
+                    'is_active' => (bool) $grade->is_active,
+                    'created_at' => $grade->created_at,
+                    'updated_at' => $grade->updated_at,
+                ];
+            });
+
+            $format = $request->format;
+            $columns = $request->columns;
+
+            return match($format) {
+                'excel' => $this->exportExcel($exportData, $columns),
+                'pdf' => $this->exportPdf($exportData, $columns),
+                'csv' => $this->exportCsv($exportData, $columns),
+            };
+
+        } catch (\Exception $e) {
+            Log::error('Export grades error', ['error' => $e->getMessage()]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to export grades',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Export to Excel
+     */
+    protected function exportExcel($data, ?array $columns)
+    {
+        $export = new GradesExport($data, $columns);
+        $filename = (new ExportService('grades'))->generateFilename('xlsx');
+        
+        return Excel::download($export, $filename);
+    }
+
+    /**
+     * Export to PDF
+     */
+    protected function exportPdf($data, ?array $columns)
+    {
+        $pdfService = new PdfExportService('grades');
+        
+        if ($columns) {
+            $pdfService->setColumns($columns);
+        }
+        
+        // Grades have few columns, A4 is sufficient
+        $pdfService->setPaperSize('a4');
+        $pdfService->setOrientation('landscape');
+        
+        $pdf = $pdfService->generate($data, 'Grades Report');
+        $filename = (new ExportService('grades'))->generateFilename('pdf');
+        
+        return $pdf->download($filename);
+    }
+
+    /**
+     * Export to CSV
+     */
+    protected function exportCsv($data, ?array $columns)
+    {
+        $csvService = new CsvExportService('grades');
+        
+        if ($columns) {
+            $csvService->setColumns($columns);
+        }
+        
+        $filename = (new ExportService('grades'))->generateFilename('csv');
+        
+        return $csvService->generate($data, $filename);
     }
 }
 

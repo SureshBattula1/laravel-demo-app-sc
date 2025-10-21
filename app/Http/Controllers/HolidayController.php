@@ -3,6 +3,11 @@
 namespace App\Http\Controllers;
 
 use App\Models\Holiday;
+use App\Exports\HolidaysExport;
+use App\Services\PdfExportService;
+use App\Services\CsvExportService;
+use App\Services\ExportService;
+use Maatwebsite\Excel\Facades\Excel;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Validator;
@@ -401,6 +406,183 @@ class HolidayController extends Controller
         $month = date('n');
         
         return $month < 4 ? ($year - 1) . '-' . $year : $year . '-' . ($year + 1);
+    }
+
+    /**
+     * Export holidays data
+     * Supports Excel, PDF, and CSV formats with filtering
+     */
+    public function export(Request $request)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'format' => 'required|in:excel,pdf,csv',
+                'columns' => 'nullable|array',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            // Build query with same filters as index method
+            $query = $this->buildHolidayQuery($request);
+
+            // Get all matching records
+            $holidays = $query->get();
+
+            // Transform data for export
+            $exportData = collect($holidays)->map(function($holiday) {
+                $createdByName = '';
+                if ($holiday->createdBy) {
+                    $createdByName = $holiday->createdBy->first_name . ' ' . $holiday->createdBy->last_name;
+                }
+
+                // Calculate duration
+                $duration = $holiday->start_date->diffInDays($holiday->end_date) + 1;
+
+                return [
+                    'id' => $holiday->id,
+                    'title' => $holiday->title,
+                    'start_date' => $holiday->start_date,
+                    'end_date' => $holiday->end_date,
+                    'duration' => $duration,
+                    'type' => $holiday->type,
+                    'branch_name' => $holiday->branch->name ?? 'All Branches',
+                    'description' => $holiday->description ?? '',
+                    'academic_year' => $holiday->academic_year,
+                    'is_recurring' => $holiday->is_recurring,
+                    'color' => $holiday->color,
+                    'is_active' => $holiday->is_active,
+                    'created_by_name' => $createdByName,
+                    'created_at' => $holiday->created_at,
+                ];
+            });
+
+            $format = $request->format;
+            $columns = $request->columns;
+
+            return match($format) {
+                'excel' => $this->exportExcel($exportData, $columns),
+                'pdf' => $this->exportPdf($exportData, $columns),
+                'csv' => $this->exportCsv($exportData, $columns),
+            };
+
+        } catch (\Exception $e) {
+            Log::error('Export holidays error', ['error' => $e->getMessage()]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to export holidays',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Build holiday query with filters (reusable for index and export)
+     */
+    protected function buildHolidayQuery(Request $request)
+    {
+        $query = Holiday::with(['branch', 'createdBy']);
+
+        // Apply branch filtering
+        $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+        if ($accessibleBranchIds !== 'all') {
+            $query->where(function($q) use ($accessibleBranchIds) {
+                $q->whereIn('branch_id', $accessibleBranchIds)
+                  ->orWhereNull('branch_id')
+                  ->orWhereIn('type', ['National', 'State']);
+            });
+        }
+
+        // Filter by type
+        if ($request->has('type') && $request->type !== '') {
+            $query->where('type', $request->type);
+        }
+
+        // Filter by academic year
+        if ($request->has('academic_year') && $request->academic_year !== '') {
+            $query->where('academic_year', $request->academic_year);
+        }
+
+        // Filter by active status
+        if ($request->has('is_active') && $request->is_active !== '') {
+            $query->where('is_active', $request->boolean('is_active'));
+        }
+
+        // Filter by date range
+        if ($request->has('from_date') && $request->has('to_date')) {
+            $query->inDateRange($request->from_date, $request->to_date);
+        }
+
+        // Filter by month
+        if ($request->has('month') && $request->month !== '') {
+            $month = $request->month;
+            $query->whereRaw('MONTH(start_date) = ?', [$month])
+                  ->orWhereRaw('MONTH(end_date) = ?', [$month]);
+        }
+
+        // Global search
+        if ($request->has('search') && $request->search !== '') {
+            $searchTerm = $request->search;
+            $query->where(function($q) use ($searchTerm) {
+                $q->where('title', 'like', '%' . $searchTerm . '%')
+                  ->orWhere('description', 'like', '%' . $searchTerm . '%');
+            });
+        }
+
+        return $query;
+    }
+
+    /**
+     * Export to Excel
+     */
+    protected function exportExcel($data, ?array $columns)
+    {
+        $export = new HolidaysExport($data, $columns);
+        $filename = (new ExportService('holidays'))->generateFilename('xlsx');
+        
+        return Excel::download($export, $filename);
+    }
+
+    /**
+     * Export to PDF
+     */
+    protected function exportPdf($data, ?array $columns)
+    {
+        $pdfService = new PdfExportService('holidays');
+        
+        if ($columns) {
+            $pdfService->setColumns($columns);
+        }
+        
+        // Use A3 paper for holidays to accommodate more columns
+        $pdfService->setPaperSize('a3');
+        $pdfService->setOrientation('landscape');
+        
+        $pdf = $pdfService->generate($data, 'Holidays Report');
+        $filename = (new ExportService('holidays'))->generateFilename('pdf');
+        
+        return $pdf->download($filename);
+    }
+
+    /**
+     * Export to CSV
+     */
+    protected function exportCsv($data, ?array $columns)
+    {
+        $csvService = new CsvExportService('holidays');
+        
+        if ($columns) {
+            $csvService->setColumns($columns);
+        }
+        
+        $filename = (new ExportService('holidays'))->generateFilename('csv');
+        
+        return $csvService->generate($data, $filename);
     }
 }
 

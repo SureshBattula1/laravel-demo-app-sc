@@ -4,6 +4,11 @@ namespace App\Http\Controllers;
 
 use App\Http\Traits\PaginatesAndSorts;
 use App\Models\Section;
+use App\Exports\SectionsExport;
+use App\Services\PdfExportService;
+use App\Services\CsvExportService;
+use App\Services\ExportService;
+use Maatwebsite\Excel\Facades\Excel;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
@@ -357,6 +362,168 @@ class SectionController extends Controller
                 'message' => 'Failed to update section status'
             ], 500);
         }
+    }
+
+    /**
+     * Export sections data
+     * Supports Excel, PDF, and CSV formats with filtering
+     */
+    public function export(Request $request)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'format' => 'required|in:excel,pdf,csv',
+                'columns' => 'nullable|array',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            // Build query with same filters as index method
+            $query = $this->buildSectionQuery($request);
+
+            // Get all matching records
+            $sections = $query->get();
+
+            // Transform data for export
+            $exportData = collect($sections)->map(function($section) {
+                $classTeacherName = '';
+                if ($section->classTeacher) {
+                    $classTeacherName = $section->classTeacher->first_name . ' ' . $section->classTeacher->last_name;
+                }
+
+                return [
+                    'id' => $section->id,
+                    'code' => $section->code,
+                    'name' => $section->name,
+                    'grade_label' => $section->grade_label,
+                    'branch_name' => $section->branch->name ?? '',
+                    'class_teacher_name' => $classTeacherName,
+                    'capacity' => $section->capacity,
+                    'current_strength' => $section->current_strength,
+                    'actual_strength' => $section->actual_strength,
+                    'room_number' => $section->room_number,
+                    'description' => $section->description ?? '',
+                    'is_active' => $section->is_active,
+                    'created_at' => $section->created_at,
+                ];
+            });
+
+            $format = $request->format;
+            $columns = $request->columns;
+
+            return match($format) {
+                'excel' => $this->exportExcel($exportData, $columns),
+                'pdf' => $this->exportPdf($exportData, $columns),
+                'csv' => $this->exportCsv($exportData, $columns),
+            };
+
+        } catch (\Exception $e) {
+            Log::error('Export sections error', ['error' => $e->getMessage()]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to export sections',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Build section query with filters (reusable for index and export)
+     */
+    protected function buildSectionQuery(Request $request)
+    {
+        $query = Section::with(['branch', 'classTeacher', 'class']);
+
+        // Apply branch filtering
+        $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+        if ($accessibleBranchIds !== 'all') {
+            if (!empty($accessibleBranchIds)) {
+                $query->whereIn('branch_id', $accessibleBranchIds);
+            } else {
+                $query->whereRaw('1 = 0');
+            }
+        }
+
+        // Filter by branch
+        if ($request->has('branch_id') && $request->branch_id !== '' && $accessibleBranchIds === 'all') {
+            $query->where('branch_id', $request->branch_id);
+        }
+
+        // Filter by grade level
+        if ($request->has('grade_level') && $request->grade_level !== '') {
+            $query->where('grade_level', $request->grade_level);
+        }
+
+        // Filter by active status
+        if ($request->has('is_active') && $request->is_active !== '') {
+            $query->where('is_active', $request->boolean('is_active'));
+        }
+
+        // Global search
+        if ($request->has('search') && $request->search !== '') {
+            $searchTerm = $request->search;
+            $query->where(function($q) use ($searchTerm) {
+                $q->where('name', 'like', '%' . $searchTerm . '%')
+                  ->orWhere('code', 'like', '%' . $searchTerm . '%')
+                  ->orWhere('room_number', 'like', '%' . $searchTerm . '%');
+            });
+        }
+
+        return $query;
+    }
+
+    /**
+     * Export to Excel
+     */
+    protected function exportExcel($data, ?array $columns)
+    {
+        $export = new SectionsExport($data, $columns);
+        $filename = (new ExportService('sections'))->generateFilename('xlsx');
+        
+        return Excel::download($export, $filename);
+    }
+
+    /**
+     * Export to PDF
+     */
+    protected function exportPdf($data, ?array $columns)
+    {
+        $pdfService = new PdfExportService('sections');
+        
+        if ($columns) {
+            $pdfService->setColumns($columns);
+        }
+        
+        // Use A3 paper for sections to accommodate more columns
+        $pdfService->setPaperSize('a3');
+        $pdfService->setOrientation('landscape');
+        
+        $pdf = $pdfService->generate($data, 'Sections Report');
+        $filename = (new ExportService('sections'))->generateFilename('pdf');
+        
+        return $pdf->download($filename);
+    }
+
+    /**
+     * Export to CSV
+     */
+    protected function exportCsv($data, ?array $columns)
+    {
+        $csvService = new CsvExportService('sections');
+        
+        if ($columns) {
+            $csvService->setColumns($columns);
+        }
+        
+        $filename = (new ExportService('sections'))->generateFilename('csv');
+        
+        return $csvService->generate($data, $filename);
     }
 }
 

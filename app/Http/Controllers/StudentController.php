@@ -710,6 +710,10 @@ class StudentController extends Controller
             $pdfService->setColumns($columns);
         }
         
+        // Use A3 paper size for students to accommodate more columns
+        $pdfService->setPaperSize('a3');
+        $pdfService->setOrientation('landscape');
+        
         $pdf = $pdfService->generate($data, 'Students Report');
         $filename = (new \App\Services\ExportService('students'))->generateFilename('pdf');
         
