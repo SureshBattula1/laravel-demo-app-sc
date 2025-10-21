@@ -9,6 +9,10 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use App\Exports\StudentsExport;
+use App\Services\PdfExportService;
+use App\Services\CsvExportService;
+use Maatwebsite\Excel\Facades\Excel;
 
 class StudentController extends Controller
 {
@@ -540,6 +544,192 @@ class StudentController extends Controller
                 'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
             ], 500);
         }
+    }
+
+    /**
+     * Export students data
+     * Supports Excel, PDF, and CSV formats with filtering
+     */
+    public function export(Request $request)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'format' => 'required|in:excel,pdf,csv',
+                'columns' => 'nullable|array',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            // Build query with same filters as index method
+            $query = $this->buildStudentQuery($request);
+
+            // Get all matching records (respecting filters but not pagination)
+            $students = $query->get();
+
+            // Transform data for export
+            $exportData = collect($students)->map(function($student) {
+                if (isset($student->branch) && is_string($student->branch)) {
+                    $branch = json_decode($student->branch);
+                    $student->branch_name = $branch->name ?? '';
+                } else {
+                    $student->branch_name = '';
+                }
+                return $student;
+            });
+
+            $format = $request->format;
+            $columns = $request->columns; // Custom columns if provided
+
+            return match($format) {
+                'excel' => $this->exportExcel($exportData, $columns),
+                'pdf' => $this->exportPdf($exportData, $columns),
+                'csv' => $this->exportCsv($exportData, $columns),
+            };
+
+        } catch (\Exception $e) {
+            Log::error('Export students error', ['error' => $e->getMessage()]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to export students',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Build student query with filters (reusable for index and export)
+     */
+    protected function buildStudentQuery(Request $request)
+    {
+        $query = DB::table('students')
+            ->join('users', 'students.user_id', '=', 'users.id')
+            ->leftJoin('branches', 'students.branch_id', '=', 'branches.id')
+            ->leftJoin('grades', 'students.grade', '=', 'grades.value')
+            ->select(
+                'students.id',
+                'students.user_id',
+                'students.branch_id',
+                'students.admission_number',
+                'students.admission_date',
+                'students.roll_number',
+                'students.grade',
+                'grades.label as grade_label',
+                'students.section',
+                'students.academic_year',
+                'students.date_of_birth',
+                'students.gender',
+                'students.blood_group',
+                'students.current_address',
+                'students.city',
+                'students.state',
+                'students.pincode',
+                'students.father_name',
+                'students.father_phone',
+                'students.mother_name',
+                'students.mother_phone',
+                'students.student_status',
+                'students.created_at',
+                'users.first_name',
+                'users.last_name',
+                'users.email',
+                'users.phone',
+                'users.is_active',
+                DB::raw('JSON_OBJECT("id", branches.id, "name", branches.name, "code", branches.code) as branch')
+            );
+
+        // Apply branch filtering
+        $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+        if ($accessibleBranchIds !== 'all') {
+            if (!empty($accessibleBranchIds)) {
+                $query->whereIn('students.branch_id', $accessibleBranchIds);
+            } else {
+                $query->whereRaw('1 = 0');
+            }
+        }
+
+        // Apply filters
+        if ($request->has('grade')) {
+            $query->where('students.grade', $request->grade);
+        }
+
+        if ($request->has('section')) {
+            $query->where('students.section', $request->section);
+        }
+
+        if ($request->has('status')) {
+            $query->where('students.student_status', $request->status);
+        }
+
+        if ($request->has('gender')) {
+            $query->where('students.gender', $request->gender);
+        }
+
+        if ($request->has('branch_id')) {
+            $query->where('students.branch_id', $request->branch_id);
+        }
+
+        if ($request->has('search')) {
+            $search = $request->search;
+            $query->where(function($q) use ($search) {
+                $q->where('users.first_name', 'like', "%{$search}%")
+                  ->orWhere('users.last_name', 'like', "%{$search}%")
+                  ->orWhere('users.email', 'like', "%{$search}%")
+                  ->orWhere('students.admission_number', 'like', "%{$search}%")
+                  ->orWhere('students.roll_number', 'like', "%{$search}%");
+            });
+        }
+
+        return $query;
+    }
+
+    /**
+     * Export to Excel
+     */
+    protected function exportExcel($data, ?array $columns)
+    {
+        $export = new StudentsExport($data, $columns);
+        $filename = (new \App\Services\ExportService('students'))->generateFilename('xlsx');
+        
+        return Excel::download($export, $filename);
+    }
+
+    /**
+     * Export to PDF
+     */
+    protected function exportPdf($data, ?array $columns)
+    {
+        $pdfService = new PdfExportService('students');
+        
+        if ($columns) {
+            $pdfService->setColumns($columns);
+        }
+        
+        $pdf = $pdfService->generate($data, 'Students Report');
+        $filename = (new \App\Services\ExportService('students'))->generateFilename('pdf');
+        
+        return $pdf->download($filename);
+    }
+
+    /**
+     * Export to CSV
+     */
+    protected function exportCsv($data, ?array $columns)
+    {
+        $csvService = new CsvExportService('students');
+        
+        if ($columns) {
+            $csvService->setColumns($columns);
+        }
+        
+        $filename = (new \App\Services\ExportService('students'))->generateFilename('csv');
+        
+        return $csvService->generate($data, $filename);
     }
 }
 

@@ -129,6 +129,7 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     // Student Routes
     Route::get('students', [StudentController::class, 'index']);
     Route::post('students', [StudentController::class, 'store']);
+    Route::get('students/export', [StudentController::class, 'export']);
     Route::get('students/{id}', [StudentController::class, 'show']);
     Route::put('students/{id}', [StudentController::class, 'update']);
     Route::delete('students/{id}', [StudentController::class, 'destroy']);
@@ -194,6 +195,7 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     Route::get('students/{studentId}/fees', [FeeController::class, 'getStudentFees']);
     
     // Attendance Routes (specific routes MUST come before apiResource)
+    Route::get('attendance/export', [AttendanceController::class, 'export']);
     Route::post('attendance/bulk', [AttendanceController::class, 'markBulk']);
     Route::get('attendance/report', [AttendanceController::class, 'getReport']);
     Route::get('attendance/student/{studentId}', [AttendanceController::class, 'getStudentAttendance']);

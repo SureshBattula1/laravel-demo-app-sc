@@ -73,10 +73,23 @@ class BranchController extends Controller
                     ->orderBy('name')
                     ->get();
                 
+                // ✅ OPTIMIZED: Get all child counts in one query
+                $allBranchIds = $branches->pluck('id')->toArray();
+                // Also collect IDs from all descendants
+                $branches->each(function($branch) use (&$allBranchIds) {
+                    $this->collectDescendantIds($branch, $allBranchIds);
+                });
+                
+                $childCounts = DB::table('branches')
+                    ->select('parent_branch_id', DB::raw('COUNT(*) as child_count'))
+                    ->whereIn('parent_branch_id', $allBranchIds)
+                    ->whereNull('deleted_at')
+                    ->groupBy('parent_branch_id')
+                    ->pluck('child_count', 'parent_branch_id');
+                
                 // Add computed fields for hierarchical view
-                $branches->each(function($branch) {
-                    $branch->capacity_utilization = $branch->getCapacityUtilization();
-                    $branch->has_children = $branch->hasChildren();
+                $branches->each(function($branch) use ($childCounts) {
+                    $this->addComputedFields($branch, $childCounts);
                 });
                 
                 return response()->json([
@@ -107,10 +120,20 @@ class BranchController extends Controller
             // Apply pagination and sorting (default: 25 per page, sorted by name asc)
             $branches = $this->paginateAndSort($query, $request, $sortableColumns, 'name', 'asc');
 
+            // ✅ OPTIMIZED: Get child counts in a single query to avoid N+1
+            $branchIds = collect($branches->items())->pluck('id')->toArray();
+            
+            $childCounts = DB::table('branches')
+                ->select('parent_branch_id', DB::raw('COUNT(*) as child_count'))
+                ->whereIn('parent_branch_id', $branchIds)
+                ->whereNull('deleted_at')
+                ->groupBy('parent_branch_id')
+                ->pluck('child_count', 'parent_branch_id');
+
             // Add computed fields to paginated results
-            $branchesData = collect($branches->items())->map(function($branch) {
+            $branchesData = collect($branches->items())->map(function($branch) use ($childCounts) {
                 $branch->capacity_utilization = $branch->getCapacityUtilization();
-                $branch->has_children = $branch->hasChildren();
+                $branch->has_children = isset($childCounts[$branch->id]) && $childCounts[$branch->id] > 0;
                 return $branch;
             })->toArray();
 
@@ -900,32 +923,39 @@ class BranchController extends Controller
             
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
             
+            // ✅ OPTIMIZED: Select only necessary columns to reduce data transfer
+            $selectColumns = ['id', 'name', 'code', 'branch_type', 'city', 'state', 'parent_branch_id', 'is_active', 'status'];
+            
             // SuperAdmin or users with cross-branch permission see all branches
             if ($accessibleBranchIds === 'all') {
-                $branches = Branch::where('is_active', true)
+                $branches = Branch::select($selectColumns)
+                    ->where('is_active', true)
                     ->orderBy('name')
                     ->get();
             } else {
-                $branches = Branch::whereIn('id', $accessibleBranchIds)
+                $branches = Branch::select($selectColumns)
+                    ->whereIn('id', $accessibleBranchIds)
                     ->where('is_active', true)
                     ->orderBy('name')
                     ->get();
             }
             
-            // Include permission info for frontend
-            $canSelectBranch = $user->role === 'SuperAdmin' 
-                            || $user->role === 'BranchAdmin' 
-                            || $user->hasCrossBranchAccess();
+            // ✅ OPTIMIZED: Calculate permissions once instead of multiple method calls
+            $isSuperAdmin = $user->role === 'SuperAdmin';
+            $isBranchAdmin = $user->role === 'BranchAdmin';
+            $hasCrossBranch = !$isSuperAdmin && $user->hasCrossBranchAccess();
+            $canManageAll = $isSuperAdmin || $user->canManageAllBranches();
+            $canViewAll = $isSuperAdmin || $hasCrossBranch || $user->canViewAllBranches();
             
             return response()->json([
                 'success' => true,
                 'data' => $branches,
                 'user_branch_id' => $user->branch_id,
                 'user_role' => $user->role,
-                'can_select_branch' => $canSelectBranch,
-                'has_cross_branch_access' => $user->hasCrossBranchAccess(),
-                'can_manage_all_branches' => $user->canManageAllBranches(),
-                'can_view_all_branches' => $user->canViewAllBranches(),
+                'can_select_branch' => $isSuperAdmin || $isBranchAdmin || $hasCrossBranch,
+                'has_cross_branch_access' => $hasCrossBranch,
+                'can_manage_all_branches' => $canManageAll,
+                'can_view_all_branches' => $canViewAll,
                 'accessible_branch_ids' => $accessibleBranchIds === 'all' ? 'all' : $accessibleBranchIds
             ]);
             
@@ -937,6 +967,35 @@ class BranchController extends Controller
                 'message' => 'Failed to fetch branches',
                 'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
             ], 500);
+        }
+    }
+
+    /**
+     * Helper: Recursively collect all descendant IDs for hierarchical queries
+     */
+    private function collectDescendantIds($branch, &$allBranchIds)
+    {
+        if ($branch->childBranches) {
+            foreach ($branch->childBranches as $child) {
+                $allBranchIds[] = $child->id;
+                $this->collectDescendantIds($child, $allBranchIds);
+            }
+        }
+    }
+
+    /**
+     * Helper: Add computed fields to branch (recursive for hierarchical)
+     */
+    private function addComputedFields($branch, $childCounts)
+    {
+        $branch->capacity_utilization = $branch->getCapacityUtilization();
+        $branch->has_children = isset($childCounts[$branch->id]) && $childCounts[$branch->id] > 0;
+        
+        // Recursively add to children
+        if ($branch->childBranches) {
+            foreach ($branch->childBranches as $child) {
+                $this->addComputedFields($child, $childCounts);
+            }
         }
     }
 }

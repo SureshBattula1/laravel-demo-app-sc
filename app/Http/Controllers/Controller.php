@@ -34,12 +34,12 @@ abstract class Controller
         // BranchAdmin can access their branch + descendants
         if ($user->role === 'BranchAdmin') {
             $userBranch = \App\Models\Branch::find($user->branch_id);
-            if ($userBranch && method_exists($userBranch, 'getDescendantIds')) {
-                return array_merge(
-                    [$user->branch_id],
-                    $userBranch->getDescendantIds() ?? []
-                );
+            if ($userBranch) {
+                // ✅ OPTIMIZED: getDescendantIds now uses recursive CTE (1 query instead of N)
+                // It includes self by default, so no need to merge
+                return $userBranch->getDescendantIds(true);
             }
+            return [$user->branch_id];
         }
         
         // All other roles: only their assigned branch
