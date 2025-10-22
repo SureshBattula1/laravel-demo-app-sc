@@ -14,11 +14,45 @@ class RoleController extends Controller
     public function index(Request $request)
     {
         $perPage = $request->get('per_page', 10);
+        $search = $request->get('search');
+        $level = $request->get('level');
+        $isSystemRole = $request->get('is_system_role');
+        $slug = $request->get('slug');
+        $sortBy = $request->get('sort_by', 'id');
+        $sortDirection = $request->get('sort_direction', 'asc');
 
-        $roles = DB::table('roles')
+        $query = DB::table('roles')
             ->select('roles.*')
-            ->selectRaw('(SELECT COUNT(*) FROM role_permissions WHERE role_id = roles.id) as permissions_count')
-            ->paginate($perPage);
+            ->selectRaw('(SELECT COUNT(*) FROM role_permissions WHERE role_id = roles.id) as permissions_count');
+
+        // Apply search filter
+        if ($search) {
+            $query->where(function($q) use ($search) {
+                $q->where('name', 'like', "%{$search}%")
+                  ->orWhere('slug', 'like', "%{$search}%")
+                  ->orWhere('description', 'like', "%{$search}%");
+            });
+        }
+
+        // Apply level filter
+        if ($level) {
+            $query->where('level', $level);
+        }
+
+        // Apply system role filter
+        if ($isSystemRole !== null && $isSystemRole !== '') {
+            $query->where('is_system_role', (bool)$isSystemRole);
+        }
+
+        // Apply slug filter
+        if ($slug) {
+            $query->where('slug', 'like', "%{$slug}%");
+        }
+
+        // Apply sorting
+        $query->orderBy($sortBy, $sortDirection);
+
+        $roles = $query->paginate($perPage);
 
         // Add permissions to each role
         foreach ($roles->items() as $role) {

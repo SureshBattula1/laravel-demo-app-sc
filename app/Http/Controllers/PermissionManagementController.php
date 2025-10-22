@@ -14,27 +14,68 @@ class PermissionManagementController extends Controller
     public function index(Request $request)
     {
         $perPage = $request->get('per_page', 10);
+        $search = $request->get('search');
         $module = $request->get('module');
+        $action = $request->get('action');
+        $isSystemPermission = $request->get('is_system_permission');
+        $slug = $request->get('slug');
+        $sortBy = $request->get('sort_by', 'permissions.id');
+        $sortDirection = $request->get('sort_direction', 'asc');
 
         $query = DB::table('permissions')
             ->leftJoin('modules', 'permissions.module_id', '=', 'modules.id')
             ->select(
                 'permissions.id',
                 'permissions.name',
+                'permissions.slug',
                 'permissions.slug as display_name',
                 'permissions.description',
                 'permissions.action',
+                'permissions.is_system_permission',
                 'modules.name as module',
                 'modules.slug as module_slug',
                 'permissions.created_at',
                 'permissions.updated_at'
             );
 
-        if ($module) {
-            $query->where('modules.name', $module);
+        // Apply search filter
+        if ($search) {
+            $query->where(function($q) use ($search) {
+                $q->where('permissions.name', 'like', "%{$search}%")
+                  ->orWhere('permissions.slug', 'like', "%{$search}%")
+                  ->orWhere('modules.name', 'like', "%{$search}%")
+                  ->orWhere('permissions.action', 'like', "%{$search}%");
+            });
         }
 
-        $permissions = $query->orderBy('modules.name')->orderBy('permissions.name')->paginate($perPage);
+        // Apply module filter
+        if ($module) {
+            $query->where('modules.slug', $module);
+        }
+
+        // Apply action filter
+        if ($action) {
+            $query->where('permissions.action', $action);
+        }
+
+        // Apply system permission filter
+        if ($isSystemPermission !== null && $isSystemPermission !== '') {
+            $query->where('permissions.is_system_permission', (bool)$isSystemPermission);
+        }
+
+        // Apply slug filter
+        if ($slug) {
+            $query->where('permissions.slug', 'like', "%{$slug}%");
+        }
+
+        // Apply sorting
+        if ($sortBy === 'module') {
+            $query->orderBy('modules.name', $sortDirection);
+        } else {
+            $query->orderBy($sortBy, $sortDirection);
+        }
+
+        $permissions = $query->paginate($perPage);
 
         return response()->json([
             'success' => true,
