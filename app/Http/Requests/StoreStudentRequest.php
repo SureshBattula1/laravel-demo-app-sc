@@ -25,7 +25,7 @@ class StoreStudentRequest extends FormRequest
             'branch_id' => 'required|exists:branches,id',
             'admission_number' => 'required|string|unique:students,admission_number',
             'admission_date' => 'required|date|before_or_equal:today',
-            'grade' => 'required|string|in:1,2,3,4,5,6,7,8,9,10,11,12',
+            'grade' => 'required|string|exists:grades,value',
             'section' => 'nullable|string|max:10',
             'academic_year' => 'required|string|regex:/^\d{4}-\d{4}$/',
             'roll_number' => 'nullable|string|max:50',

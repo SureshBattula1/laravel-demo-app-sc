@@ -113,7 +113,7 @@ class SubjectController extends Controller
                 'name' => 'required|string|max:255|regex:/^[a-zA-Z0-9\s\-&]+$/',
                 'code' => 'required|string|max:50|unique:subjects|regex:/^[A-Z0-9\-]+$/',
                 'department_id' => 'required|exists:departments,id',
-                'grade_level' => 'required|string|in:1,2,3,4,5,6,7,8,9,10,11,12',
+                'grade_level' => 'required|string|exists:grades,value',
                 'type' => 'required|in:Core,Elective,Language,Lab,Activity',
                 'branch_id' => 'required|exists:branches,id',
                 'teacher_id' => 'nullable|exists:users,id',

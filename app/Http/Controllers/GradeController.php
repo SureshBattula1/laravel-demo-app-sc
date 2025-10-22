@@ -33,10 +33,10 @@ class GradeController extends Controller
             }
 
             // Define sortable columns
-            $sortableColumns = ['value', 'label', 'is_active', 'created_at', 'updated_at'];
+            $sortableColumns = ['value', 'label', 'order', 'category', 'is_active', 'created_at', 'updated_at'];
 
-            // Apply pagination and sorting (default: 25 per page, sorted by value asc)
-            $grades = $this->paginateAndSort($query, $request, $sortableColumns, 'value', 'asc');
+            // Apply pagination and sorting (default: 25 per page, sorted by order asc)
+            $grades = $this->paginateAndSort($query, $request, $sortableColumns, 'order', 'asc');
 
             // Transform the paginated data
             $transformedData = collect($grades->items())->map(function ($grade) {
@@ -44,6 +44,8 @@ class GradeController extends Controller
                     'value' => $grade->value,
                     'label' => $grade->label,
                     'description' => $grade->description ?? null,
+                    'order' => $grade->order ?? 0,
+                    'category' => $grade->category ?? null,
                     'is_active' => (bool) $grade->is_active,
                     'created_at' => $grade->created_at,
                     'updated_at' => $grade->updated_at
@@ -100,6 +102,8 @@ class GradeController extends Controller
                     'value' => $grade->value,
                     'label' => $grade->label,
                     'description' => $grade->description ?? null,
+                    'order' => $grade->order ?? 0,
+                    'category' => $grade->category ?? null,
                     'is_active' => (bool) $grade->is_active
                 ]
             ]);
@@ -125,6 +129,8 @@ class GradeController extends Controller
                 'value' => 'required|string|max:20|unique:grades,value',
                 'label' => 'required|string|max:100',
                 'description' => 'nullable|string|max:500',
+                'order' => 'nullable|integer|min:0',
+                'category' => 'nullable|string|in:Pre-Primary,Primary,Middle,Secondary,Senior-Secondary',
                 'is_active' => 'boolean'
             ]);
 
@@ -141,6 +147,8 @@ class GradeController extends Controller
                 'value' => strip_tags($request->value),
                 'label' => strip_tags($request->label),
                 'description' => $request->description ? strip_tags($request->description) : null,
+                'order' => $request->order ?? 99,
+                'category' => $request->category ?? null,
                 'is_active' => $request->boolean('is_active', true),
                 'created_at' => now(),
                 'updated_at' => now()
@@ -159,6 +167,8 @@ class GradeController extends Controller
                     'value' => $grade->value,
                     'label' => $grade->label,
                     'description' => $grade->description,
+                    'order' => $grade->order ?? 0,
+                    'category' => $grade->category ?? null,
                     'is_active' => (bool) $grade->is_active
                 ]
             ], 201);
@@ -193,6 +203,8 @@ class GradeController extends Controller
             $validator = Validator::make($request->all(), [
                 'label' => 'sometimes|required|string|max:100',
                 'description' => 'nullable|string|max:500',
+                'order' => 'nullable|integer|min:0',
+                'category' => 'nullable|string|in:Pre-Primary,Primary,Middle,Secondary,Senior-Secondary',
                 'is_active' => 'sometimes|boolean'
             ]);
 
@@ -211,6 +223,12 @@ class GradeController extends Controller
             }
             if ($request->has('description')) {
                 $updateData['description'] = $request->description ? strip_tags($request->description) : null;
+            }
+            if ($request->has('order')) {
+                $updateData['order'] = $request->order;
+            }
+            if ($request->has('category')) {
+                $updateData['category'] = $request->category;
             }
             if ($request->has('is_active')) {
                 $updateData['is_active'] = $request->boolean('is_active');
@@ -234,6 +252,8 @@ class GradeController extends Controller
                     'value' => $updatedGrade->value,
                     'label' => $updatedGrade->label,
                     'description' => $updatedGrade->description,
+                    'order' => $updatedGrade->order ?? 0,
+                    'category' => $updatedGrade->category ?? null,
                     'is_active' => (bool) $updatedGrade->is_active
                 ]
             ]);

@@ -320,11 +320,27 @@ class ImportService
     protected function validateAgeForGrade(int $age, string $grade): bool
     {
         $gradeAgeMap = [
-            'Pre-KG' => [2, 4], 'LKG' => [3, 5], 'UKG' => [4, 6],
-            '1' => [5, 7], '2' => [6, 8], '3' => [7, 9],
-            '4' => [8, 10], '5' => [9, 11], '6' => [10, 12],
-            '7' => [11, 13], '8' => [12, 14], '9' => [13, 15],
-            '10' => [14, 16], '11' => [15, 17], '12' => [16, 18]
+            // Pre-Primary Grades
+            'PlaySchool' => [2, 3],
+            'Nursery' => [3, 4],
+            'LKG' => [4, 5],
+            'UKG' => [5, 6],
+            // Primary Grades
+            '1' => [6, 7],
+            '2' => [7, 8],
+            '3' => [8, 9],
+            '4' => [9, 10],
+            '5' => [10, 11],
+            // Middle School
+            '6' => [11, 12],
+            '7' => [12, 13],
+            '8' => [13, 14],
+            // Secondary
+            '9' => [14, 15],
+            '10' => [15, 16],
+            // Senior Secondary
+            '11' => [16, 17],
+            '12' => [17, 18]
         ];
 
         if (!isset($gradeAgeMap[$grade])) {
