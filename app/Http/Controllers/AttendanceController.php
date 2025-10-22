@@ -94,17 +94,17 @@ class AttendanceController extends Controller
                 }
             }
 
-            // Search filter
+            // OPTIMIZED Search filter - removed leading wildcards for better index usage
             if ($request->has('search') && !empty($request->search)) {
                 $search = strip_tags($request->search);
                 $query->where(function($q) use ($search, $type) {
-                    $q->where('users.first_name', 'like', '%' . $search . '%')
-                      ->orWhere('users.last_name', 'like', '%' . $search . '%')
-                      ->orWhere('users.email', 'like', '%' . $search . '%');
+                    $q->where('users.first_name', 'like', $search . '%')
+                      ->orWhere('users.last_name', 'like', $search . '%')
+                      ->orWhere('users.email', 'like', $search . '%');
                     
                     // Add type-specific search fields
                     if ($type === 'student') {
-                        $q->orWhere('students.admission_number', 'like', '%' . $search . '%');
+                        $q->orWhere('students.admission_number', 'like', $search . '%');
                     }
                 });
             }
@@ -400,29 +400,45 @@ class AttendanceController extends Controller
                 ], 404);
             }
             
-            // Apply date filters if provided
-            $query = DB::table('teacher_attendance')
+            // OPTIMIZED: Build base query with filters
+            $baseQuery = DB::table('teacher_attendance')
                 ->where('teacher_id', $teacherId);
             
             if (request()->has('from_date')) {
-                $query->whereDate('date', '>=', request('from_date'));
+                $baseQuery->whereDate('date', '>=', request('from_date'));
             }
             
             if (request()->has('to_date')) {
-                $query->whereDate('date', '<=', request('to_date'));
+                $baseQuery->whereDate('date', '<=', request('to_date'));
             }
             
-            $attendance = $query->orderBy('date', 'desc')->get();
+            // Get attendance records
+            $attendance = (clone $baseQuery)->orderBy('date', 'desc')->get();
 
+            // OPTIMIZED: Calculate summary using SQL aggregation instead of PHP loops
+            $summaryQuery = (clone $baseQuery)
+                ->select(
+                    DB::raw('COUNT(*) as total_days'),
+                    DB::raw('SUM(CASE WHEN status = "Present" THEN 1 ELSE 0 END) as present'),
+                    DB::raw('SUM(CASE WHEN status = "Absent" THEN 1 ELSE 0 END) as absent'),
+                    DB::raw('SUM(CASE WHEN status = "Late" THEN 1 ELSE 0 END) as late'),
+                    DB::raw('SUM(CASE WHEN status IN ("Sick Leave", "Leave") THEN 1 ELSE 0 END) as leaves'),
+                    DB::raw('SUM(CASE WHEN status = "Half-Day" THEN 1 ELSE 0 END) as half_day')
+                )
+                ->first();
+
+            $totalDays = $summaryQuery->total_days ?? 0;
+            $presentCount = $summaryQuery->present ?? 0;
+            
             $summary = [
-                'total_days' => $attendance->count(),
-                'present' => $attendance->where('status', 'Present')->count(),
-                'absent' => $attendance->where('status', 'Absent')->count(),
-                'late' => $attendance->where('status', 'Late')->count(),
-                'leaves' => $attendance->whereIn('status', ['Sick Leave', 'Leave'])->count(),
-                'half_day' => $attendance->where('status', 'Half-Day')->count(),
-                'percentage' => $attendance->count() > 0 
-                    ? round(($attendance->where('status', 'Present')->count() / $attendance->count()) * 100, 2)
+                'total_days' => (int) $totalDays,
+                'present' => (int) $presentCount,
+                'absent' => (int) ($summaryQuery->absent ?? 0),
+                'late' => (int) ($summaryQuery->late ?? 0),
+                'leaves' => (int) ($summaryQuery->leaves ?? 0),
+                'half_day' => (int) ($summaryQuery->half_day ?? 0),
+                'percentage' => $totalDays > 0 
+                    ? round(($presentCount / $totalDays) * 100, 2)
                     : 0
             ];
 
@@ -475,29 +491,45 @@ class AttendanceController extends Controller
                 ], 404);
             }
             
-            // Apply date filters if provided
-            $query = DB::table('student_attendance')
+            // OPTIMIZED: Build base query with filters
+            $baseQuery = DB::table('student_attendance')
                 ->where('student_id', $studentId);
             
             if (request()->has('from_date')) {
-                $query->whereDate('date', '>=', request('from_date'));
+                $baseQuery->whereDate('date', '>=', request('from_date'));
             }
             
             if (request()->has('to_date')) {
-                $query->whereDate('date', '<=', request('to_date'));
+                $baseQuery->whereDate('date', '<=', request('to_date'));
             }
             
-            $attendance = $query->orderBy('date', 'desc')->get();
+            // Get attendance records
+            $attendance = (clone $baseQuery)->orderBy('date', 'desc')->get();
 
+            // OPTIMIZED: Calculate summary using SQL aggregation instead of PHP loops
+            $summaryQuery = (clone $baseQuery)
+                ->select(
+                    DB::raw('COUNT(*) as total_days'),
+                    DB::raw('SUM(CASE WHEN status = "Present" THEN 1 ELSE 0 END) as present'),
+                    DB::raw('SUM(CASE WHEN status = "Absent" THEN 1 ELSE 0 END) as absent'),
+                    DB::raw('SUM(CASE WHEN status = "Late" THEN 1 ELSE 0 END) as late'),
+                    DB::raw('SUM(CASE WHEN status IN ("Sick Leave", "Leave") THEN 1 ELSE 0 END) as leaves'),
+                    DB::raw('SUM(CASE WHEN status = "Half-Day" THEN 1 ELSE 0 END) as half_day')
+                )
+                ->first();
+
+            $totalDays = $summaryQuery->total_days ?? 0;
+            $presentCount = $summaryQuery->present ?? 0;
+            
             $summary = [
-                'total_days' => $attendance->count(),
-                'present' => $attendance->where('status', 'Present')->count(),
-                'absent' => $attendance->where('status', 'Absent')->count(),
-                'late' => $attendance->where('status', 'Late')->count(),
-                'leaves' => $attendance->whereIn('status', ['Sick Leave', 'Leave'])->count(),
-                'half_day' => $attendance->where('status', 'Half-Day')->count(),
-                'percentage' => $attendance->count() > 0 
-                    ? round(($attendance->where('status', 'Present')->count() / $attendance->count()) * 100, 2)
+                'total_days' => (int) $totalDays,
+                'present' => (int) $presentCount,
+                'absent' => (int) ($summaryQuery->absent ?? 0),
+                'late' => (int) ($summaryQuery->late ?? 0),
+                'leaves' => (int) ($summaryQuery->leaves ?? 0),
+                'half_day' => (int) ($summaryQuery->half_day ?? 0),
+                'percentage' => $totalDays > 0 
+                    ? round(($presentCount / $totalDays) * 100, 2)
                     : 0
             ];
 
@@ -541,6 +573,19 @@ class AttendanceController extends Controller
                 ->orderBy('students.roll_number')
                 ->get();
 
+            // OPTIMIZED: Calculate summary using SQL instead of PHP
+            $summaryQuery = DB::table('student_attendance')
+                ->join('students', 'student_attendance.student_id', '=', 'students.user_id')
+                ->where('students.grade', $grade)
+                ->where('students.section', $section)
+                ->whereDate('student_attendance.date', $date)
+                ->select(
+                    DB::raw('COUNT(*) as total'),
+                    DB::raw('SUM(CASE WHEN student_attendance.status = "Present" THEN 1 ELSE 0 END) as present'),
+                    DB::raw('SUM(CASE WHEN student_attendance.status = "Absent" THEN 1 ELSE 0 END) as absent')
+                )
+                ->first();
+
             return response()->json([
                 'success' => true,
                 'data' => $attendance,
@@ -548,9 +593,9 @@ class AttendanceController extends Controller
                     'grade' => $grade,
                     'section' => $section,
                     'date' => $date,
-                    'total' => $attendance->count(),
-                    'present' => $attendance->where('status', 'Present')->count(),
-                    'absent' => $attendance->where('status', 'Absent')->count()
+                    'total' => (int) ($summaryQuery->total ?? 0),
+                    'present' => (int) ($summaryQuery->present ?? 0),
+                    'absent' => (int) ($summaryQuery->absent ?? 0)
                 ]
             ]);
         } catch (\Exception $e) {
@@ -605,13 +650,37 @@ class AttendanceController extends Controller
 
             $records = $query->get();
 
+            // OPTIMIZED: Calculate summary using SQL aggregation
+            $summaryQuery = (clone DB::table($table)
+                ->whereBetween('date', [$request->from_date, $request->to_date]));
+
+            if ($request->has('branch_id')) {
+                $summaryQuery->where('branch_id', $request->branch_id);
+            }
+            if ($type === 'student' && $request->has('grade')) {
+                $summaryQuery->where('grade_level', $request->grade);
+            }
+            if ($type === 'student' && $request->has('section')) {
+                $summaryQuery->where('section', $request->section);
+            }
+
+            $summaryData = $summaryQuery->select(
+                DB::raw('COUNT(*) as total_records'),
+                DB::raw('SUM(CASE WHEN status = "Present" THEN 1 ELSE 0 END) as present'),
+                DB::raw('SUM(CASE WHEN status = "Absent" THEN 1 ELSE 0 END) as absent'),
+                DB::raw('SUM(CASE WHEN status = "Late" THEN 1 ELSE 0 END) as late')
+            )->first();
+
+            $totalRecords = $summaryData->total_records ?? 0;
+            $presentCount = $summaryData->present ?? 0;
+
             $summary = [
-                'total_records' => $records->count(),
-                'present' => $records->where('status', 'Present')->count(),
-                'absent' => $records->where('status', 'Absent')->count(),
-                'late' => $records->where('status', 'Late')->count(),
-                'percentage' => $records->count() > 0
-                    ? round(($records->where('status', 'Present')->count() / $records->count()) * 100, 2)
+                'total_records' => (int) $totalRecords,
+                'present' => (int) $presentCount,
+                'absent' => (int) ($summaryData->absent ?? 0),
+                'late' => (int) ($summaryData->late ?? 0),
+                'percentage' => $totalRecords > 0
+                    ? round(($presentCount / $totalRecords) * 100, 2)
                     : 0
             ];
 
@@ -644,20 +713,37 @@ class AttendanceController extends Controller
             $from_date = request()->get('from_date', date('Y-m-01'));
             $to_date = request()->get('to_date', date('Y-m-d'));
 
+            // Get attendance records
             $attendance = DB::table('student_attendance')
                 ->where('student_id', $studentId)
                 ->whereBetween('date', [$from_date, $to_date])
                 ->orderBy('date', 'desc')
                 ->get();
 
+            // OPTIMIZED: Calculate summary using SQL aggregation
+            $summaryQuery = DB::table('student_attendance')
+                ->where('student_id', $studentId)
+                ->whereBetween('date', [$from_date, $to_date])
+                ->select(
+                    DB::raw('COUNT(*) as total_days'),
+                    DB::raw('SUM(CASE WHEN status = "Present" THEN 1 ELSE 0 END) as present'),
+                    DB::raw('SUM(CASE WHEN status = "Absent" THEN 1 ELSE 0 END) as absent'),
+                    DB::raw('SUM(CASE WHEN status = "Late" THEN 1 ELSE 0 END) as late'),
+                    DB::raw('SUM(CASE WHEN status IN ("Sick Leave", "Leave") THEN 1 ELSE 0 END) as leaves')
+                )
+                ->first();
+
+            $totalDays = $summaryQuery->total_days ?? 0;
+            $presentCount = $summaryQuery->present ?? 0;
+
             $summary = [
-                'total_days' => $attendance->count(),
-                'present' => $attendance->where('status', 'Present')->count(),
-                'absent' => $attendance->where('status', 'Absent')->count(),
-                'late' => $attendance->where('status', 'Late')->count(),
-                'leaves' => $attendance->whereIn('status', ['Sick Leave', 'Leave'])->count(),
-                'percentage' => $attendance->count() > 0
-                    ? round(($attendance->where('status', 'Present')->count() / $attendance->count()) * 100, 2)
+                'total_days' => (int) $totalDays,
+                'present' => (int) $presentCount,
+                'absent' => (int) ($summaryQuery->absent ?? 0),
+                'late' => (int) ($summaryQuery->late ?? 0),
+                'leaves' => (int) ($summaryQuery->leaves ?? 0),
+                'percentage' => $totalDays > 0
+                    ? round(($presentCount / $totalDays) * 100, 2)
                     : 0
             ];
 
