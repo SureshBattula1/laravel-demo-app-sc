@@ -11,6 +11,7 @@ use App\Models\Department;
 use App\Models\Teacher;
 use App\Models\Section;
 use App\Models\ClassModel;
+use App\Models\Role;
 use Carbon\Carbon;
 
 class DemoDataSeeder extends Seeder
@@ -307,6 +308,17 @@ class DemoDataSeeder extends Seeder
                     ]
                 );
                 
+                // Assign Teacher role via roles relationship
+                $teacherRole = Role::where('slug', 'teacher')->first();
+                if ($teacherRole && !$user->roles()->where('role_id', $teacherRole->id)->exists()) {
+                    $user->roles()->attach($teacherRole->id, [
+                        'is_primary' => true,
+                        'branch_id' => $branch->id,
+                        'created_at' => now(),
+                        'updated_at' => now()
+                    ]);
+                }
+                
                 // Create Teacher Record - BARE MINIMUM (based on actual schema)
                 $teacher = Teacher::firstOrCreate(
                     ['user_id' => $user->id],
@@ -419,6 +431,17 @@ class DemoDataSeeder extends Seeder
                             'email_verified_at' => now()
                         ]
                     );
+                    
+                    // Assign Student role via roles relationship
+                    $studentRole = Role::where('slug', 'student')->first();
+                    if ($studentRole && !$user->roles()->where('role_id', $studentRole->id)->exists()) {
+                        $user->roles()->attach($studentRole->id, [
+                            'is_primary' => true,
+                            'branch_id' => $branch->id,
+                            'created_at' => now(),
+                            'updated_at' => now()
+                        ]);
+                    }
                     
                     // Create Student Record
                     $fatherFirstName = $this->firstNames['Male'][array_rand($this->firstNames['Male'])];

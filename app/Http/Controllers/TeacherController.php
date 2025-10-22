@@ -356,6 +356,17 @@ class TeacherController extends Controller
                 'branch_id' => $request->branch_id,
                 'is_active' => $request->is_active ?? true
             ]);
+            
+            // Assign Teacher role via roles relationship
+            $teacherRole = \App\Models\Role::where('slug', 'teacher')->first();
+            if ($teacherRole) {
+                $user->roles()->attach($teacherRole->id, [
+                    'is_primary' => true,
+                    'branch_id' => $request->branch_id,
+                    'created_at' => now(),
+                    'updated_at' => now()
+                ]);
+            }
 
             // Create teacher profile with fields that exist in DB
             $teacherData = $request->only([

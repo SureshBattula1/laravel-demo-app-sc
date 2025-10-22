@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Models\Branch;
 use App\Models\Department;
 use App\Models\Teacher;
+use App\Models\Role;
 use Carbon\Carbon;
 
 class TeacherSeeder extends Seeder
@@ -33,6 +34,15 @@ class TeacherSeeder extends Seeder
                          'Walker', 'Young', 'Allen', 'King', 'Wright', 'Scott', 'Torres', 'Nguyen', 'Hill', 'Flores',
                          'Green', 'Adams', 'Nelson', 'Baker', 'Hall', 'Rivera', 'Campbell', 'Mitchell', 'Carter', 'Roberts'];
     
+    private $cities = [
+        ['name' => 'New York', 'state' => 'New York', 'country' => 'USA', 'code' => 'NY'],
+        ['name' => 'Los Angeles', 'state' => 'California', 'country' => 'USA', 'code' => 'LA'],
+        ['name' => 'Chicago', 'state' => 'Illinois', 'country' => 'USA', 'code' => 'CH'],
+        ['name' => 'Houston', 'state' => 'Texas', 'country' => 'USA', 'code' => 'HO'],
+        ['name' => 'Phoenix', 'state' => 'Arizona', 'country' => 'USA', 'code' => 'PH'],
+        ['name' => 'Miami', 'state' => 'Florida', 'country' => 'USA', 'code' => 'MI'],
+    ];
+    
     private $subjects = [
         'Mathematics', 'English', 'Science', 'Physics', 'Chemistry', 'Biology', 
         'History', 'Geography', 'Computer Science', 'Physical Education', 
@@ -51,16 +61,12 @@ class TeacherSeeder extends Seeder
         DB::beginTransaction();
         
         try {
-            $this->command->info('🚀 Starting Teacher Seeding...');
+            $this->command->info('🚀 Starting Teacher Seeding for 6 Branches...');
             
-            // Get all active branches
-            $branches = Branch::active()->get();
+            // Ensure we have 6 branches
+            $branches = $this->ensureBranches();
             
-            if ($branches->isEmpty()) {
-                $this->command->warn('⚠️ No branches found. Please seed branches first.');
-                DB::rollBack();
-                return;
-            }
+            $this->command->info("✓ Working with {$branches->count()} branches");
             
             $totalTeachers = 0;
             
@@ -93,6 +99,53 @@ class TeacherSeeder extends Seeder
             $this->command->error('Stack trace: ' . $e->getTraceAsString());
             throw $e;
         }
+    }
+    
+    /**
+     * Ensure 6 branches exist
+     */
+    private function ensureBranches()
+    {
+        $this->command->info('📍 Ensuring 6 branches exist...');
+        
+        foreach ($this->cities as $index => $city) {
+            $branch = Branch::firstOrCreate(
+                ['code' => 'BR' . str_pad($index + 1, 3, '0', STR_PAD_LEFT)],
+                [
+                    'name' => 'Excellence Academy - ' . $city['name'],
+                    'address' => rand(100, 9999) . ' ' . $this->getRandomStreet(),
+                    'city' => $city['name'],
+                    'state' => $city['state'],
+                    'country' => $city['country'],
+                    'pincode' => str_pad(rand(10000, 99999), 5, '0', STR_PAD_LEFT),
+                    'phone' => '+1-' . rand(200, 999) . '-' . rand(200, 999) . '-' . rand(1000, 9999),
+                    'email' => strtolower($city['code']) . '@excellenceacademy.com',
+                    'principal_name' => 'Dr. ' . $this->getRandomName(),
+                    'principal_contact' => '+1-' . rand(200, 999) . '-' . rand(200, 999) . '-' . rand(1000, 9999),
+                    'principal_email' => 'principal.' . strtolower($city['code']) . '@excellenceacademy.com',
+                    'established_date' => Carbon::now()->subYears(rand(5, 20))->format('Y-m-d'),
+                    'affiliation_number' => 'AFF-' . date('Y') . '-' . str_pad($index + 1, 4, '0', STR_PAD_LEFT),
+                    'is_main_branch' => $index === 0,
+                    'is_active' => true,
+                    'status' => 'Active',
+                    'total_capacity' => 1200,
+                    'current_enrollment' => 0,
+                    'has_library' => true,
+                    'has_lab' => true,
+                    'has_sports' => true,
+                    'has_canteen' => true,
+                    'has_transport' => true,
+                ]
+            );
+            
+            if ($branch->wasRecentlyCreated) {
+                $this->command->info("  ✓ Created new branch: {$branch->name}");
+            } else {
+                $this->command->info("  ✓ Branch already exists: {$branch->name}");
+            }
+        }
+        
+        return Branch::active()->get();
     }
     
     /**
@@ -133,6 +186,17 @@ class TeacherSeeder extends Seeder
                     continue; // Skip if teacher already exists
                 }
                 $user = $existingUser;
+                
+                // Ensure existing user has Teacher role assigned
+                $teacherRole = Role::where('slug', 'teacher')->first();
+                if ($teacherRole && !$user->roles()->where('role_id', $teacherRole->id)->exists()) {
+                    $user->roles()->attach($teacherRole->id, [
+                        'is_primary' => true,
+                        'branch_id' => $branch->id,
+                        'created_at' => now(),
+                        'updated_at' => now()
+                    ]);
+                }
             } else {
                 // Create User
                 $user = User::create([
@@ -147,10 +211,28 @@ class TeacherSeeder extends Seeder
                     'is_active' => true,
                     'email_verified_at' => now()
                 ]);
+                
+                // Assign Teacher role via roles relationship
+                $teacherRole = Role::where('slug', 'teacher')->first();
+                if ($teacherRole) {
+                    $user->roles()->attach($teacherRole->id, [
+                        'is_primary' => true,
+                        'branch_id' => $branch->id,
+                        'created_at' => now(),
+                        'updated_at' => now()
+                    ]);
+                }
             }
             
             // Generate employee ID
             $employeeId = 'EMP-' . $branch->code . '-' . str_pad($i, 4, '0', STR_PAD_LEFT);
+            
+            // Check if teacher with this employee_id already exists
+            $existingTeacher = Teacher::where('employee_id', $employeeId)->first();
+            if ($existingTeacher) {
+                $this->command->warn("  ⚠ Skipping {$employeeId} - already exists");
+                continue;
+            }
             
             // Random department
             $department = $departments->isNotEmpty() ? $departments->random() : null;
@@ -170,7 +252,6 @@ class TeacherSeeder extends Seeder
             
             // Create Teacher Record - only using columns that exist in the database
             $currentAddress = rand(100, 9999) . ' ' . $this->getRandomStreet();
-            $permanentAddress = rand(100, 9999) . ' ' . $this->getRandomStreet();
             
             // Create Teacher Record - Using the same minimal approach as DemoDataSeeder
             $teacher = Teacher::create([
@@ -202,8 +283,9 @@ class TeacherSeeder extends Seeder
      */
     private function getRandomSubjects(): array
     {
-        shuffle($this->subjects);
-        return array_slice($this->subjects, 0, rand(2, 4));
+        $subjects = $this->subjects;
+        shuffle($subjects);
+        return array_slice($subjects, 0, rand(2, 4));
     }
     
     /**
@@ -323,4 +405,3 @@ class TeacherSeeder extends Seeder
         return array_slice($skills, 0, rand(3, 6));
     }
 }
-

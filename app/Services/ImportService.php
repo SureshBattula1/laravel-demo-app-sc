@@ -6,6 +6,7 @@ use App\Models\ImportHistory;
 use App\Models\StudentImport;
 use App\Models\TeacherImport;
 use App\Models\User;
+use App\Models\Role;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
@@ -366,6 +367,17 @@ class ImportService
                         'branch_id' => $record->branch_id,
                         'is_active' => true,
                     ]);
+                    
+                    // Assign Student role via roles relationship
+                    $studentRole = Role::where('slug', 'student')->first();
+                    if ($studentRole) {
+                        $user->roles()->attach($studentRole->id, [
+                            'is_primary' => true,
+                            'branch_id' => $record->branch_id,
+                            'created_at' => now(),
+                            'updated_at' => now()
+                        ]);
+                    }
 
                     // Create student record
                     // ✅ Only include columns that exist in the students table
@@ -482,6 +494,17 @@ class ImportService
                         'branch_id' => $record->branch_id,
                         'is_active' => true,
                     ]);
+                    
+                    // Assign Teacher role via roles relationship
+                    $teacherRole = Role::where('slug', 'teacher')->first();
+                    if ($teacherRole) {
+                        $user->roles()->attach($teacherRole->id, [
+                            'is_primary' => true,
+                            'branch_id' => $record->branch_id,
+                            'created_at' => now(),
+                            'updated_at' => now()
+                        ]);
+                    }
 
                     // Create teacher record (if teachers table exists)
                     if (Schema::hasTable('teachers')) {
