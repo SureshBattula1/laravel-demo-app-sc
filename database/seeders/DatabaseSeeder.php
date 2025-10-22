@@ -168,9 +168,10 @@ class DatabaseSeeder extends Seeder
 
             DB::commit();
 
-            // Seed dashboard data
+            // Seed comprehensive demo data
             $this->call([
-                DashboardDataSeeder::class,
+                DemoDataSeeder::class,
+                // DashboardDataSeeder::class, // Optional: uncomment if needed
             ]);
 
             $this->command->info('✅ Database seeded successfully!');
