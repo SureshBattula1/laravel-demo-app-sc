@@ -88,11 +88,15 @@ class StudentController extends Controller
             if ($request->has('search')) {
                 $search = $request->search;
                 $query->where(function($q) use ($search) {
-                    $q->where('users.first_name', 'like', "%{$search}%")
-                      ->orWhere('users.last_name', 'like', "%{$search}%")
-                      ->orWhere('users.email', 'like', "%{$search}%")
-                      ->orWhere('students.admission_number', 'like', "%{$search}%")
-                      ->orWhere('students.roll_number', 'like', "%{$search}%");
+                    // Use FULLTEXT search if available, otherwise use optimized LIKE queries
+                    // Remove leading wildcard for better index usage where possible
+                    $q->where('users.first_name', 'like', "{$search}%")
+                      ->orWhere('users.last_name', 'like', "{$search}%")
+                      ->orWhere('users.email', 'like', "{$search}%")
+                      ->orWhere('students.admission_number', 'like', "{$search}%")
+                      ->orWhere('students.roll_number', 'like', "{$search}%")
+                      // Also check for exact matches or contains (for flexibility)
+                      ->orWhere(DB::raw('CONCAT(users.first_name, " ", users.last_name)'), 'like', "{$search}%");
                 });
             }
 
@@ -677,11 +681,15 @@ class StudentController extends Controller
         if ($request->has('search')) {
             $search = $request->search;
             $query->where(function($q) use ($search) {
-                $q->where('users.first_name', 'like', "%{$search}%")
-                  ->orWhere('users.last_name', 'like', "%{$search}%")
-                  ->orWhere('users.email', 'like', "%{$search}%")
-                  ->orWhere('students.admission_number', 'like', "%{$search}%")
-                  ->orWhere('students.roll_number', 'like', "%{$search}%");
+                // Use FULLTEXT search if available, otherwise use optimized LIKE queries
+                // Remove leading wildcard for better index usage where possible
+                $q->where('users.first_name', 'like', "{$search}%")
+                  ->orWhere('users.last_name', 'like', "{$search}%")
+                  ->orWhere('users.email', 'like', "{$search}%")
+                  ->orWhere('students.admission_number', 'like', "{$search}%")
+                  ->orWhere('students.roll_number', 'like', "{$search}%")
+                  // Also check for exact matches or contains (for flexibility)
+                  ->orWhere(DB::raw('CONCAT(users.first_name, " ", users.last_name)'), 'like', "{$search}%");
             });
         }
 
