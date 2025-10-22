@@ -67,27 +67,27 @@ class TeacherController extends Controller
                 });
             }
 
-            // Search functionality
+            // OPTIMIZED Search functionality - removed leading wildcards for better index usage
             if ($request->has('search')) {
                 $search = strip_tags($request->search);
                 $query->where(function($q) use ($search) {
-                    $q->where('employee_id', 'like', '%' . $search . '%')
-                      ->orWhere('designation', 'like', '%' . $search . '%')
+                    $q->where('employee_id', 'like', $search . '%')
+                      ->orWhere('designation', 'like', $search . '%')
                       ->orWhereHas('user', function($userQuery) use ($search) {
-                          $userQuery->where('first_name', 'like', '%' . $search . '%')
-                      ->orWhere('last_name', 'like', '%' . $search . '%')
-                      ->orWhere('email', 'like', '%' . $search . '%')
-                      ->orWhere('phone', 'like', '%' . $search . '%');
+                          $userQuery->where('first_name', 'like', $search . '%')
+                                    ->orWhere('last_name', 'like', $search . '%')
+                                    ->orWhere('email', 'like', $search . '%')
+                                    ->orWhere('phone', 'like', $search . '%');
                       });
                 });
             }
 
-            // Filter by specific fields
+            // OPTIMIZED Filter by specific fields - removed leading wildcards
             if ($request->has('employee_id')) {
-                $query->where('employee_id', 'like', '%' . $request->employee_id . '%');
+                $query->where('employee_id', 'like', $request->employee_id . '%');
             }
             if ($request->has('designation')) {
-                $query->where('designation', 'like', '%' . $request->designation . '%');
+                $query->where('designation', 'like', $request->designation . '%');
             }
             if ($request->has('gender')) {
                 $query->where('gender', $request->gender);
@@ -952,9 +952,9 @@ class TeacherController extends Controller
             $query->where('category_type', $request->category_type);
         }
 
-        // Filter by designation
+        // OPTIMIZED Filter by designation
         if ($request->has('designation') && $request->designation !== '') {
-            $query->where('designation', 'like', '%' . $request->designation . '%');
+            $query->where('designation', 'like', $request->designation . '%');
         }
 
         // Filter by employee type
@@ -972,9 +972,9 @@ class TeacherController extends Controller
             $query->where('gender', $request->gender);
         }
 
-        // Filter by employee_id
+        // OPTIMIZED Filter by employee_id
         if ($request->has('employee_id') && $request->employee_id !== '') {
-            $query->where('employee_id', 'like', '%' . $request->employee_id . '%');
+            $query->where('employee_id', 'like', $request->employee_id . '%');
         }
 
         // Filter by active status
@@ -984,20 +984,20 @@ class TeacherController extends Controller
             });
         }
 
-        // Global search across multiple fields
+        // OPTIMIZED Global search across multiple fields - removed leading wildcards
         if ($request->has('search') && $request->search !== '') {
             $searchTerm = $request->search;
             $query->where(function($q) use ($searchTerm) {
-                $q->where('employee_id', 'like', '%' . $searchTerm . '%')
-                  ->orWhere('designation', 'like', '%' . $searchTerm . '%')
+                $q->where('employee_id', 'like', $searchTerm . '%')
+                  ->orWhere('designation', 'like', $searchTerm . '%')
                   ->orWhereHas('user', function($userQuery) use ($searchTerm) {
-                      $userQuery->where('first_name', 'like', '%' . $searchTerm . '%')
-                                ->orWhere('last_name', 'like', '%' . $searchTerm . '%')
-                                ->orWhere('email', 'like', '%' . $searchTerm . '%')
-                                ->orWhere('phone', 'like', '%' . $searchTerm . '%');
+                      $userQuery->where('first_name', 'like', $searchTerm . '%')
+                                ->orWhere('last_name', 'like', $searchTerm . '%')
+                                ->orWhere('email', 'like', $searchTerm . '%')
+                                ->orWhere('phone', 'like', $searchTerm . '%');
                   })
                   ->orWhereHas('department', function($deptQuery) use ($searchTerm) {
-                      $deptQuery->where('name', 'like', '%' . $searchTerm . '%');
+                      $deptQuery->where('name', 'like', $searchTerm . '%');
                   });
             });
         }
