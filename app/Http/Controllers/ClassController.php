@@ -308,75 +308,100 @@ class ClassController extends Controller
 
     /**
      * Get available grades with statistics
+     * OPTIMIZED: Reduced from O(N) queries to O(1) using aggregation
      */
     public function getGrades(Request $request)
     {
         try {
-            // Get grades from the grades table
-            $gradesFromDb = DB::table('grades')->orderBy('value', 'asc')->get();
-            
-            $grades = [];
             $branchId = $request->query('branch_id');
             
+            // Get grades from the grades table
+            $gradesFromDb = DB::table('grades')
+                ->where('is_active', true)
+                ->orderBy('value', 'asc')
+                ->get();
+            
+            // OPTIMIZATION: Get all student counts in ONE query instead of N queries
+            $studentCountsQuery = DB::table('students')
+                ->select('grade', DB::raw('COUNT(*) as count'))
+                ->where('student_status', 'Active')
+                ->groupBy('grade');
+            
+            if ($branchId) {
+                $studentCountsQuery->where('branch_id', $branchId);
+            }
+            
+            $studentCounts = $studentCountsQuery->pluck('count', 'grade')->toArray();
+            
+            // OPTIMIZATION: Get all class counts in ONE query
+            $classCountsQuery = DB::table('classes')
+                ->select('grade', DB::raw('COUNT(*) as count'))
+                ->where('is_active', true)
+                ->groupBy('grade');
+            
+            if ($branchId) {
+                $classCountsQuery->where('branch_id', $branchId);
+            }
+            
+            $classCounts = $classCountsQuery->pluck('count', 'grade')->toArray();
+            
+            // OPTIMIZATION: Get all sections in ONE query from classes table
+            $sectionsFromClassesQuery = DB::table('classes')
+                ->select('grade', 'section')
+                ->whereNotNull('section')
+                ->where('is_active', true)
+                ->distinct();
+            
+            if ($branchId) {
+                $sectionsFromClassesQuery->where('branch_id', $branchId);
+            }
+            
+            $sectionsFromClasses = $sectionsFromClassesQuery->get()
+                ->groupBy('grade')
+                ->map(function($items) {
+                    return $items->pluck('section')->filter()->unique()->values()->toArray();
+                })
+                ->toArray();
+            
+            // OPTIMIZATION: Get all sections in ONE query from sections table
+            $sectionsFromTableQuery = DB::table('sections')
+                ->select('grade_level', 'name')
+                ->where('is_active', true)
+                ->whereNull('deleted_at')
+                ->distinct();
+            
+            if ($branchId) {
+                $sectionsFromTableQuery->where('branch_id', $branchId);
+            }
+            
+            $sectionsFromTable = $sectionsFromTableQuery->get()
+                ->groupBy('grade_level')
+                ->map(function($items) {
+                    return $items->pluck('name')->filter()->unique()->values()->toArray();
+                })
+                ->toArray();
+            
+            // Now build the response array - NO MORE QUERIES IN LOOP!
+            $grades = [];
             foreach ($gradesFromDb as $gradeRecord) {
-                // Get classes for this grade with optional branch filter
-                $classesQuery = ClassModel::where('grade', $gradeRecord->value)
-                    ->where('is_active', true);
+                $gradeValue = $gradeRecord->value;
                 
-                if ($branchId) {
-                    $classesQuery->where('branch_id', $branchId);
-                }
-                
-                $classes = $classesQuery->get();
-                
-                // Get unique sections from both classes and sections tables
-                $sectionsFromClasses = $classes->pluck('section')
-                    ->filter()
+                // Merge sections from both sources
+                $sectionsClass = $sectionsFromClasses[$gradeValue] ?? [];
+                $sectionsTable = $sectionsFromTable[$gradeValue] ?? [];
+                $sections = collect(array_merge($sectionsClass, $sectionsTable))
                     ->unique()
+                    ->sort()
                     ->values()
                     ->toArray();
-                
-                // Get sections from the sections table for this grade with optional branch filter
-                $sectionsTableQuery = DB::table('sections')
-                    ->where('grade_level', $gradeRecord->value)
-                    ->where('is_active', true)
-                    ->whereNull('deleted_at');
-                
-                if ($branchId) {
-                    $sectionsTableQuery->where('branch_id', $branchId);
-                }
-                
-                $sectionsFromSectionsTable = $sectionsTableQuery
-                    ->pluck('name')
-                    ->filter()
-                    ->unique()
-                    ->values()
-                    ->toArray();
-                
-                // Merge and get unique sections from both sources
-                $sections = collect(array_merge($sectionsFromClasses, $sectionsFromSectionsTable))
-                    ->unique()
-                    ->values()
-                    ->toArray();
-                
-                // Count total students in this grade with optional branch filter
-                $studentsQuery = DB::table('students')
-                    ->where('grade', $gradeRecord->value)
-                    ->where('student_status', 'Active');
-                
-                if ($branchId) {
-                    $studentsQuery->where('branch_id', $branchId);
-                }
-                
-                $studentsCount = $studentsQuery->count();
                 
                 $grades[] = [
-                    'value' => $gradeRecord->value,
+                    'value' => $gradeValue,
                     'label' => $gradeRecord->label,
                     'description' => $gradeRecord->description ?? null,
-                    'students_count' => $studentsCount,
+                    'students_count' => $studentCounts[$gradeValue] ?? 0,
                     'sections' => $sections,
-                    'classes_count' => $classes->count(),
+                    'classes_count' => $classCounts[$gradeValue] ?? 0,
                     'is_active' => (bool) $gradeRecord->is_active
                 ];
             }
@@ -466,6 +491,7 @@ class ClassController extends Controller
 
     /**
      * Get available sections (with dynamic filtering by grade and branch)
+     * OPTIMIZED: Check both classes and sections tables efficiently
      */
     public function getSections(Request $request)
     {
@@ -473,22 +499,39 @@ class ClassController extends Controller
             $grade = $request->query('grade');
             $branchId = $request->query('branch_id');
 
-            // If grade and/or branch specified, return sections from existing classes
+            // If grade and/or branch specified, return sections from existing data
             if ($grade || $branchId) {
-                $query = ClassModel::select('section')
+                // OPTIMIZATION: Query both tables with UNION instead of separate queries
+                $query = DB::table('classes')
+                    ->select('section as name')
                     ->whereNotNull('section')
-                    ->where('is_active', true)
-                    ->distinct();
+                    ->where('is_active', true);
 
                 if ($grade) {
                     $query->where('grade', $grade);
                 }
-
                 if ($branchId) {
                     $query->where('branch_id', $branchId);
                 }
 
-                $existingSections = $query->pluck('section')
+                // Also get from sections table
+                $sectionsQuery = DB::table('sections')
+                    ->select('name')
+                    ->where('is_active', true)
+                    ->whereNull('deleted_at');
+
+                if ($grade) {
+                    $sectionsQuery->where('grade_level', $grade);
+                }
+                if ($branchId) {
+                    $sectionsQuery->where('branch_id', $branchId);
+                }
+
+                // Merge and get unique sections
+                $classSection = $query->pluck('name')->toArray();
+                $tableSections = $sectionsQuery->pluck('name')->toArray();
+                
+                $existingSections = collect(array_merge($classSection, $tableSections))
                     ->filter()
                     ->unique()
                     ->sort()

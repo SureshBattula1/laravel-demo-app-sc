@@ -76,12 +76,33 @@ class SectionController extends Controller
             // Apply pagination and sorting (default: 25 per page, sorted by name asc)
             $sections = $this->paginateAndSort($query, $request, $sortableColumns, 'name', 'asc');
 
+            // OPTIMIZATION: Get student counts for all sections in ONE query to avoid N+1
+            $sectionIds = $sections->pluck('id')->toArray();
+            $studentCounts = DB::table('students')
+                ->select(
+                    'branch_id',
+                    'grade',
+                    'section',
+                    DB::raw('COUNT(*) as count')
+                )
+                ->where('student_status', 'Active')
+                ->whereIn('branch_id', $sections->pluck('branch_id')->unique())
+                ->groupBy('branch_id', 'grade', 'section')
+                ->get()
+                ->mapWithKeys(function($item) {
+                    $key = $item->branch_id . '_' . $item->grade . '_' . $item->section;
+                    return [$key => $item->count];
+                })
+                ->toArray();
+
             // Enhance each section with grade details and actual student count
-            $sections->getCollection()->transform(function ($section) {
+            $sections->getCollection()->transform(function ($section) use ($studentCounts) {
                 // Append grade_details accessor data
                 $section->append('grade_details');
-                // Override current_strength with actual count from students table
-                $section->current_strength = $section->actual_strength;
+                // Override current_strength with pre-fetched count (no N+1!)
+                $key = $section->branch_id . '_' . $section->grade_level . '_' . $section->name;
+                $section->current_strength = $studentCounts[$key] ?? 0;
+                $section->actual_strength = $studentCounts[$key] ?? 0;
                 return $section;
             });
 
@@ -196,9 +217,18 @@ class SectionController extends Controller
             $section = Section::with(['branch', 'classTeacher', 'class'])
                 ->findOrFail($id);
 
+            // OPTIMIZATION: Get actual student count without accessor (avoid extra query)
+            $actualCount = DB::table('students')
+                ->where('branch_id', $section->branch_id)
+                ->where('grade', $section->grade_level)
+                ->where('section', $section->name)
+                ->where('student_status', 'Active')
+                ->count();
+
             // Append grade details and update current_strength with actual count
             $section->append('grade_details');
-            $section->current_strength = $section->actual_strength;
+            $section->current_strength = $actualCount;
+            $section->actual_strength = $actualCount;
 
             return response()->json([
                 'success' => true,

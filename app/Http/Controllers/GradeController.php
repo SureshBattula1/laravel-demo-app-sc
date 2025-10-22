@@ -19,12 +19,18 @@ class GradeController extends Controller
 
     /**
      * Get all grades with server-side pagination and sorting
+     * OPTIMIZED: Added filtering for active grades in dropdown scenarios
      */
     public function index(Request $request)
     {
         try {
             // Get grades from the grades table
             $query = DB::table('grades');
+            
+            // Filter by active status if requested (common for dropdowns)
+            if ($request->has('is_active')) {
+                $query->where('is_active', $request->boolean('is_active'));
+            }
 
             // Define sortable columns
             $sortableColumns = ['value', 'label', 'is_active', 'created_at', 'updated_at'];
