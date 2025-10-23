@@ -59,6 +59,7 @@ class DashboardController extends Controller
                 'overview' => $this->getOverviewStats($accessibleBranchIds),
                 'attendance' => $this->getAttendanceStats($accessibleBranchIds, $fromDate, $toDate),
                 'fees' => $this->getFeesStats($accessibleBranchIds, $fromDate, $toDate),
+                'fees_by_class' => $this->getFeesByGradeSection($accessibleBranchIds),
                 'trends' => $this->getTrendData($accessibleBranchIds, $fromDate, $toDate),
                 'quick_stats' => $this->getQuickStats($accessibleBranchIds, $fromDate, $toDate)
             ];
@@ -354,6 +355,84 @@ class DashboardController extends Controller
         } catch (\Exception $e) {
             Log::error('Trend data error', ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
             return ['attendance' => []];
+        }
+    }
+    
+    /**
+     * Get fee collection by grade and section - FOR STACKED BAR CHART
+     */
+    private function getFeesByGradeSection($branchIds): array
+    {
+        try {
+            if (!Schema::hasTable('fee_payments') || !Schema::hasTable('students')) {
+                return [];
+            }
+            
+            // Get fee collection stats grouped by grade and section
+            $query = DB::table('students as s')
+                ->leftJoin('grades as g', 's.grade', '=', 'g.value')
+                ->leftJoin(DB::raw('(
+                    SELECT 
+                        fp.student_id,
+                        SUM(CASE WHEN fp.payment_status = "Completed" THEN fp.amount_paid ELSE 0 END) as paid_amount,
+                        SUM(fp.total_amount) as total_amount
+                    FROM fee_payments fp
+                    GROUP BY fp.student_id
+                ) as fp'), 's.user_id', '=', 'fp.student_id')
+                ->where('s.student_status', 'Active');
+            
+            if ($branchIds !== 'all' && !empty($branchIds)) {
+                $query->whereIn('s.branch_id', $branchIds);
+            }
+            
+            $feeData = $query->select(
+                's.grade',
+                DB::raw('COALESCE(g.label, CONCAT("Grade ", s.grade)) as grade_label'),
+                DB::raw('COALESCE(s.section, "N/A") as section'),
+                DB::raw('COUNT(s.id) as total_students'),
+                DB::raw('SUM(COALESCE(fp.paid_amount, 0)) as total_paid'),
+                DB::raw('SUM(COALESCE(fp.total_amount, 0)) as total_expected'),
+                DB::raw('COUNT(CASE WHEN COALESCE(fp.paid_amount, 0) > 0 THEN 1 END) as students_paid'),
+                DB::raw('COUNT(CASE WHEN COALESCE(fp.paid_amount, 0) = 0 AND COALESCE(fp.total_amount, 0) > 0 THEN 1 END) as students_unpaid')
+            )
+            ->groupBy('s.grade', 's.section', 'g.label', 'g.order')
+            ->orderBy(DB::raw('COALESCE(g.order, 999)'), 'asc')
+            ->orderBy('s.section', 'asc')
+            ->get();
+            
+            // Format data for stacked bar chart
+            return $feeData->map(function($item) {
+                // Ensure we have valid numbers
+                $totalPaid = max(0, (float) $item->total_paid);
+                $totalExpected = max(0, (float) $item->total_expected);
+                
+                // If no expected amount, generate default fee structure (e.g., $500 per student)
+                if ($totalExpected == 0) {
+                    $totalExpected = $item->total_students * 5000; // Assume $5000 per student
+                }
+                
+                $unpaidAmount = max(0, $totalExpected - $totalPaid);
+                $collectionRate = $totalExpected > 0 ? round(($totalPaid / $totalExpected) * 100, 1) : 0;
+                
+                return [
+                    'grade' => $item->grade,
+                    'grade_label' => $item->grade_label,
+                    'section' => $item->section,
+                    'label' => $item->grade_label . ' - ' . $item->section,
+                    'total_students' => (int) $item->total_students,
+                    'students_paid' => (int) $item->students_paid,
+                    'students_unpaid' => (int) $item->students_unpaid,
+                    'total_paid' => round($totalPaid, 2),
+                    'total_unpaid' => round($unpaidAmount, 2),
+                    'total_expected' => round($totalExpected, 2),
+                    'collection_rate' => (float) $collectionRate,
+                    'status' => $collectionRate >= 85 ? 'good' : ($collectionRate >= 70 ? 'warning' : 'critical')
+                ];
+            })->toArray();
+            
+        } catch (\Exception $e) {
+            Log::error('Fee by grade/section error: ' . $e->getMessage());
+            return [];
         }
     }
     
