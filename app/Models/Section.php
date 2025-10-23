@@ -121,6 +121,29 @@ class Section extends Model
             ->where('branch_id', $this->branch_id);
     }
 
+    /**
+     * Get subjects assigned to this section
+     */
+    public function subjects()
+    {
+        return $this->belongsToMany(
+            Subject::class,
+            'section_subjects',
+            'section_id',
+            'subject_id'
+        )
+        ->withPivot(['teacher_id', 'academic_year', 'is_active'])
+        ->withTimestamps();
+    }
+
+    /**
+     * Get section subjects with full details
+     */
+    public function sectionSubjects()
+    {
+        return $this->hasMany(SectionSubject::class);
+    }
+
     // Helper methods
     public function getAvailableSeats()
     {

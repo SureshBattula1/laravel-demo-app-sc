@@ -32,6 +32,7 @@ use App\Http\Controllers\UserController;
 use App\Http\Controllers\RoleController;
 use App\Http\Controllers\PermissionManagementController;
 use App\Http\Controllers\ModuleController;
+use App\Http\Controllers\SectionSubjectController;
 
 /*
 |--------------------------------------------------------------------------
@@ -167,10 +168,21 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
         Route::get('/', [SectionController::class, 'index']);
         Route::post('/', [SectionController::class, 'store']);
         Route::get('export', [SectionController::class, 'export']);
+        Route::get('{id}/subjects', [SectionSubjectController::class, 'getSectionSubjects']);
         Route::get('{id}', [SectionController::class, 'show']);
         Route::put('{id}', [SectionController::class, 'update']);
         Route::delete('{id}', [SectionController::class, 'destroy']);
         Route::put('{id}/toggle-status', [SectionController::class, 'toggleStatus']);
+    });
+    
+    // Section-Subject Assignment Routes
+    Route::prefix('section-subjects')->group(function () {
+        Route::get('/', [SectionSubjectController::class, 'index']);
+        Route::post('/', [SectionSubjectController::class, 'assignSubject']);
+        Route::post('bulk', [SectionSubjectController::class, 'assignMultipleSubjects']);
+        Route::post('copy', [SectionSubjectController::class, 'copySubjects']);
+        Route::put('{id}', [SectionSubjectController::class, 'updateAssignment']);
+        Route::delete('{id}', [SectionSubjectController::class, 'removeSubject']);
     });
     
     // Exam Routes
