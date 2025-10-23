@@ -27,7 +27,17 @@ class TeacherController extends Controller
     public function index(Request $request)
     {
         try {
-            $query = Teacher::with(['user', 'branch', 'department']);
+            // 🚀 OPTIMIZED: Select only needed columns and limit eager loading
+            $query = Teacher::select([
+                'id', 'user_id', 'branch_id', 'department_id', 'employee_id',
+                'category_type', 'designation', 'gender', 'date_of_birth',
+                'joining_date', 'employee_type', 'teacher_status', 'created_at', 'updated_at'
+            ])
+            ->with([
+                'user:id,first_name,last_name,email,phone,is_active',
+                'branch:id,name,code',
+                'department:id,name,code'
+            ]);
 
             // 🔥 APPLY BRANCH FILTERING - Restrict to accessible branches
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);

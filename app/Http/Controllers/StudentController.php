@@ -24,6 +24,7 @@ class StudentController extends Controller
     public function index(Request $request)
     {
         try {
+            // 🚀 OPTIMIZED: Use indexed columns and avoid JSON_OBJECT for better performance
             $query = DB::table('students')
                 ->join('users', 'students.user_id', '=', 'users.id')
                 ->leftJoin('branches', 'students.branch_id', '=', 'branches.id')
@@ -48,7 +49,9 @@ class StudentController extends Controller
                     'users.email',
                     'users.phone',
                     'users.is_active',
-                    DB::raw('JSON_OBJECT("id", branches.id, "name", branches.name, "code", branches.code) as branch')
+                    'branches.id as branch_id_val',
+                    'branches.name as branch_name',
+                    'branches.code as branch_code'
                 );
 
             // 🔥 APPLY BRANCH FILTERING - This restricts data based on user's branch access
@@ -120,11 +123,15 @@ class StudentController extends Controller
             // Apply pagination and sorting (default: 25 per page, sorted by created_at desc)
             $students = $this->paginateAndSort($query, $request, $sortableColumns, 'students.created_at', 'desc');
 
-            // Parse JSON branch field for each student
+            // 🚀 OPTIMIZED: Format branch data on backend instead of JSON parsing
             $studentsData = collect($students->items())->map(function($student) {
-                if (isset($student->branch) && is_string($student->branch)) {
-                    $student->branch = json_decode($student->branch);
-                }
+                $student->branch = [
+                    'id' => $student->branch_id_val,
+                    'name' => $student->branch_name,
+                    'code' => $student->branch_code
+                ];
+                // Remove temporary fields
+                unset($student->branch_id_val, $student->branch_name, $student->branch_code);
                 return $student;
             })->toArray();
 

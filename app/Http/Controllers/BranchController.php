@@ -24,7 +24,16 @@ class BranchController extends Controller
     public function index(Request $request)
     {
         try {
-            $query = Branch::with(['parentBranch', 'childBranches']);
+            // 🚀 OPTIMIZED: Select only needed columns to reduce data transfer
+            $query = Branch::select([
+                'id', 'name', 'code', 'branch_type', 'city', 'state', 'region',
+                'parent_branch_id', 'status', 'is_active', 'total_capacity',
+                'current_enrollment', 'established_date', 'created_at', 'updated_at'
+            ])
+            ->with([
+                'parentBranch:id,name,code',
+                'childBranches:id,name,code,parent_branch_id,is_active'
+            ]);
 
             // Filter by active status
             if ($request->has('is_active')) {
