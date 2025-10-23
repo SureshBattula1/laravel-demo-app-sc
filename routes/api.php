@@ -12,6 +12,7 @@ use App\Http\Controllers\ExamController;
 use App\Http\Controllers\FeeController;
 use App\Http\Controllers\FeeTypeController;
 use App\Http\Controllers\AttendanceController;
+use App\Http\Controllers\LeaveController;
 use App\Http\Controllers\LibraryController;
 use App\Http\Controllers\TransportController;
 use App\Http\Controllers\EventController;
@@ -209,6 +210,11 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     Route::get('attendance/class/{grade}/{section}', [AttendanceController::class, 'getClassAttendance']);
     Route::get('attendance/report/{studentId}', [AttendanceController::class, 'generateReport']);
     Route::apiResource('attendance', AttendanceController::class);
+    
+    // Leave Routes (specific routes MUST come before apiResource)
+    Route::get('leaves/student/{studentId}', [LeaveController::class, 'getStudentLeaves']);
+    Route::get('leaves/teacher/{teacherId}', [LeaveController::class, 'getTeacherLeaves']);
+    Route::apiResource('leaves', LeaveController::class);
     
     // Library Routes
     Route::apiResource('books', LibraryController::class);
