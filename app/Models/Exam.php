@@ -13,6 +13,7 @@ class Exam extends Model
 
     protected $fillable = [
         'id',
+        'exam_term_id',
         'branch_id',
         'name',
         'exam_type',
@@ -49,9 +50,19 @@ class Exam extends Model
     }
 
     // Relationships
+    public function examTerm()
+    {
+        return $this->belongsTo(ExamTerm::class, 'exam_term_id');
+    }
+
     public function branch()
     {
         return $this->belongsTo(Branch::class);
+    }
+
+    public function schedules()
+    {
+        return $this->hasMany(ExamSchedule::class);
     }
 
     public function results()
