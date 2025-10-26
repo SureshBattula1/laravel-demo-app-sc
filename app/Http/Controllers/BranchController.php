@@ -46,10 +46,7 @@ class BranchController extends Controller
                 $query->where('region', $request->region);
             }
 
-            // Filter by city
-            if ($request->has('city')) {
-                $query->where('city', $request->city);
-            }
+            // Filter by city (moved to advanced search section below)
 
             // Filter by parent branch
             if ($request->has('parent_id')) {
@@ -69,6 +66,27 @@ class BranchController extends Controller
                       ->orWhere('city', 'like', '%' . $search . '%')
                       ->orWhere('region', 'like', '%' . $search . '%');
                 });
+            }
+
+            // Individual field filters from advanced search
+            if ($request->has('name') && $request->name !== '') {
+                $query->where('name', 'like', '%' . strip_tags($request->name) . '%');
+            }
+
+            if ($request->has('code') && $request->code !== '') {
+                $query->where('code', 'like', '%' . strip_tags($request->code) . '%');
+            }
+
+            if ($request->has('branch_type') && $request->branch_type !== '') {
+                $query->where('branch_type', $request->branch_type);
+            }
+
+            if ($request->has('city') && $request->city !== '') {
+                $query->where('city', 'like', '%' . strip_tags($request->city) . '%');
+            }
+
+            if ($request->has('status') && $request->status !== '') {
+                $query->where('status', $request->status);
             }
 
             // Hierarchical view (nested structure) - returns all without pagination
@@ -1105,10 +1123,7 @@ class BranchController extends Controller
             $query->where('region', $request->region);
         }
 
-        // Filter by city
-        if ($request->has('city') && $request->city !== '') {
-            $query->where('city', $request->city);
-        }
+        // Filter by city (moved to advanced search section below)
 
         // Filter by parent branch
         if ($request->has('parent_id') && $request->parent_id !== '') {
@@ -1130,6 +1145,27 @@ class BranchController extends Controller
                   ->orWhere('phone', 'like', '%' . $searchTerm . '%')
                   ->orWhere('principal_name', 'like', '%' . $searchTerm . '%');
             });
+        }
+
+        // Individual field filters from advanced search
+        if ($request->has('name') && $request->name !== '') {
+            $query->where('name', 'like', '%' . strip_tags($request->name) . '%');
+        }
+
+        if ($request->has('code') && $request->code !== '') {
+            $query->where('code', 'like', '%' . strip_tags($request->code) . '%');
+        }
+
+        if ($request->has('branch_type') && $request->branch_type !== '') {
+            $query->where('branch_type', $request->branch_type);
+        }
+
+        if ($request->has('city') && $request->city !== '') {
+            $query->where('city', 'like', '%' . strip_tags($request->city) . '%');
+        }
+
+        if ($request->has('status') && $request->status !== '') {
+            $query->where('status', $request->status);
         }
 
         return $query;
