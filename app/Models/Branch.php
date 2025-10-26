@@ -151,6 +151,12 @@ class Branch extends Model
         return $this->hasMany(BranchSetting::class);
     }
 
+    public function universalAttachments()
+    {
+        return \App\Models\UniversalAttachment::where('module', 'branch')
+            ->where('module_id', $this->id);
+    }
+
     public function analytics()
     {
         return $this->hasMany(BranchAnalytic::class);

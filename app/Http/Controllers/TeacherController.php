@@ -36,7 +36,7 @@ class TeacherController extends Controller
             ->with([
                 'user:id,first_name,last_name,email,phone,is_active',
                 'branch:id,name,code',
-                'department:id,name,code'
+                'department:id,name'
             ]);
 
             // 🔥 APPLY BRANCH FILTERING - Restrict to accessible branches

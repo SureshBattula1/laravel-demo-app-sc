@@ -36,6 +36,7 @@ use App\Http\Controllers\ModuleController;
 use App\Http\Controllers\SectionSubjectController;
 use App\Http\Controllers\ExamTermController;
 use App\Http\Controllers\ExamScheduleController;
+use App\Http\Controllers\GlobalUploadController;
 
 /*
 |--------------------------------------------------------------------------
@@ -404,6 +405,15 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
         Route::get('/{entity}/preview/{batchId}', [App\Http\Controllers\ImportController::class, 'preview']);
         Route::post('/{entity}/commit/{batchId}', [App\Http\Controllers\ImportController::class, 'commit']);
         Route::delete('/{entity}/cancel/{batchId}', [App\Http\Controllers\ImportController::class, 'cancel']);
+    });
+
+    // Global File Upload Routes
+    Route::prefix('uploads')->group(function () {
+        Route::post('/', [GlobalUploadController::class, 'upload']);
+        Route::post('/multiple', [GlobalUploadController::class, 'uploadMultiple']);
+        Route::delete('/', [GlobalUploadController::class, 'delete']);
+        Route::get('/file-info', [GlobalUploadController::class, 'getFileInfo']);
+        Route::get('/exists', [GlobalUploadController::class, 'checkFileExists']);
     });
 });
 

@@ -46,8 +46,7 @@ class Teacher extends Model
         'references', 'professional_memberships', 'professional_license',
         'performance_reviews', 'appraisals', 'goals_objectives', 'training_needs',
         'hobbies_interests', 'volunteer_work', 'community_involvement',
-        'personal_statement', 'career_objectives', 'notes', 'additional_notes',
-        'profile_completion_percentage', 'profile_verified', 'last_profile_update', 'updated_by'
+        'personal_statement', 'career_objectives', 'notes', 'additional_notes'
     ];
     
     // Virtual attributes stored in extended_profile JSON
@@ -77,8 +76,7 @@ class Teacher extends Model
         'references', 'professional_memberships', 'professional_license',
         'performance_reviews', 'appraisals', 'goals_objectives', 'training_needs',
         'hobbies_interests', 'volunteer_work', 'community_involvement',
-        'personal_statement', 'career_objectives', 'notes', 'additional_notes',
-        'profile_completion_percentage', 'profile_verified', 'last_profile_update', 'updated_by'
+        'personal_statement', 'career_objectives', 'notes', 'additional_notes'
     ];
 
     protected function casts(): array
@@ -247,14 +245,13 @@ class Teacher extends Model
     // Methods
     public function updateProfileCompletion()
     {
-        $this->profile_completion_percentage = $this->getProfileCompletionPercentageAttribute();
-        $this->last_profile_update = now();
-        $this->save();
+        // Just compute and return the percentage, don't save to database
+        return $this->getProfileCompletionPercentageAttribute();
     }
 
     public function isProfileComplete()
     {
-        return $this->profile_completion_percentage >= 80;
+        return $this->getProfileCompletionPercentageAttribute() >= 80;
     }
 
     public function getRequiredDocuments()

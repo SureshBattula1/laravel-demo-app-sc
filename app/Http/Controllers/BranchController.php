@@ -266,7 +266,10 @@ class BranchController extends Controller
                 // Status
                 'status' => 'nullable|in:Active,Inactive,UnderConstruction,Maintenance,Closed',
                 'is_active' => 'boolean',
-                'settings' => 'nullable|array'
+                'settings' => 'nullable|array',
+                
+                // Logo (accept string path from global upload)
+                'logo' => 'nullable|string|max:500'
             ]);
 
             if ($validator->fails()) {
@@ -278,7 +281,7 @@ class BranchController extends Controller
 
             DB::beginTransaction();
 
-            $branchData = $request->except(['logo']);
+            $branchData = $request->all();
             $branchData['code'] = strtoupper($branchData['code'] ?? '');
             $branchData['status'] = $branchData['status'] ?? 'Active';
             $branchData['current_enrollment'] = 0;
@@ -289,8 +292,12 @@ class BranchController extends Controller
             if (isset($branchData['city'])) $branchData['city'] = strip_tags($branchData['city']);
             if (isset($branchData['email'])) $branchData['email'] = filter_var($branchData['email'], FILTER_SANITIZE_EMAIL);
 
-            // Handle logo upload if present
-            if ($request->hasFile('logo')) {
+            // Handle logo - accept either string path (from global upload) or file upload
+            if ($request->has('logo') && is_string($request->logo) && !empty($request->logo)) {
+                // Logo already uploaded via global upload service
+                $branchData['logo'] = $request->logo;
+            } elseif ($request->hasFile('logo')) {
+                // Traditional file upload (backward compatibility)
                 $logoPath = $request->file('logo')->store('branch-logos', 'public');
                 $branchData['logo'] = $logoPath;
             }
@@ -449,7 +456,10 @@ class BranchController extends Controller
                 // Status
                 'status' => 'sometimes|in:Active,Inactive,UnderConstruction,Maintenance,Closed',
                 'is_active' => 'sometimes|boolean',
-                'settings' => 'nullable|array'
+                'settings' => 'nullable|array',
+                
+                // Logo (accept string path from global upload)
+                'logo' => 'sometimes|string|max:500'
             ]);
 
             if ($validator->fails()) {
@@ -461,7 +471,7 @@ class BranchController extends Controller
 
             DB::beginTransaction();
 
-            $updateData = $request->except(['logo', 'id', 'created_at', 'updated_at', 'deleted_at']);
+            $updateData = $request->except(['id', 'created_at', 'updated_at', 'deleted_at']);
             
             // Sanitize code field
             if (isset($updateData['code'])) {
@@ -474,8 +484,18 @@ class BranchController extends Controller
             if (isset($updateData['city'])) $updateData['city'] = strip_tags($updateData['city']);
             if (isset($updateData['email'])) $updateData['email'] = filter_var($updateData['email'], FILTER_SANITIZE_EMAIL);
 
-            // Handle logo upload if present
-            if ($request->hasFile('logo')) {
+            // Handle logo - accept either string path (from global upload) or file upload
+            if ($request->has('logo') && is_string($request->logo) && !empty($request->logo)) {
+                // Logo already uploaded via global upload service
+                // Only delete old logo if it's different from the new one
+                if ($branch->logo && $request->logo !== $branch->logo) {
+                    if (\Storage::disk('public')->exists($branch->logo)) {
+                        \Storage::disk('public')->delete($branch->logo);
+                    }
+                }
+                $updateData['logo'] = $request->logo;
+            } elseif ($request->hasFile('logo')) {
+                // Traditional file upload (backward compatibility)
                 // Delete old logo if exists
                 if ($branch->logo && \Storage::disk('public')->exists($branch->logo)) {
                     \Storage::disk('public')->delete($branch->logo);
