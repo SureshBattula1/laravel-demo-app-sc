@@ -24,7 +24,16 @@ class SectionController extends Controller
     public function index(Request $request)
     {
         try {
-            $query = Section::with(['branch', 'classTeacher', 'class']);
+            // 🚀 OPTIMIZED: Select specific columns and limit eager loading
+            $query = Section::select([
+                'id', 'branch_id', 'name', 'code', 'grade_level', 'capacity',
+                'current_strength', 'room_number', 'class_teacher_id', 'is_active',
+                'created_at', 'updated_at'
+            ])
+            ->with([
+                'branch:id,name,code',
+                'classTeacher:id,first_name,last_name,email'
+            ]);
 
             // 🔥 APPLY BRANCH FILTERING - Restrict to accessible branches
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);

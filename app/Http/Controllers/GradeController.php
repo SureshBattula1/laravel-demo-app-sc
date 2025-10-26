@@ -24,8 +24,9 @@ class GradeController extends Controller
     public function index(Request $request)
     {
         try {
-            // Get grades from the grades table
-            $query = DB::table('grades');
+            // 🚀 OPTIMIZED: Select only needed columns
+            $query = DB::table('grades')
+                ->select('id', 'value', 'label', 'description', 'order', 'category', 'is_active', 'created_at', 'updated_at');
             
             // Filter by active status if requested (common for dropdowns)
             if ($request->has('is_active')) {
