@@ -48,9 +48,20 @@ class UserController extends Controller
         // OPTIMIZED: Cache roles array to avoid N+1 queries
         $rolesMap = DB::table('roles')->pluck('id', 'name')->toArray();
 
+        // Map enum values to role table names
+        $roleMapping = [
+            'SuperAdmin' => 'Super Admin',
+            'BranchAdmin' => 'Branch Admin',
+            'Teacher' => 'Teacher',
+            'Student' => 'Student',
+            'Parent' => 'Parent',
+            'Staff' => 'Staff'
+        ];
+
         // Add role_id to each user (no extra queries!)
         foreach ($users->items() as $user) {
-            $user->role_id = $rolesMap[$user->role] ?? null;
+            $roleName = $roleMapping[$user->role] ?? $user->role;
+            $user->role_id = $rolesMap[$roleName] ?? null;
         }
 
         return response()->json([
@@ -70,9 +81,20 @@ class UserController extends Controller
         // OPTIMIZED: Cache roles array to avoid N+1 queries
         $rolesMap = DB::table('roles')->pluck('id', 'name')->toArray();
 
+        // Map enum values to role table names
+        $roleMapping = [
+            'SuperAdmin' => 'Super Admin',
+            'BranchAdmin' => 'Branch Admin',
+            'Teacher' => 'Teacher',
+            'Student' => 'Student',
+            'Parent' => 'Parent',
+            'Staff' => 'Staff'
+        ];
+
         // Add role_id to each user (no extra queries!)
         foreach ($users as $user) {
-            $user->role_id = $rolesMap[$user->role] ?? null;
+            $roleName = $roleMapping[$user->role] ?? $user->role;
+            $user->role_id = $rolesMap[$roleName] ?? null;
         }
 
         return response()->json([
@@ -89,8 +111,18 @@ class UserController extends Controller
     {
         $user = User::with(['branch'])->findOrFail($id);
 
-        // OPTIMIZED: Single query for role_id
-        $roleRecord = DB::table('roles')->where('name', $user->role)->select('id')->first();
+        // OPTIMIZED: Single query for role_id with enum to role name mapping
+        $roleMapping = [
+            'SuperAdmin' => 'Super Admin',
+            'BranchAdmin' => 'Branch Admin',
+            'Teacher' => 'Teacher',
+            'Student' => 'Student',
+            'Parent' => 'Parent',
+            'Staff' => 'Staff'
+        ];
+        
+        $roleName = $roleMapping[$user->role] ?? $user->role;
+        $roleRecord = DB::table('roles')->where('name', $roleName)->select('id')->first();
         $user->role_id = $roleRecord ? $roleRecord->id : null;
 
         return response()->json([
