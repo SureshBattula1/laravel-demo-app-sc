@@ -1,0 +1,120 @@
+========================================
+MAIL CONFIGURATION FOR .ENV FILE
+========================================
+
+Copy the configuration below to your .env file and uncomment the option you want to use.
+
+========================================
+REQUIRED: Frontend URL
+========================================
+Add this line to your .env file:
+
+FRONTEND_URL=http://localhost:4200
+
+
+========================================
+OPTION 1: LOG DRIVER (Current - Development)
+========================================
+Emails written to storage/logs/laravel.log (already configured)
+
+MAIL_MAILER=log
+
+
+========================================
+OPTION 2: MAILTRAP (Recommended for Testing)
+========================================
+FREE testing service - Sign up at https://mailtrap.io
+
+MAIL_MAILER=smtp
+MAIL_HOST=sandbox.smtp.mailtrap.io
+MAIL_PORT=2525
+MAIL_USERNAME=your_mailtrap_username
+MAIL_PASSWORD=your_mailtrap_password
+MAIL_ENCRYPTION=tls
+MAIL_FROM_ADDRESS=noreply@schoolsystem.com
+MAIL_FROM_NAME="School Management System"
+
+
+========================================
+OPTION 3: GMAIL (Production)
+========================================
+1. Enable 2-Factor Authentication
+2. Create App Password at: https://myaccount.google.com/apppasswords
+3. Use App Password (NOT your regular Gmail password)
+
+MAIL_MAILER=smtp
+MAIL_HOST=smtp.gmail.com
+MAIL_PORT=587
+MAIL_USERNAME=your-email@gmail.com
+MAIL_PASSWORD=your-16-character-app-password
+MAIL_ENCRYPTION=tls
+MAIL_FROM_ADDRESS=your-email@gmail.com
+MAIL_FROM_NAME="School Management System"
+
+
+========================================
+OPTION 4: SENDGRID (Production)
+========================================
+
+MAIL_MAILER=smtp
+MAIL_HOST=smtp.sendgrid.net
+MAIL_PORT=587
+MAIL_USERNAME=apikey
+MAIL_PASSWORD=your-sendgrid-api-key
+MAIL_ENCRYPTION=tls
+MAIL_FROM_ADDRESS=noreply@schoolsystem.com
+MAIL_FROM_NAME="School Management System"
+
+
+========================================
+OPTION 5: OUTLOOK/Office 365 (Production)
+========================================
+
+MAIL_MAILER=smtp
+MAIL_HOST=smtp.office365.com
+MAIL_PORT=587
+MAIL_USERNAME=your-email@outlook.com
+MAIL_PASSWORD=your-password
+MAIL_ENCRYPTION=tls
+MAIL_FROM_ADDRESS=your-email@outlook.com
+MAIL_FROM_NAME="School Management System"
+
+
+========================================
+STEPS TO CONFIGURE:
+========================================
+
+1. Open your .env file: laravel-demo-app-sc/.env
+
+2. Add/Update these lines with your chosen configuration
+
+3. Clear Laravel config cache:
+   cd laravel-demo-app-sc
+   php artisan config:clear
+
+4. Test the email by requesting a password reset
+
+5. Check logs or your email inbox depending on the driver
+
+
+========================================
+CURRENT STATUS:
+========================================
+
+✅ Email template created
+✅ Mail class created  
+✅ Email sending implemented
+✅ Reset functionality working
+
+⏳ Waiting for mail configuration in .env file
+   Currently using: MAIL_MAILER=log (emails go to log files)
+
+
+========================================
+TO VIEW CURRENT LOG EMAILS:
+========================================
+
+Open: laravel-demo-app-sc/storage/logs/laravel.log
+Search for: "Password reset email sent"
+You'll see the complete email content and reset URL
+

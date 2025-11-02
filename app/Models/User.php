@@ -21,6 +21,7 @@ class User extends Authenticatable
         'phone',
         'mobile',
         'password',
+        'remember_token',
         'role',
         'user_type',
         'user_type_id',
