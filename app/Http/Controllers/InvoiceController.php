@@ -53,11 +53,12 @@ class InvoiceController extends Controller
                 $query->overdue();
             }
 
-            if ($request->has('search')) {
+            // OPTIMIZED Search filter - prefix search for better index usage
+            if ($request->has('search') && !empty($request->search)) {
                 $search = strip_tags($request->search);
                 $query->where(function($q) use ($search) {
-                    $q->where('invoice_number', 'like', '%' . $search . '%')
-                      ->orWhere('customer_name', 'like', '%' . $search . '%');
+                    $q->where('invoice_number', 'like', "{$search}%")
+                      ->orWhere('customer_name', 'like', "{$search}%");
                 });
             }
 
@@ -162,11 +163,31 @@ class InvoiceController extends Controller
                                   ->limit($request->get('limit', 100))
                                   ->get();
 
-            // Add additional data for display
-            $transactions->each(function($transaction) {
-                // Add student or teacher details if available
-                if ($transaction->party_type === 'Student' && $transaction->party_id) {
-                    $student = DB::table('students')->find($transaction->party_id);
+            // OPTIMIZED: Batch load students and teachers to avoid N+1 queries
+            $studentIds = $transactions->filter(function($t) {
+                return $t->party_type === 'Student' && $t->party_id;
+            })->pluck('party_id')->unique()->filter();
+
+            $teacherIds = $transactions->filter(function($t) {
+                return $t->party_type === 'Teacher' && $t->party_id;
+            })->pluck('party_id')->unique()->filter();
+
+            // Single query for all students
+            $students = $studentIds->isEmpty() ? collect() : DB::table('students')
+                ->whereIn('id', $studentIds)
+                ->get()
+                ->keyBy('id');
+
+            // Single query for all teachers
+            $teachers = $teacherIds->isEmpty() ? collect() : DB::table('users')
+                ->whereIn('id', $teacherIds)
+                ->get()
+                ->keyBy('id');
+
+            // Map to transactions (0 queries in loop)
+            $transactions->each(function($transaction) use ($students, $teachers) {
+                if ($transaction->party_type === 'Student') {
+                    $student = $students->get($transaction->party_id);
                     if ($student) {
                         $transaction->student_details = [
                             'name' => $student->first_name . ' ' . $student->last_name,
@@ -176,8 +197,8 @@ class InvoiceController extends Controller
                     }
                 }
                 
-                if ($transaction->party_type === 'Teacher' && $transaction->party_id) {
-                    $teacher = DB::table('users')->find($transaction->party_id);
+                if ($transaction->party_type === 'Teacher') {
+                    $teacher = $teachers->get($transaction->party_id);
                     if ($teacher) {
                         $transaction->teacher_details = [
                             'name' => $teacher->first_name . ' ' . $teacher->last_name,

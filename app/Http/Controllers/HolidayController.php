@@ -59,25 +59,40 @@ class HolidayController extends Controller
                       ->orWhereRaw('MONTH(end_date) = ?', [$month]);
             }
 
-            if ($request->has('search')) {
+            // OPTIMIZED Search filter - prefix search for better index usage
+            if ($request->has('search') && !empty($request->search)) {
                 $search = strip_tags($request->search);
                 $query->where(function($q) use ($search) {
-                    $q->where('title', 'like', '%' . $search . '%')
-                      ->orWhere('description', 'like', '%' . $search . '%');
+                    $q->where('title', 'like', "{$search}%")
+                      ->orWhere('description', 'like', "{$search}%");
                 });
             }
 
-            $holidays = $query->orderBy('start_date', 'asc')->get();
+            // OPTIMIZED: Add pagination and calculate duration in SQL
+            $perPage = $request->get('per_page', 25);
+            $page = $request->get('page', 1);
+            
+            $holidays = $query->orderBy('start_date', 'asc')->paginate($perPage, ['*'], 'page', $page);
 
-            // Append duration to each holiday
+            // Calculate duration for each holiday
             $holidays->each(function ($holiday) {
-                $holiday->append('duration');
+                $start = new \DateTime($holiday->start_date);
+                $end = new \DateTime($holiday->end_date);
+                $holiday->duration = $start->diff($end)->days + 1;
             });
 
             return response()->json([
                 'success' => true,
-                'data' => $holidays,
-                'count' => $holidays->count()
+                'data' => $holidays->items(),
+                'meta' => [
+                    'current_page' => $holidays->currentPage(),
+                    'per_page' => $holidays->perPage(),
+                    'total' => $holidays->total(),
+                    'last_page' => $holidays->lastPage(),
+                    'from' => $holidays->firstItem(),
+                    'to' => $holidays->lastItem(),
+                    'has_more_pages' => $holidays->hasMorePages()
+                ]
             ]);
 
         } catch (\Exception $e) {
@@ -525,12 +540,12 @@ class HolidayController extends Controller
                   ->orWhereRaw('MONTH(end_date) = ?', [$month]);
         }
 
-        // Global search
+        // OPTIMIZED Global search - prefix search for better index usage
         if ($request->has('search') && $request->search !== '') {
-            $searchTerm = $request->search;
+            $searchTerm = strip_tags($request->search);
             $query->where(function($q) use ($searchTerm) {
-                $q->where('title', 'like', '%' . $searchTerm . '%')
-                  ->orWhere('description', 'like', '%' . $searchTerm . '%');
+                $q->where('title', 'like', "{$searchTerm}%")
+                  ->orWhere('description', 'like', "{$searchTerm}%");
             });
         }
 

@@ -12,7 +12,7 @@ class Exam extends Model
     use HasFactory, SoftDeletes;
 
     protected $fillable = [
-        'id',
+        // 'id', // Not fillable - auto-increment
         'exam_term_id',
         'branch_id',
         'name',
@@ -29,25 +29,27 @@ class Exam extends Model
     ];
 
     protected $casts = [
-        'start_date' => 'datetime',
-        'end_date' => 'datetime',
+        'start_date' => 'date',
+        'end_date' => 'date',
         'is_active' => 'boolean',
         'total_marks' => 'decimal:2',
         'passing_marks' => 'decimal:2'
     ];
 
-    protected $keyType = 'string';
-    public $incrementing = false;
+    // Note: Currently using integer IDs instead of UUIDs
+    protected $keyType = 'int';
+    public $incrementing = true;
 
-    protected static function boot()
-    {
-        parent::boot();
-        static::creating(function ($model) {
-            if (empty($model->id)) {
-                $model->id = (string) Str::uuid();
-            }
-        });
-    }
+    // Removed UUID boot method since table uses integer IDs
+    // protected static function boot()
+    // {
+    //     parent::boot();
+    //     static::creating(function ($model) {
+    //         if (empty($model->id)) {
+    //             $model->id = (string) Str::uuid();
+    //         }
+    //     });
+    // }
 
     // Relationships
     public function examTerm()

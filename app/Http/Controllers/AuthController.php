@@ -125,7 +125,10 @@ class AuthController extends Controller
             // Determine if login is email or phone
             $loginField = filter_var($login, FILTER_VALIDATE_EMAIL) ? 'email' : 'phone';
             
-            $user = User::where($loginField, $login)->first();
+            // OPTIMIZED: Select only needed columns first
+            $user = User::where($loginField, $login)
+                ->select('id', $loginField, 'password', 'role', 'branch_id', 'is_active', 'first_name', 'last_name', 'avatar')
+                ->first();
 
             if (!$user || !Hash::check($request->password, $user->password)) {
                 RateLimiter::hit($key, 300); // 5 minutes
@@ -150,8 +153,8 @@ class AuthController extends Controller
 
             DB::beginTransaction();
 
-            // Update last login
-            $user->update(['last_login' => now()]);
+            // OPTIMIZED: Update last_login without loading full model again
+            DB::table('users')->where('id', $user->id)->update(['last_login' => now()]);
             
             // Create token
             $token = $user->createToken('auth_token', ['*'], now()->addDays(30))->plainTextToken;
@@ -162,10 +165,13 @@ class AuthController extends Controller
 
             Log::info('User logged in successfully', ['user_id' => $user->id]);
 
+            // OPTIMIZED: Load branch only when needed
+            $user->load('branch');
+
             return response()->json([
                 'success' => true,
                 'message' => 'Login successful',
-                'user' => $user->load('branch'),
+                'user' => $user,
                 'access_token' => $token,
                 'token_type' => 'Bearer',
                 'expires_in' => '30 days'

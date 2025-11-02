@@ -7,11 +7,12 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
+use Carbon\Carbon;
 
 class ExamController extends Controller
 {
     /**
-     * Display a listing of exams
+     * Display a listing of exams - OPTIMIZED with pagination
      */
     public function index(Request $request)
     {
@@ -33,13 +34,13 @@ class ExamController extends Controller
                 $query->where('exam_type', $request->exam_type);
             }
 
-            // Search by name
-            if ($request->has('search')) {
-                $search = $request->search;
+            // OPTIMIZED Search by name - prefix search for better index usage
+            if ($request->has('search') && !empty($request->search)) {
+                $search = strip_tags($request->search);
                 $query->where(function($q) use ($search) {
-                    $q->where('name', 'like', "%{$search}%")
-                      ->orWhere('exam_type', 'like', "%{$search}%")
-                      ->orWhere('academic_year', 'like', "%{$search}%");
+                    $q->where('name', 'like', "{$search}%")  // ✅ Can use index
+                      ->orWhere('exam_type', 'like', "{$search}%")
+                      ->orWhere('academic_year', 'like', "{$search}%");
                 });
             }
 
@@ -48,11 +49,24 @@ class ExamController extends Controller
                 $query->where('is_active', $request->boolean('is_active'));
             }
 
-            $exams = $query->orderBy('start_date', 'desc')->get();
+            // OPTIMIZED: Add pagination to prevent loading all exams
+            $perPage = $request->get('per_page', 25);
+            $page = $request->get('page', 1);
+            
+            $exams = $query->orderBy('start_date', 'desc')
+                ->paginate($perPage, ['*'], 'page', $page);
 
             return response()->json([
                 'success' => true,
-                'data' => $exams,
+                'data' => $exams->items(),
+                'meta' => [
+                    'current_page' => $exams->currentPage(),
+                    'per_page' => $exams->perPage(),
+                    'total' => $exams->total(),
+                    'last_page' => $exams->lastPage(),
+                    'from' => $exams->firstItem(),
+                    'to' => $exams->lastItem(),
+                ],
                 'message' => 'Exams retrieved successfully'
             ]);
 
@@ -74,7 +88,7 @@ class ExamController extends Controller
         DB::beginTransaction();
         try {
             $validator = Validator::make($request->all(), [
-                'branch_id' => 'required|uuid|exists:branches,id',
+                'branch_id' => 'required|integer|exists:branches,id',
                 'name' => 'required|string|max:255',
                 'exam_type' => 'required|string|in:Midterm,Final,Quiz,Assignment,Practical,Other',
                 'academic_year' => 'required|string|max:20',
@@ -94,8 +108,22 @@ class ExamController extends Controller
                 ], 422);
             }
 
+            // Prepare data with proper date formatting
+            $examData = $request->only([
+                'exam_term_id', 'branch_id', 'name', 'exam_type', 'academic_year',
+                'total_marks', 'passing_marks', 'description'
+            ]);
+            
+            // Format dates properly
+            if ($request->has('start_date')) {
+                $examData['start_date'] = Carbon::parse($request->start_date)->format('Y-m-d');
+            }
+            if ($request->has('end_date')) {
+                $examData['end_date'] = Carbon::parse($request->end_date)->format('Y-m-d');
+            }
+            
             $exam = Exam::create([
-                ...$request->all(),
+                ...$examData,
                 'created_by' => $request->user()->id,
                 'is_active' => $request->has('is_active') ? $request->boolean('is_active') : true
             ]);
@@ -153,6 +181,7 @@ class ExamController extends Controller
             $exam = Exam::findOrFail($id);
 
             $validator = Validator::make($request->all(), [
+                'branch_id' => 'integer|exists:branches,id',
                 'name' => 'string|max:255',
                 'exam_type' => 'string|in:Midterm,Final,Quiz,Assignment,Practical,Other',
                 'academic_year' => 'string|max:20',
@@ -172,8 +201,22 @@ class ExamController extends Controller
                 ], 422);
             }
 
+            // Prepare update data with proper date formatting
+            $updateData = $request->only([
+                'exam_term_id', 'branch_id', 'name', 'exam_type', 'academic_year',
+                'total_marks', 'passing_marks', 'description', 'is_active'
+            ]);
+            
+            // Format dates properly
+            if ($request->has('start_date')) {
+                $updateData['start_date'] = Carbon::parse($request->start_date)->format('Y-m-d');
+            }
+            if ($request->has('end_date')) {
+                $updateData['end_date'] = Carbon::parse($request->end_date)->format('Y-m-d');
+            }
+            
             $exam->update([
-                ...$request->all(),
+                ...$updateData,
                 'updated_by' => $request->user()->id
             ]);
 
@@ -233,19 +276,31 @@ class ExamController extends Controller
     }
 
     /**
-     * Get exam statistics
+     * Get exam statistics - OPTIMIZED with single query
      */
     public function statistics(string $id)
     {
         try {
-            $exam = Exam::with('results')->findOrFail($id);
+            $exam = Exam::findOrFail($id);
 
-            $totalStudents = $exam->results()->count();
-            $passedStudents = $exam->results()->where('marks_obtained', '>=', $exam->passing_marks)->count();
+            // OPTIMIZED: Single aggregated query instead of 5 separate queries
+            $stats = DB::table('exam_results')
+                ->where('exam_id', $id)
+                ->select(
+                    DB::raw('COUNT(*) as total_students'),
+                    DB::raw('SUM(CASE WHEN marks_obtained >= ' . (float)$exam->passing_marks . ' THEN 1 ELSE 0 END) as passed_students'),
+                    DB::raw('AVG(marks_obtained) as average_marks'),
+                    DB::raw('MAX(marks_obtained) as highest_marks'),
+                    DB::raw('MIN(marks_obtained) as lowest_marks')
+                )
+                ->first();
+
+            $totalStudents = (int) ($stats->total_students ?? 0);
+            $passedStudents = (int) ($stats->passed_students ?? 0);
             $failedStudents = $totalStudents - $passedStudents;
-            $averageMarks = $exam->results()->avg('marks_obtained');
-            $highestMarks = $exam->results()->max('marks_obtained');
-            $lowestMarks = $exam->results()->min('marks_obtained');
+            $averageMarks = round((float) ($stats->average_marks ?? 0), 2);
+            $highestMarks = (float) ($stats->highest_marks ?? 0);
+            $lowestMarks = (float) ($stats->lowest_marks ?? 0);
 
             return response()->json([
                 'success' => true,
@@ -256,7 +311,7 @@ class ExamController extends Controller
                         'passed_students' => $passedStudents,
                         'failed_students' => $failedStudents,
                         'pass_percentage' => $totalStudents > 0 ? round(($passedStudents / $totalStudents) * 100, 2) : 0,
-                        'average_marks' => round($averageMarks, 2),
+                        'average_marks' => $averageMarks,
                         'highest_marks' => $highestMarks,
                         'lowest_marks' => $lowestMarks
                     ]

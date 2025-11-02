@@ -87,17 +87,17 @@ class SectionSubjectController extends Controller
                 $query->where('is_active', $request->boolean('is_active'));
             }
 
-            // Search
-            if ($request->has('search')) {
+            // OPTIMIZED Search - prefix search for better index usage
+            if ($request->has('search') && !empty($request->search)) {
                 $search = strip_tags($request->search);
                 $query->where(function($q) use ($search) {
                     $q->whereHas('section', function($sq) use ($search) {
-                        $sq->where('name', 'like', '%' . $search . '%')
-                           ->orWhere('code', 'like', '%' . $search . '%');
+                        $sq->where('name', 'like', "{$search}%")
+                           ->orWhere('code', 'like', "{$search}%");
                     })
                     ->orWhereHas('subject', function($sq) use ($search) {
-                        $sq->where('name', 'like', '%' . $search . '%')
-                           ->orWhere('code', 'like', '%' . $search . '%');
+                        $sq->where('name', 'like', "{$search}%")
+                           ->orWhere('code', 'like', "{$search}%");
                     });
                 });
             }
@@ -237,14 +237,15 @@ class SectionSubjectController extends Controller
             $assigned = [];
             $skipped = [];
 
-            foreach ($request->subjects as $subjectData) {
-                // Check if already exists
-                $exists = SectionSubject::where('section_id', $request->section_id)
-                    ->where('subject_id', $subjectData['subject_id'])
-                    ->where('academic_year', $request->academic_year)
-                    ->exists();
+            // OPTIMIZED: Get all existing assignments once
+            $existingSubjectIds = SectionSubject::where('section_id', $request->section_id)
+                ->where('academic_year', $request->academic_year)
+                ->pluck('subject_id')
+                ->toArray();
 
-                if ($exists) {
+            foreach ($request->subjects as $subjectData) {
+                // Check if already exists (no query)
+                if (in_array($subjectData['subject_id'], $existingSubjectIds)) {
                     $skipped[] = $subjectData['subject_id'];
                     continue;
                 }
@@ -259,6 +260,9 @@ class SectionSubjectController extends Controller
                 ]);
 
                 $assigned[] = $assignment->load(['section', 'subject', 'teacher']);
+                
+                // Add to existing list to prevent duplicates
+                $existingSubjectIds[] = $subjectData['subject_id'];
             }
 
             DB::commit();

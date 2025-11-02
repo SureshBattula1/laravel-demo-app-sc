@@ -53,13 +53,13 @@ class SubjectController extends Controller
                 $query->where('subjects.type', strip_tags($request->type));
             }
 
-            // Search functionality
-            if ($request->has('search')) {
+            // OPTIMIZED Search functionality - prefix search for better index usage
+            if ($request->has('search') && !empty($request->search)) {
                 $search = strip_tags($request->search);
                 $query->where(function($q) use ($search) {
-                    $q->where('subjects.name', 'like', '%' . $search . '%')
-                      ->orWhere('subjects.code', 'like', '%' . $search . '%')
-                      ->orWhere('subjects.description', 'like', '%' . $search . '%');
+                    $q->where('subjects.name', 'like', "{$search}%")
+                      ->orWhere('subjects.code', 'like', "{$search}%")
+                      ->orWhere('subjects.description', 'like', "{$search}%");
                 });
             }
 

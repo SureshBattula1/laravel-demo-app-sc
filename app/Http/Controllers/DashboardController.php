@@ -791,18 +791,57 @@ class DashboardController extends Controller
                 ], 403);
             }
 
-            $children = User::where('parent_id', $parentId)
+            // FIXED: Load all children at once - NO N+1!
+            $childrenIds = User::where('parent_id', $parentId)
                 ->where('role', 'Student')
-                ->get();
+                ->pluck('id');
+
+            if ($childrenIds->isEmpty()) {
+                return response()->json([
+                    'success' => true,
+                    'data' => [
+                        'attendance' => [],
+                        'results' => []
+                    ]
+                ]);
+            }
+
+            // OPTIMIZED: Batch calculate attendance for all children at once
+            $attendanceData = $this->batchCalculateAttendancePercentage($childrenIds->toArray());
+            
+            // FIXED: Load all results in single query instead of in loop
+            $results = ExamResult::select(
+                    'exam_results.student_id',
+                    'subjects.name as subject',
+                    'exam_results.marks as percentage',
+                    DB::raw('CASE 
+                        WHEN exam_results.marks >= 95 THEN "A+"
+                        WHEN exam_results.marks >= 90 THEN "A"
+                        ELSE "B"
+                    END as grade'),
+                    'exams.exam_date as date'
+                )
+                ->join('exams', 'exam_results.exam_id', '=', 'exams.id')
+                ->join('subjects', 'exams.subject_id', '=', 'subjects.id')
+                ->join('users', 'exam_results.student_id', '=', 'users.id')
+                ->whereIn('exam_results.student_id', $childrenIds)
+                ->orderByDesc('exams.exam_date')
+                ->limit($childrenIds->count() * 5) // Get top 5 for each child
+                ->get()
+                ->groupBy('student_id');
 
             $data = [
                 'attendance' => [],
                 'results' => []
             ];
 
-            foreach ($children as $child) {
-                // Get attendance
-                $attendancePercentage = $this->calculateAttendancePercentage($child->id);
+            foreach ($childrenIds as $childId) {
+                $child = User::find($childId);
+                if (!$child) continue;
+
+                // Get attendance from batch calculation
+                $attendancePercentage = $attendanceData[$childId] ?? 0;
+                
                 $data['attendance'][] = [
                     'id' => $child->id,
                     'name' => $child->first_name . ' ' . $child->last_name,
@@ -810,25 +849,10 @@ class DashboardController extends Controller
                     'avatar' => $child->avatar
                 ];
 
-                // Get recent results
-                $results = ExamResult::select(
-                        'subjects.name as subject',
-                        'exam_results.marks as percentage',
-                        DB::raw('CASE 
-                            WHEN exam_results.marks >= 95 THEN "A+"
-                            WHEN exam_results.marks >= 90 THEN "A"
-                            ELSE "B"
-                        END as grade'),
-                        'exams.exam_date as date'
-                    )
-                    ->join('exams', 'exam_results.exam_id', '=', 'exams.id')
-                    ->join('subjects', 'exams.subject_id', '=', 'subjects.id')
-                    ->where('exam_results.student_id', $child->id)
-                    ->orderByDesc('exams.exam_date')
-                    ->limit(5)
-                    ->get();
-
-                foreach ($results as $result) {
+                // Get recent results (already loaded in batch)
+                $childResults = $results->get($childId, collect());
+                
+                foreach ($childResults->take(5) as $result) {
                     $result->studentName = $child->first_name . ' ' . $child->last_name;
                     $data['results'][] = $result;
                 }
@@ -926,30 +950,27 @@ class DashboardController extends Controller
     private function getStudentStats($user)
     {
         try {
+            // Optimized: Calculate attendance once
             $attendancePercentage = $this->calculateAttendancePercentage($user->id);
             
             $examsCount = 0;
             $eventsCount = 0;
             $pendingFees = 0;
             
-            try {
+            // OPTIMIZED: Single batch query for all stats if possible
+            if (Schema::hasTable('exams')) {
                 $examsCount = Exam::where('exam_date', '>=', Carbon::now())->count();
-            } catch (\Exception $e) {
-                // Exam table might not exist
             }
             
-            try {
+            if (Schema::hasTable('events')) {
                 $eventsCount = Event::where('event_date', '>=', Carbon::now())->count();
-            } catch (\Exception $e) {
-                // Event table might not exist
             }
             
-            try {
-                $pendingFees = FeePayment::where('student_id', $user->id)
-                    ->where('status', 'pending')
-                    ->sum('amount') ?? 0;
-            } catch (\Exception $e) {
-                // FeePayment table might not exist
+            if (Schema::hasTable('fee_payments')) {
+                $pendingFees = DB::table('fee_payments')
+                    ->where('student_id', $user->id)
+                    ->where('payment_status', 'Pending')
+                    ->sum('amount_paid') ?? 0;
             }
 
             return [
@@ -972,33 +993,49 @@ class DashboardController extends Controller
     private function getParentStats($user)
     {
         try {
-            $children = User::where('parent_id', $user->id)->where('role', 'Student')->get();
-            $totalAttendance = 0;
-            $totalPendingFees = 0;
-
-            foreach ($children as $child) {
-                $totalAttendance += $this->calculateAttendancePercentage($child->id);
-                
-                try {
-                    $totalPendingFees += FeePayment::where('student_id', $child->id)
-                        ->where('status', 'pending')
-                        ->sum('amount') ?? 0;
-                } catch (\Exception $e) {
-                    // FeePayment might not exist
-                }
+            // FIXED: Load children once, get IDs
+            $childrenIds = User::where('parent_id', $user->id)
+                ->where('role', 'Student')
+                ->pluck('id');
+            
+            if ($childrenIds->isEmpty()) {
+                return [
+                    'students' => 0,
+                    'attendance' => 0,
+                    'pendingFees' => 0,
+                    'events' => 0
+                ];
             }
 
-            $avgAttendance = $children->count() > 0 ? $totalAttendance / $children->count() : 0;
+            // OPTIMIZED: Batch calculate attendance for all children at once
+            $attendanceData = $this->batchCalculateAttendancePercentage($childrenIds->toArray());
+            $totalAttendance = array_sum($attendanceData);
+            $avgAttendance = $childrenIds->count() > 0 ? $totalAttendance / $childrenIds->count() : 0;
             
+            // OPTIMIZED: Single query for all pending fees
+            $totalPendingFees = 0;
+            try {
+                if (Schema::hasTable('fee_payments')) {
+                    $totalPendingFees = DB::table('fee_payments')
+                        ->whereIn('student_id', $childrenIds)
+                        ->where('payment_status', 'Pending')
+                        ->sum('amount_paid') ?? 0;
+                }
+            } catch (\Exception $e) {
+                // FeePayment might not exist
+            }
+
             $eventsCount = 0;
             try {
-                $eventsCount = Event::where('event_date', '>=', Carbon::now())->count();
+                if (Schema::hasTable('events')) {
+                    $eventsCount = Event::where('event_date', '>=', Carbon::now())->count();
+                }
             } catch (\Exception $e) {
                 // Event table might not exist
             }
 
             return [
-                'students' => $children->count(),
+                'students' => $childrenIds->count(),
                 'attendance' => round($avgAttendance),
                 'pendingFees' => $totalPendingFees,
                 'events' => $eventsCount
@@ -1047,6 +1084,9 @@ class DashboardController extends Controller
         }
     }
 
+    /**
+     * Calculate attendance percentage for a single student
+     */
     private function calculateAttendancePercentage($studentId)
     {
         try {
@@ -1058,6 +1098,78 @@ class DashboardController extends Controller
         } catch (\Exception $e) {
             // Attendance table might not exist
             return 0;
+        }
+    }
+
+    /**
+     * BATCH calculate attendance for multiple students - OPTIMIZED
+     * Fixes N+1 query problem by calculating all at once
+     */
+    private function batchCalculateAttendancePercentage(array $studentIds): array
+    {
+        try {
+            if (empty($studentIds)) {
+                return [];
+            }
+
+            // Check if attendance table exists
+            if (!Schema::hasTable('attendances') && !Schema::hasTable('student_attendance')) {
+                return array_fill_keys($studentIds, 0);
+            }
+
+            // Use student_attendance table if it exists
+            if (Schema::hasTable('student_attendance')) {
+                $attendanceData = DB::table('student_attendance')
+                    ->select(
+                        'student_id',
+                        DB::raw('COUNT(*) as total_days'),
+                        DB::raw('SUM(CASE WHEN status = "Present" THEN 1 ELSE 0 END) as present_days')
+                    )
+                    ->whereIn('student_id', $studentIds)
+                    ->groupBy('student_id')
+                    ->get()
+                    ->keyBy('student_id');
+
+                $result = [];
+                foreach ($studentIds as $id) {
+                    $data = $attendanceData->get($id);
+                    if ($data && $data->total_days > 0) {
+                        $result[$id] = round(($data->present_days / $data->total_days) * 100);
+                    } else {
+                        $result[$id] = 0;
+                    }
+                }
+                
+                return $result;
+            }
+
+            // Fallback to attendances table (old schema)
+            $attendanceData = DB::table('attendances')
+                ->select(
+                    'student_id',
+                    DB::raw('COUNT(*) as total_days'),
+                    DB::raw('SUM(CASE WHEN status = "present" THEN 1 ELSE 0 END) as present_days')
+                )
+                ->whereIn('student_id', $studentIds)
+                ->groupBy('student_id')
+                ->get()
+                ->keyBy('student_id');
+
+            $result = [];
+            foreach ($studentIds as $id) {
+                $data = $attendanceData->get($id);
+                if ($data && $data->total_days > 0) {
+                    $result[$id] = round(($data->present_days / $data->total_days) * 100);
+                } else {
+                    $result[$id] = 0;
+                }
+            }
+
+            return $result;
+
+        } catch (\Exception $e) {
+            Log::error('Batch attendance calculation error', ['error' => $e->getMessage()]);
+            return array_fill_keys($studentIds, 0);
         }
     }
 

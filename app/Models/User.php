@@ -101,25 +101,26 @@ class User extends Authenticatable
 
     /**
      * Check if user has a specific permission
+     * Priority: User-specific overrides > Role permissions
      */
     public function hasPermission(string $permissionSlug, ?int $branchId = null): bool
     {
-        // SuperAdmin has all permissions
-        if ($this->isSuperAdmin()) {
-            return true;
-        }
+        // REMOVED SuperAdmin bypass - SuperAdmin now follows permissions like everyone else
+        // If you want SuperAdmin to have all permissions, assign them to the SuperAdmin role
 
-        // Check user-specific permission overrides first
+        // STEP 1: Check user-specific permission overrides FIRST (highest priority)
         $userPermission = $this->permissions()
             ->where('slug', $permissionSlug)
             ->when($branchId, fn($q) => $q->where('user_permissions.branch_id', $branchId))
             ->first();
 
+        // If user has explicit override, use it (granted=true means YES, granted=false means NO)
         if ($userPermission) {
-            return $userPermission->pivot->granted;
+            return (bool) $userPermission->pivot->granted;
         }
 
-        // Check role-based permissions
+        // STEP 2: Check role-based permissions (if no user override)
+        // This automatically updates when role permissions change
         return $this->roles()
             ->whereHas('permissions', function($q) use ($permissionSlug) {
                 $q->where('slug', $permissionSlug);
@@ -156,37 +157,57 @@ class User extends Authenticatable
 
     /**
      * Get all user permissions (from roles + overrides)
+     * NO CACHING - Always fresh from database
+     * 
+     * Logic:
+     * 1. Get all permissions from user's roles
+     * 2. Apply user-specific overrides (granted=true adds, granted=false removes)
+     * 
+     * Note: SuperAdmin bypass removed - SuperAdmin must have permissions assigned to role
      */
     public function getAllPermissions(?int $branchId = null): Collection
     {
-        if ($this->isSuperAdmin()) {
-            return Permission::all();
-        }
+        // STEP 1: Get all permissions from all assigned roles
+        $rolePermissionIds = \DB::table('user_roles')
+            ->join('role_permissions', 'user_roles.role_id', '=', 'role_permissions.role_id')
+            ->where('user_roles.user_id', $this->id)
+            ->when($branchId, fn($q) => $q->where('user_roles.branch_id', $branchId))
+            ->distinct()
+            ->pluck('role_permissions.permission_id')
+            ->toArray();
 
-        // Get permissions from roles
-        $rolePermissions = Permission::whereHas('roles', function($q) use ($branchId) {
-            $q->whereHas('users', function($q2) use ($branchId) {
-                $q2->where('users.id', $this->id)
-                   ->when($branchId, fn($q3) => $q3->where('user_roles.branch_id', $branchId));
-            });
-        })->get();
-
-        // Apply user-specific overrides
-        $overrides = $this->permissions()
-            ->when($branchId, fn($q) => $q->where('user_permissions.branch_id', $branchId))
+        // Get permission objects
+        $rolePermissions = \DB::table('permissions')
+            ->whereIn('id', $rolePermissionIds)
             ->get();
 
-        $permissions = $rolePermissions->keyBy('id');
+        // Convert to keyed collection by permission ID
+        $finalPermissions = collect($rolePermissions)->keyBy('id');
 
-        foreach ($overrides as $override) {
-            if ($override->pivot->granted) {
-                $permissions[$override->id] = $override;
+        // STEP 2: Apply user-specific permission overrides
+        $userOverrides = \DB::table('user_permissions')
+            ->where('user_id', $this->id)
+            ->when($branchId, fn($q) => $q->where('branch_id', $branchId))
+            ->get();
+
+        foreach ($userOverrides as $override) {
+            if ($override->granted) {
+                // GRANT: Add this permission (even if not in role)
+                if (!$finalPermissions->has($override->permission_id)) {
+                    $permission = \DB::table('permissions')
+                        ->where('id', $override->permission_id)
+                        ->first();
+                    if ($permission) {
+                        $finalPermissions[$override->permission_id] = $permission;
+                    }
+                }
             } else {
-                unset($permissions[$override->id]);
+                // REVOKE: Remove this permission (even if in role)
+                $finalPermissions->forget($override->permission_id);
             }
         }
 
-        return $permissions->values();
+        return $finalPermissions->values();
     }
 
     /**
@@ -203,11 +224,6 @@ class User extends Authenticatable
      */
     public function hasCrossBranchAccess(): bool
     {
-        // SuperAdmin always has cross-branch access
-        if ($this->isSuperAdmin()) {
-            return true;
-        }
-        
         // Check for specific cross-branch permissions
         return $this->hasAnyPermission([
             'system.cross_branch_access',
@@ -221,10 +237,6 @@ class User extends Authenticatable
      */
     public function canManageAllBranches(): bool
     {
-        if ($this->isSuperAdmin()) {
-            return true;
-        }
-        
         return $this->hasAnyPermission([
             'system.cross_branch_access',
             'system.manage_all_branches'
@@ -236,10 +248,6 @@ class User extends Authenticatable
      */
     public function canViewAllBranches(): bool
     {
-        if ($this->isSuperAdmin()) {
-            return true;
-        }
-        
         return $this->hasAnyPermission([
             'system.cross_branch_access',
             'system.manage_all_branches',

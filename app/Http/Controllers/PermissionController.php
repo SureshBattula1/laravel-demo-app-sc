@@ -105,7 +105,8 @@ class PermissionController extends Controller
     }
 
     /**
-     * Get user's effective permissions
+     * Get user's effective permissions (role permissions + user overrides)
+     * NO CACHING - Always fetches fresh from database
      */
     public function getUserPermissions($userId, Request $request)
     {
@@ -113,6 +114,7 @@ class PermissionController extends Controller
             $user = User::findOrFail($userId);
             $branchId = $request->input('branch_id');
 
+            // Get all effective permissions (role + overrides applied)
             $permissions = $user->getAllPermissions($branchId);
             
             // Group by module for easier frontend consumption
@@ -127,16 +129,23 @@ class PermissionController extends Controller
                 });
             });
 
+            // Get permission slugs (what frontend needs for hasPermission checks)
+            $permissionSlugs = $permissions->pluck('slug')->toArray();
+            
             return response()->json([
                 'success' => true,
                 'data' => [
                     'user' => $user->only(['id', 'first_name', 'last_name', 'email', 'role']),
                     'permissions' => $groupedPermissions,
-                    'permission_slugs' => $permissions->pluck('slug')->toArray()
+                    'permission_slugs' => $permissionSlugs,
+                    'total_count' => count($permissionSlugs)
                 ]
             ]);
         } catch (\Exception $e) {
-            Log::error('Get user permissions error', ['error' => $e->getMessage()]);
+            Log::error('Get user permissions error', [
+                'user_id' => $userId,
+                'error' => $e->getMessage()
+            ]);
             
             return response()->json([
                 'success' => false,

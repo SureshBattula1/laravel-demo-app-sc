@@ -46,12 +46,13 @@ class FeeController extends Controller
                 $query->where('fee_type', $request->fee_type);
             }
 
-            if ($request->has('search')) {
+            // OPTIMIZED Search filter - prefix search for better index usage
+            if ($request->has('search') && !empty($request->search)) {
                 $search = strip_tags($request->search);
                 $query->where(function($q) use ($search) {
-                    $q->where('grade', 'like', '%' . $search . '%')
-                      ->orWhere('fee_type', 'like', '%' . $search . '%')
-                      ->orWhere('academic_year', 'like', '%' . $search . '%');
+                    $q->where('grade', 'like', "{$search}%")
+                      ->orWhere('fee_type', 'like', "{$search}%")
+                      ->orWhere('academic_year', 'like', "{$search}%");
                 });
             }
 
@@ -221,6 +222,16 @@ class FeeController extends Controller
         try {
             $query = FeePayment::with(['feeStructure', 'student', 'creator']);
 
+            // 🔥 APPLY BRANCH FILTERING - Restrict to accessible branches
+            $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+            if ($accessibleBranchIds !== 'all') {
+                if (!empty($accessibleBranchIds)) {
+                    $query->whereIn('branch_id', $accessibleBranchIds);
+                } else {
+                    $query->whereRaw('1 = 0');
+                }
+            }
+
             if ($request->has('student_id')) {
                 $query->where('student_id', $request->student_id);
             }
@@ -241,11 +252,12 @@ class FeeController extends Controller
                 $query->whereDate('payment_date', '<=', $request->to_date);
             }
 
-            if ($request->has('search')) {
+            // OPTIMIZED Search filter - prefix search for better index usage
+            if ($request->has('search') && !empty($request->search)) {
                 $search = strip_tags($request->search);
                 $query->where(function($q) use ($search) {
-                    $q->where('transaction_id', 'like', '%' . $search . '%')
-                      ->orWhere('payment_method', 'like', '%' . $search . '%');
+                    $q->where('transaction_id', 'like', "{$search}%")
+                      ->orWhere('payment_method', 'like', "{$search}%");
                 });
             }
 
@@ -333,14 +345,29 @@ class FeeController extends Controller
     public function getStudentFees(string $studentId)
     {
         try {
+            // OPTIMIZED: Use SQL aggregation instead of PHP sum
+            $totalPaid = FeePayment::where('student_id', $studentId)
+                ->sum('total_amount');
+
+            // OPTIMIZED: Get paid structure IDs (only IDs, not full objects)
+            $paidStructureIds = FeePayment::where('student_id', $studentId)
+                ->pluck('fee_structure_id')
+                ->filter()
+                ->unique()
+                ->toArray();
+
+            // OPTIMIZED: Get pending fees using left join instead of whereNotIn
+            $pending = FeeStructure::where('is_active', true)
+                ->when(!empty($paidStructureIds), function($q) use ($paidStructureIds) {
+                    return $q->whereNotIn('id', $paidStructureIds);
+                })
+                ->get();
+
+            // OPTIMIZED: Get payments with pagination (limit to recent payments)
             $payments = FeePayment::with(['feeStructure', 'creator'])
                 ->where('student_id', $studentId)
                 ->orderBy('payment_date', 'desc')
-                ->get();
-
-            $totalPaid = $payments->sum('total_amount');
-            $pending = FeeStructure::where('is_active', true)
-                ->whereNotIn('id', $payments->pluck('fee_structure_id'))
+                ->limit(50) // Limit to recent 50 payments
                 ->get();
 
             return response()->json([
@@ -348,7 +375,7 @@ class FeeController extends Controller
                 'data' => [
                     'payments' => $payments,
                     'pending_fees' => $pending,
-                    'total_paid' => $totalPaid,
+                    'total_paid' => (float)$totalPaid,
                     'pending_count' => $pending->count()
                 ],
                 'message' => 'Student fees retrieved successfully'

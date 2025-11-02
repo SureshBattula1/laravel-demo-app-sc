@@ -38,13 +38,14 @@ class PermissionManagementController extends Controller
                 'permissions.updated_at'
             );
 
-        // Apply search filter
+        // OPTIMIZED Search filter - prefix search for better index usage
         if ($search) {
+            $search = strip_tags($search);
             $query->where(function($q) use ($search) {
-                $q->where('permissions.name', 'like', "%{$search}%")
-                  ->orWhere('permissions.slug', 'like', "%{$search}%")
-                  ->orWhere('modules.name', 'like', "%{$search}%")
-                  ->orWhere('permissions.action', 'like', "%{$search}%");
+                $q->where('permissions.name', 'like', "{$search}%")
+                  ->orWhere('permissions.slug', 'like', "{$search}%")
+                  ->orWhere('modules.name', 'like', "{$search}%")
+                  ->orWhere('permissions.action', 'like', "{$search}%");
             });
         }
 
@@ -63,9 +64,10 @@ class PermissionManagementController extends Controller
             $query->where('permissions.is_system_permission', (bool)$isSystemPermission);
         }
 
-        // Apply slug filter
+        // Apply slug filter - OPTIMIZED: prefix search
         if ($slug) {
-            $query->where('permissions.slug', 'like', "%{$slug}%");
+            $slug = strip_tags($slug);
+            $query->where('permissions.slug', 'like', "{$slug}%");
         }
 
         // Apply sorting

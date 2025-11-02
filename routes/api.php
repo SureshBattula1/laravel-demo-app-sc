@@ -37,6 +37,7 @@ use App\Http\Controllers\SectionSubjectController;
 use App\Http\Controllers\ExamTermController;
 use App\Http\Controllers\ExamScheduleController;
 use App\Http\Controllers\GlobalUploadController;
+use App\Http\Controllers\ExamMarkController;
 
 /*
 |--------------------------------------------------------------------------
@@ -210,9 +211,17 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     Route::prefix('exam-schedules')->group(function () {
         Route::get('/', [ExamScheduleController::class, 'index']);
         Route::post('/', [ExamScheduleController::class, 'store']);
-        Route::get('{id}', [ExamScheduleController::class, 'show']);
+        Route::get('{id}/students', [ExamScheduleController::class, 'getStudents']);
+        Route::get('{id}', [ExamScheduleController::class, 'show'])->where('id', '[0-9]+');
         Route::put('{id}', [ExamScheduleController::class, 'update']);
         Route::delete('{id}', [ExamScheduleController::class, 'destroy']);
+    });
+
+    // Exam Marks
+    Route::prefix('exam-marks')->group(function () {
+        Route::get('schedule/{scheduleId}', [ExamMarkController::class, 'getMarks']);
+        Route::post('schedule/{scheduleId}', [ExamMarkController::class, 'storeMarks']);
+        Route::get('student/{studentId}', [ExamMarkController::class, 'getStudentMarks']);
     });
     
     // Fee Routes

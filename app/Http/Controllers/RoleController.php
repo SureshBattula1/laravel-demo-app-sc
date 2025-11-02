@@ -25,12 +25,13 @@ class RoleController extends Controller
             ->select('roles.*')
             ->selectRaw('(SELECT COUNT(*) FROM role_permissions WHERE role_id = roles.id) as permissions_count');
 
-        // Apply search filter
+        // OPTIMIZED Search filter - prefix search for better index usage
         if ($search) {
+            $search = strip_tags($search);
             $query->where(function($q) use ($search) {
-                $q->where('name', 'like', "%{$search}%")
-                  ->orWhere('slug', 'like', "%{$search}%")
-                  ->orWhere('description', 'like', "%{$search}%");
+                $q->where('name', 'like', "{$search}%")
+                  ->orWhere('slug', 'like', "{$search}%")
+                  ->orWhere('description', 'like', "{$search}%");
             });
         }
 
@@ -44,9 +45,10 @@ class RoleController extends Controller
             $query->where('is_system_role', (bool)$isSystemRole);
         }
 
-        // Apply slug filter
+        // Apply slug filter - OPTIMIZED: prefix search
         if ($slug) {
-            $query->where('slug', 'like', "%{$slug}%");
+            $slug = strip_tags($slug);
+            $query->where('slug', 'like', "{$slug}%");
         }
 
         // Apply sorting
@@ -54,9 +56,32 @@ class RoleController extends Controller
 
         $roles = $query->paginate($perPage);
 
-        // Add permissions to each role
-        foreach ($roles->items() as $role) {
-            $role->permissions = $this->getRolePermissions($role->id);
+        // OPTIMIZED: Batch load permissions to avoid N+1 queries
+        $roleIds = collect($roles->items())->pluck('id')->toArray();
+        
+        if (!empty($roleIds)) {
+            $allPermissions = DB::table('role_permissions')
+                ->join('permissions', 'role_permissions.permission_id', '=', 'permissions.id')
+                ->leftJoin('modules', 'permissions.module_id', '=', 'modules.id')
+                ->whereIn('role_permissions.role_id', $roleIds)
+                ->select(
+                    'role_permissions.role_id',
+                    'permissions.id',
+                    'permissions.name',
+                    'permissions.slug as display_name',
+                    'permissions.description',
+                    'permissions.action',
+                    'modules.name as module',
+                    'modules.slug as module_slug',
+                    'permissions.created_at',
+                    'permissions.updated_at'
+                )
+                ->get()
+                ->groupBy('role_id');
+
+            foreach ($roles->items() as $role) {
+                $role->permissions = $allPermissions->get($role->id, []);
+            }
         }
 
         return response()->json([
@@ -72,9 +97,33 @@ class RoleController extends Controller
     public function all()
     {
         $roles = DB::table('roles')->get();
+        
+        $roleIds = collect($roles)->pluck('id')->toArray();
+        
+        // OPTIMIZED: Batch load permissions to avoid N+1 queries
+        if (!empty($roleIds)) {
+            $allPermissions = DB::table('role_permissions')
+                ->join('permissions', 'role_permissions.permission_id', '=', 'permissions.id')
+                ->leftJoin('modules', 'permissions.module_id', '=', 'modules.id')
+                ->whereIn('role_permissions.role_id', $roleIds)
+                ->select(
+                    'role_permissions.role_id',
+                    'permissions.id',
+                    'permissions.name',
+                    'permissions.slug as display_name',
+                    'permissions.description',
+                    'permissions.action',
+                    'modules.name as module',
+                    'modules.slug as module_slug',
+                    'permissions.created_at',
+                    'permissions.updated_at'
+                )
+                ->get()
+                ->groupBy('role_id');
 
-        foreach ($roles as $role) {
-            $role->permissions = $this->getRolePermissions($role->id);
+            foreach ($roles as $role) {
+                $role->permissions = $allPermissions->get($role->id, []);
+            }
         }
 
         return response()->json([
@@ -214,6 +263,10 @@ class RoleController extends Controller
 
     /**
      * Assign permissions to role
+     * 
+     * IMPORTANT: When role permissions change, ALL users with this role
+     * automatically get the updated permissions (no user update needed).
+     * User-specific overrides still take precedence over role permissions.
      */
     public function assignPermissions(Request $request, $id)
     {
@@ -230,28 +283,52 @@ class RoleController extends Controller
             ], 422);
         }
 
-        // Delete existing permissions
-        DB::table('role_permissions')->where('role_id', $id)->delete();
+        DB::beginTransaction();
+        try {
+            // Delete existing role permissions
+            DB::table('role_permissions')->where('role_id', $id)->delete();
 
-        // Insert new permissions
-        $permissions = collect($request->permissions)->map(function ($permissionId) use ($id) {
-            return [
-                'role_id' => $id,
-                'permission_id' => $permissionId,
-                'created_at' => now()
-            ];
-        });
+            // Insert new permissions
+            $permissions = collect($request->permissions)->map(function ($permissionId) use ($id) {
+                return [
+                    'role_id' => $id,
+                    'permission_id' => $permissionId,
+                    'created_at' => now(),
+                    'updated_at' => now()
+                ];
+            });
 
-        DB::table('role_permissions')->insert($permissions->toArray());
+            if (!$permissions->isEmpty()) {
+                DB::table('role_permissions')->insert($permissions->toArray());
+            }
 
-        $role = DB::table('roles')->where('id', $id)->first();
-        $role->permissions = $this->getRolePermissions($id);
+            // Get affected users count (for logging/notification)
+            $affectedUsersCount = DB::table('user_roles')
+                ->where('role_id', $id)
+                ->distinct('user_id')
+                ->count();
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Permissions assigned successfully',
-            'data' => $role
-        ]);
+            DB::commit();
+
+            $role = DB::table('roles')->where('id', $id)->first();
+            $role->permissions = $this->getRolePermissions($id);
+
+            return response()->json([
+                'success' => true,
+                'message' => "Permissions updated successfully. {$affectedUsersCount} user(s) will inherit these permissions.",
+                'data' => [
+                    'role' => $role,
+                    'affected_users_count' => $affectedUsersCount,
+                    'permissions_count' => count($request->permissions)
+                ]
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update permissions: ' . $e->getMessage()
+            ], 500);
+        }
     }
 
     /**

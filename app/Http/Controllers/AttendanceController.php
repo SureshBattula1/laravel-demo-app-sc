@@ -1027,16 +1027,16 @@ class AttendanceController extends Controller
             }
         }
 
-        // Search filter
+        // OPTIMIZED Search filter - prefix search for better index usage
         if ($request->has('search') && !empty($request->search)) {
             $search = strip_tags($request->search);
             $query->where(function($q) use ($search, $type) {
-                $q->where('users.first_name', 'like', '%' . $search . '%')
-                  ->orWhere('users.last_name', 'like', '%' . $search . '%')
-                  ->orWhere('users.email', 'like', '%' . $search . '%');
+                $q->where('users.first_name', 'like', "{$search}%")
+                  ->orWhere('users.last_name', 'like', "{$search}%")
+                  ->orWhere('users.email', 'like', "{$search}%");
                 
                 if ($type === 'student') {
-                    $q->orWhere('students.admission_number', 'like', '%' . $search . '%');
+                    $q->orWhere('students.admission_number', 'like', "{$search}%");
                 }
             });
         }

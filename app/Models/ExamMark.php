@@ -41,7 +41,12 @@ class ExamMark extends Model
     // Relationships
     public function examSchedule(): BelongsTo
     {
-        return $this->belongsTo(ExamSchedule::class);
+        return $this->belongsTo(ExamSchedule::class, 'exam_schedule_id');
+    }
+
+    public function schedule(): BelongsTo
+    {
+        return $this->belongsTo(ExamSchedule::class, 'exam_schedule_id');
     }
 
     public function student(): BelongsTo

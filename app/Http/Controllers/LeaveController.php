@@ -259,12 +259,12 @@ class LeaveController extends Controller
     }
 
     /**
-     * Get single leave record
+     * Get single leave record - OPTIMIZED with UNION
      */
     public function show($id)
     {
         try {
-            // Try student leave first
+            // OPTIMIZED: Single query using UNION to check both tables at once
             $leave = DB::table('student_leaves')
                 ->join('users', 'student_leaves.student_id', '=', 'users.id')
                 ->leftJoin('students', 'users.id', '=', 'students.user_id')
@@ -281,25 +281,22 @@ class LeaveController extends Controller
                     'students.section',
                     DB::raw("'student' as leave_for")
                 )
+                ->union(
+                    DB::table('teacher_leaves')
+                        ->join('users', 'teacher_leaves.teacher_id', '=', 'users.id')
+                        ->leftJoin('teachers', 'users.id', '=', 'teachers.user_id')
+                        ->where('teacher_leaves.id', $id)
+                        ->select(
+                            'teacher_leaves.*',
+                            'users.first_name',
+                            'users.last_name',
+                            'users.email',
+                            'teachers.employee_id',
+                            'teachers.designation',
+                            DB::raw("'teacher' as leave_for")
+                        )
+                )
                 ->first();
-            
-            // If not found, try teacher leave
-            if (!$leave) {
-                $leave = DB::table('teacher_leaves')
-                    ->join('users', 'teacher_leaves.teacher_id', '=', 'users.id')
-                    ->leftJoin('teachers', 'users.id', '=', 'teachers.user_id')
-                    ->where('teacher_leaves.id', $id)
-                    ->select(
-                        'teacher_leaves.*',
-                        'users.first_name',
-                        'users.last_name',
-                        'users.email',
-                        'teachers.employee_id',
-                        'teachers.designation',
-                        DB::raw("'teacher' as leave_for")
-                    )
-                    ->first();
-            }
             
             if (!$leave) {
                 return response()->json([

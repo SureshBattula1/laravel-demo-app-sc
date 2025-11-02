@@ -35,47 +35,75 @@ class AccountController extends Controller
                 $query->where('branch_id', $branchId);
             }
 
-            // Calculate totals
-            $totalIncome = (clone $query)->where('type', 'Income')->sum('amount');
-            $totalExpense = (clone $query)->where('type', 'Expense')->sum('amount');
+            // OPTIMIZED: Single aggregated query for totals (both Income and Expense in one query)
+            $totalsQuery = DB::table('transactions')
+                ->where('status', 'Approved')
+                ->where('financial_year', $financialYear);
+
+            // Apply branch filter
+            if ($accessibleBranchIds !== 'all') {
+                if (!empty($accessibleBranchIds)) {
+                    $totalsQuery->whereIn('branch_id', $accessibleBranchIds);
+                } else {
+                    // No access to any branches - return empty data
+                    return response()->json([
+                        'success' => true,
+                        'data' => [
+                            'summary' => ['total_income' => 0, 'total_expense' => 0, 'net_balance' => 0, 'financial_year' => $financialYear],
+                            'income_by_category' => [],
+                            'expense_by_category' => [],
+                            'recent_transactions' => [],
+                            'monthly_trend' => []
+                        ]
+                    ]);
+                }
+            } elseif ($branchId) {
+                $totalsQuery->where('branch_id', $branchId);
+            }
+
+            $totals = $totalsQuery
+                ->select(
+                    DB::raw('SUM(CASE WHEN type = "Income" THEN amount ELSE 0 END) as total_income'),
+                    DB::raw('SUM(CASE WHEN type = "Expense" THEN amount ELSE 0 END) as total_expense')
+                )
+                ->first();
+
+            $totalIncome = (float) ($totals->total_income ?? 0);
+            $totalExpense = (float) ($totals->total_expense ?? 0);
             $netBalance = $totalIncome - $totalExpense;
 
-            // Get category-wise breakdown
-            $incomeByCategory = DB::table('transactions')
+            // OPTIMIZED: Single aggregated query for category breakdown (both Income and Expense)
+            $categoryQuery = DB::table('transactions')
                 ->join('account_categories', 'transactions.category_id', '=', 'account_categories.id')
-                ->where('transactions.type', 'Income')
                 ->where('transactions.status', 'Approved')
-                ->where('transactions.financial_year', $financialYear)
-                ->when($branchId, function ($q) use ($branchId) {
-                    return $q->where('transactions.branch_id', $branchId);
-                })
-                ->select('account_categories.name as category', DB::raw('SUM(transactions.amount) as amount'))
-                ->groupBy('account_categories.name')
-                ->get()
-                ->map(function ($item) {
-                    return [
-                        'category' => $item->category,
-                        'amount' => (float) $item->amount
-                    ];
-                });
+                ->where('transactions.financial_year', $financialYear);
 
-            $expenseByCategory = DB::table('transactions')
-                ->join('account_categories', 'transactions.category_id', '=', 'account_categories.id')
-                ->where('transactions.type', 'Expense')
-                ->where('transactions.status', 'Approved')
-                ->where('transactions.financial_year', $financialYear)
-                ->when($branchId, function ($q) use ($branchId) {
-                    return $q->where('transactions.branch_id', $branchId);
-                })
-                ->select('account_categories.name as category', DB::raw('SUM(transactions.amount) as amount'))
-                ->groupBy('account_categories.name')
-                ->get()
-                ->map(function ($item) {
-                    return [
-                        'category' => $item->category,
-                        'amount' => (float) $item->amount
-                    ];
-                });
+            // Apply branch filter
+            if ($accessibleBranchIds !== 'all') {
+                if (!empty($accessibleBranchIds)) {
+                    $categoryQuery->whereIn('transactions.branch_id', $accessibleBranchIds);
+                }
+            } elseif ($branchId) {
+                $categoryQuery->where('transactions.branch_id', $branchId);
+            }
+
+            $categoryBreakdown = $categoryQuery
+                ->select(
+                    'transactions.type',
+                    'account_categories.name as category',
+                    DB::raw('SUM(transactions.amount) as amount')
+                )
+                ->groupBy('transactions.type', 'account_categories.name')
+                ->get();
+
+            // Separate income and expense categories
+            $incomeByCategory = $categoryBreakdown
+                ->filter(fn($item) => $item->type === 'Income')
+                ->map(fn($item) => ['category' => $item->category, 'amount' => (float) $item->amount]);
+
+            $expenseByCategory = $categoryBreakdown
+                ->filter(fn($item) => $item->type === 'Expense')
+                ->map(fn($item) => ['category' => $item->category, 'amount' => (float) $item->amount]);
 
             // Recent transactions
             $recentTransactions = Transaction::with(['category', 'branch', 'createdBy'])

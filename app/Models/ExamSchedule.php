@@ -11,8 +11,7 @@ class ExamSchedule extends Model
     protected $fillable = [
         'exam_id',
         'subject_id',
-        'branch_id',
-        'grade_level',
+        'grade',
         'section',
         'exam_date',
         'start_time',
@@ -21,20 +20,14 @@ class ExamSchedule extends Model
         'total_marks',
         'passing_marks',
         'room_number',
-        'invigilator_id',
-        'instructions',
-        'status',
-        'is_active'
+        'invigilator_id'
     ];
 
     protected function casts(): array
     {
         return [
             'exam_date' => 'date',
-            'is_active' => 'boolean',
-            'duration' => 'integer',
             'total_marks' => 'decimal:2',
-            'passing_marks' => 'decimal:2',
         ];
     }
 
@@ -47,26 +40,6 @@ class ExamSchedule extends Model
     public function subject(): BelongsTo
     {
         return $this->belongsTo(Subject::class);
-    }
-
-    public function branch(): BelongsTo
-    {
-        return $this->belongsTo(Branch::class);
-    }
-
-    public function invigilator(): BelongsTo
-    {
-        return $this->belongsTo(User::class, 'invigilator_id');
-    }
-
-    public function marks(): HasMany
-    {
-        return $this->hasMany(ExamMark::class);
-    }
-
-    public function attendance(): HasMany
-    {
-        return $this->hasMany(ExamAttendance::class);
     }
 }
 

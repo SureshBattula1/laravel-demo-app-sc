@@ -8,6 +8,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
+use Carbon\Carbon;
 
 class ExamScheduleController extends Controller
 {
@@ -16,16 +17,14 @@ class ExamScheduleController extends Controller
     public function index(Request $request)
     {
         try {
-            // 🚀 OPTIMIZED: Select only needed columns
+            // Select only existing columns based on actual table structure
             $query = ExamSchedule::select([
-                'id', 'exam_id', 'subject_id', 'branch_id', 'grade_level', 'section',
-                'exam_date', 'start_time', 'end_time', 'duration', 'total_marks',
-                'passing_marks', 'room_number', 'invigilator_id', 'status', 'is_active', 'created_at'
+                'id', 'exam_id', 'subject_id', 'grade', 'section',
+                'exam_date', 'start_time', 'end_time', 'duration', 
+                'total_marks', 'passing_marks', 'room_number', 'invigilator_id', 'created_at'
             ])->with([
-                'exam:id,name,exam_type',
-                'subject:id,name,code',
-                'branch:id,name,code',
-                'invigilator:id,first_name,last_name'
+                'exam:id,name',
+                'subject:id,name,code'
             ]);
 
             // Filters
@@ -33,24 +32,16 @@ class ExamScheduleController extends Controller
                 $query->where('exam_id', $request->exam_id);
             }
 
-            if ($request->has('grade_level')) {
-                $query->where('grade_level', $request->grade_level);
-            }
-
-            if ($request->has('section')) {
-                $query->where('section', $request->section);
+            if ($request->has('grade')) {
+                $query->where('grade', $request->grade);
             }
 
             if ($request->has('exam_date')) {
                 $query->whereDate('exam_date', $request->exam_date);
             }
 
-            if ($request->has('status')) {
-                $query->where('status', $request->status);
-            }
-
             $schedules = $this->paginateAndSort($query, $request, [
-                'id', 'exam_date', 'start_time', 'grade_level', 'section', 'status', 'created_at'
+                'id', 'exam_date', 'start_time', 'grade', 'created_at'
             ], 'exam_date', 'asc');
 
             return response()->json([
@@ -74,15 +65,10 @@ class ExamScheduleController extends Controller
         $validator = Validator::make($request->all(), [
             'exam_id' => 'required|exists:exams,id',
             'subject_id' => 'required|exists:subjects,id',
-            'branch_id' => 'required|exists:branches,id',
-            'grade_level' => 'required|string',
-            'section' => 'nullable|string',
             'exam_date' => 'required|date',
             'start_time' => 'required',
             'end_time' => 'required',
-            'duration' => 'required|integer|min:1',
             'total_marks' => 'required|numeric|min:0',
-            'passing_marks' => 'required|numeric|min:0|lte:total_marks',
         ]);
 
         if ($validator->fails()) {
@@ -91,20 +77,51 @@ class ExamScheduleController extends Controller
 
         DB::beginTransaction();
         try {
-            $schedule = ExamSchedule::create($request->all());
+            // Prepare data properly - use only fields that exist in database
+            $scheduleData = [
+                'exam_id' => $request->exam_id,
+                'subject_id' => $request->subject_id,
+                'grade' => $request->grade_level || $request->grade,
+                'section' => $request->section,
+                'exam_date' => $request->exam_date,
+                'start_time' => $request->start_time,
+                'end_time' => $request->end_time,
+                'duration' => $request->duration,
+                'total_marks' => $request->total_marks,
+                'passing_marks' => $request->passing_marks,
+                'room_number' => $request->room_number,
+                'invigilator_id' => $request->invigilator_id,
+            ];
+
+            $schedule = ExamSchedule::create($scheduleData);
             DB::commit();
-            return response()->json(['success' => true, 'data' => $schedule->load(['exam', 'subject', 'branch']), 'message' => 'Schedule created'], 201);
+            return response()->json(['success' => true, 'data' => $schedule->load(['exam', 'subject']), 'message' => 'Schedule created'], 201);
         } catch (\Exception $e) {
             DB::rollBack();
-            Log::error('Create schedule error', ['error' => $e->getMessage()]);
-            return response()->json(['success' => false, 'message' => 'Failed to create schedule'], 500);
+            Log::error('Create schedule error', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'data' => $request->all()
+            ]);
+            return response()->json([
+                'success' => false, 
+                'message' => 'Failed to create schedule',
+                'error' => $e->getMessage()
+            ], 500);
         }
     }
 
     public function show($id)
     {
         try {
-            $schedule = ExamSchedule::with(['exam', 'subject', 'branch', 'invigilator'])->findOrFail($id);
+            $schedule = ExamSchedule::with(['exam:id,name,branch_id', 'subject:id,name,code'])
+                ->select([
+                    'id', 'exam_id', 'subject_id', 'grade', 'section',
+                    'exam_date', 'start_time', 'end_time', 'duration',
+                    'total_marks', 'passing_marks', 'room_number', 'invigilator_id',
+                    'created_at', 'updated_at'
+                ])
+                ->findOrFail($id);
             return response()->json(['success' => true, 'data' => $schedule]);
         } catch (\Exception $e) {
             return response()->json(['success' => false, 'message' => 'Schedule not found'], 404);
@@ -126,13 +143,50 @@ class ExamScheduleController extends Controller
     {
         try {
             $schedule = ExamSchedule::findOrFail($id);
-            if ($schedule->marks()->count() > 0) {
-                return response()->json(['success' => false, 'message' => 'Cannot delete schedule with existing marks'], 400);
-            }
             $schedule->delete();
             return response()->json(['success' => true, 'message' => 'Schedule deleted']);
         } catch (\Exception $e) {
             return response()->json(['success' => false, 'message' => 'Failed to delete schedule'], 500);
+        }
+    }
+
+    /**
+     * Get students for an exam schedule
+     */
+    public function getStudents($id)
+    {
+        try {
+            $schedule = ExamSchedule::with(['exam'])->findOrFail($id);
+            
+            $query = DB::table('students')
+                ->join('users', 'students.user_id', '=', 'users.id')
+                ->where('students.grade', $schedule->grade);
+            
+            // Add section filter if specified
+            if ($schedule->section) {
+                $query->where('students.section', $schedule->section);
+            }
+            
+            // Add branch filter from exam
+            if ($schedule->exam && $schedule->exam->branch_id) {
+                $query->where('students.branch_id', $schedule->exam->branch_id);
+            }
+            
+            $students = $query->select(
+                    'users.id as student_id',
+                    'students.roll_number',
+                    'students.admission_number',
+                    'users.first_name',
+                    'users.last_name',
+                    'users.email'
+                )
+                ->orderBy('students.roll_number')
+                ->get();
+            
+            return response()->json(['success' => true, 'data' => $students]);
+        } catch (\Exception $e) {
+            Log::error('Get schedule students error', ['error' => $e->getMessage()]);
+            return response()->json(['success' => false, 'message' => 'Failed to fetch students'], 500);
         }
     }
 }

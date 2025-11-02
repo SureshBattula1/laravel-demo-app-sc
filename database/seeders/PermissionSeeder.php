@@ -242,20 +242,36 @@ class PermissionSeeder extends Seeder
                 'permissions' => ['view', 'generate', 'export']
             ],
             [
+                'name' => 'Roles',
+                'slug' => 'roles',
+                'icon' => 'admin_panel_settings',
+                'route' => '/settings/roles',
+                'order' => 18,
+                'permissions' => ['view', 'create', 'edit', 'delete', 'update']
+            ],
+            [
+                'name' => 'Permissions',
+                'slug' => 'permissions',
+                'icon' => 'shield',
+                'route' => '/settings/permissions',
+                'order' => 19,
+                'permissions' => ['view', 'create', 'edit', 'delete', 'update']
+            ],
+            [
+                'name' => 'Users Management',
+                'slug' => 'users',
+                'icon' => 'people',
+                'route' => '/settings/users',
+                'order' => 20,
+                'permissions' => ['view', 'create', 'edit', 'delete', 'update']
+            ],
+            [
                 'name' => 'Settings',
                 'slug' => 'settings',
                 'icon' => 'settings',
                 'route' => '/settings',
-                'order' => 18,
+                'order' => 21,
                 'permissions' => ['view', 'edit']
-            ],
-            [
-                'name' => 'Users',
-                'slug' => 'users',
-                'icon' => 'people',
-                'route' => '/users',
-                'order' => 19,
-                'permissions' => ['view', 'create', 'edit', 'delete', 'manage_roles']
             ]
         ];
 

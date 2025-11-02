@@ -30,13 +30,13 @@ class FeeTypeController extends Controller
                 $query->where('is_active', filter_var($request->is_active, FILTER_VALIDATE_BOOLEAN));
             }
 
-            // Search by name or code
-            if ($request->has('search') && $request->search) {
-                $search = $request->search;
+            // OPTIMIZED Search filter - prefix search for better index usage
+            if ($request->has('search') && !empty($request->search)) {
+                $search = strip_tags($request->search);
                 $query->where(function ($q) use ($search) {
-                    $q->where('name', 'like', "%{$search}%")
-                      ->orWhere('code', 'like', "%{$search}%")
-                      ->orWhere('description', 'like', "%{$search}%");
+                    $q->where('name', 'like', "{$search}%")
+                      ->orWhere('code', 'like', "{$search}%")
+                      ->orWhere('description', 'like', "{$search}%");
                 });
             }
 
