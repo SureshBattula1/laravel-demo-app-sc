@@ -17,7 +17,7 @@ class ExamController extends Controller
     public function index(Request $request)
     {
         try {
-            $query = Exam::with(['branch', 'creator']);
+            $query = Exam::with(['branch', 'examTerm', 'creator']);
 
             // Filter by branch
             if ($request->has('branch_id')) {
@@ -53,7 +53,7 @@ class ExamController extends Controller
             $perPage = $request->get('per_page', 25);
             $page = $request->get('page', 1);
             
-            $exams = $query->orderBy('start_date', 'desc')
+            $exams = $query->orderBy('created_at', 'desc')
                 ->paginate($perPage, ['*'], 'page', $page);
 
             return response()->json([
@@ -90,12 +90,13 @@ class ExamController extends Controller
             $validator = Validator::make($request->all(), [
                 'branch_id' => 'required|integer|exists:branches,id',
                 'name' => 'required|string|max:255',
-                'exam_type' => 'required|string|in:Midterm,Final,Quiz,Assignment,Practical,Other',
+                'exam_term_id' => 'nullable|integer|exists:exam_terms,id',
+                'exam_type' => 'nullable|string|in:Midterm,Final,Quiz,Assignment,Practical,Other',
                 'academic_year' => 'required|string|max:20',
-                'start_date' => 'required|date',
-                'end_date' => 'required|date|after_or_equal:start_date',
-                'total_marks' => 'required|numeric|min:0',
-                'passing_marks' => 'required|numeric|min:0|lte:total_marks',
+                'start_date' => 'nullable|date',
+                'end_date' => 'nullable|date|after_or_equal:start_date',
+                'total_marks' => 'nullable|numeric|min:0',
+                'passing_marks' => 'nullable|numeric|min:0|lte:total_marks',
                 'description' => 'nullable|string',
                 'is_active' => 'boolean'
             ]);
@@ -132,7 +133,7 @@ class ExamController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data' => $exam->load(['branch', 'creator']),
+                'data' => $exam->load(['branch', 'examTerm', 'creator']),
                 'message' => 'Exam created successfully'
             ], 201);
 
@@ -153,7 +154,7 @@ class ExamController extends Controller
     public function show(string $id)
     {
         try {
-            $exam = Exam::with(['branch', 'results.student', 'creator', 'updater'])->findOrFail($id);
+            $exam = Exam::with(['branch', 'examTerm', 'results.student', 'creator', 'updater'])->findOrFail($id);
 
             return response()->json([
                 'success' => true,
@@ -183,12 +184,13 @@ class ExamController extends Controller
             $validator = Validator::make($request->all(), [
                 'branch_id' => 'integer|exists:branches,id',
                 'name' => 'string|max:255',
-                'exam_type' => 'string|in:Midterm,Final,Quiz,Assignment,Practical,Other',
+                'exam_term_id' => 'nullable|integer|exists:exam_terms,id',
+                'exam_type' => 'nullable|string|in:Midterm,Final,Quiz,Assignment,Practical,Other',
                 'academic_year' => 'string|max:20',
-                'start_date' => 'date',
-                'end_date' => 'date|after_or_equal:start_date',
-                'total_marks' => 'numeric|min:0',
-                'passing_marks' => 'numeric|min:0',
+                'start_date' => 'nullable|date',
+                'end_date' => 'nullable|date|after_or_equal:start_date',
+                'total_marks' => 'nullable|numeric|min:0',
+                'passing_marks' => 'nullable|numeric|min:0',
                 'description' => 'nullable|string',
                 'is_active' => 'boolean'
             ]);
@@ -224,7 +226,7 @@ class ExamController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data' => $exam->load(['branch', 'creator', 'updater']),
+                'data' => $exam->load(['branch', 'examTerm', 'creator', 'updater']),
                 'message' => 'Exam updated successfully'
             ]);
 
