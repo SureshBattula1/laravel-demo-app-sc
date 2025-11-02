@@ -340,8 +340,8 @@ class TeacherController extends Controller
                 'career_objectives' => 'nullable|string',
                 'additional_notes' => 'nullable|string',
                 
-                // Profile Picture - 1MB max, multiple formats
-                'profile_picture' => 'nullable|image|mimes:jpeg,jpg,png,gif,svg,webp,bmp|max:1024'
+                // Profile Picture - accept as string path (already uploaded via upload endpoint)
+                'profile_picture' => 'nullable|string'
             ]);
 
             if ($validator->fails()) {
@@ -627,8 +627,8 @@ class TeacherController extends Controller
                 'career_objectives' => 'nullable|string',
                 'additional_notes' => 'nullable|string',
                 
-                // Profile Picture - 1MB max, multiple formats
-                'profile_picture' => 'nullable|image|mimes:jpeg,jpg,png,gif,svg,webp,bmp|max:1024'
+                // Profile Picture - accept as string path (already uploaded via upload endpoint)
+                'profile_picture' => 'nullable|string'
             ]);
 
             if ($validator->fails()) {

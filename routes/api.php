@@ -143,6 +143,7 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     Route::put('students/{id}', [StudentController::class, 'update']);
     Route::delete('students/{id}', [StudentController::class, 'destroy']);
     Route::post('students/promote', [StudentController::class, 'promote']);
+    Route::post('students/{id}/upload-profile-picture', [StudentController::class, 'uploadProfilePicture']);
     
     // Class & Section Routes - Full CRUD
     Route::prefix('classes')->group(function () {
@@ -414,6 +415,14 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
         Route::delete('/', [GlobalUploadController::class, 'delete']);
         Route::get('/file-info', [GlobalUploadController::class, 'getFileInfo']);
         Route::get('/exists', [GlobalUploadController::class, 'checkFileExists']);
+    });
+
+    // Attachments Routes (Universal Attachments)
+    Route::prefix('attachments')->group(function () {
+        Route::post('/save', [GlobalUploadController::class, 'saveAttachment']);
+        Route::get('/{module}/{moduleId}', [GlobalUploadController::class, 'getAttachments']);
+        Route::get('/{module}/{moduleId}/{attachmentId}/download', [GlobalUploadController::class, 'downloadAttachment']);
+        Route::delete('/{module}/{moduleId}/{attachmentId}', [GlobalUploadController::class, 'deleteAttachment']);
     });
 });
 

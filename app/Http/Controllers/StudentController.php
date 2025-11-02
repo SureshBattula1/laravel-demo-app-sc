@@ -9,6 +9,8 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
+use App\Models\Student;
 use App\Exports\StudentsExport;
 use App\Services\PdfExportService;
 use App\Services\CsvExportService;
@@ -760,6 +762,87 @@ class StudentController extends Controller
         $filename = (new \App\Services\ExportService('students'))->generateFilename('csv');
         
         return $csvService->generate($data, $filename);
+    }
+    
+    /**
+     * Upload profile picture for student
+     */
+    public function uploadProfilePicture(Request $request, $id)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'profile_picture' => 'required|image|mimes:jpeg,jpg,png,gif,svg,webp,bmp|max:1024'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Validation failed',
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            $student = Student::findOrFail($id);
+            
+            $filePath = $this->handleFileUpload($request, $student, 'profile_picture', 'profile_picture');
+            
+            if ($filePath) {
+                // Update student profile_picture field with path
+                $student->update(['profile_picture' => $filePath]);
+                
+                // Also update the user's avatar field
+                if ($student->user) {
+                    $student->user->update(['avatar' => $filePath]);
+                }
+                
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Profile picture uploaded successfully',
+                    'data' => [
+                        'file_path' => $filePath,
+                        'file_url' => Storage::url($filePath)
+                    ]
+                ]);
+            }
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to upload profile picture'
+            ], 500);
+            
+        } catch (\Exception $e) {
+            Log::error('Upload profile picture error', ['error' => $e->getMessage()]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to upload profile picture',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+            ], 500);
+        }
+    }
+    
+    /**
+     * Handle file upload for student documents
+     */
+    private function handleFileUpload(Request $request, Student $student, string $fieldName, string $documentType): ?string
+    {
+        if (!$request->hasFile($fieldName)) {
+            return null;
+        }
+
+        try {
+            $file = $request->file($fieldName);
+            
+            // Generate unique filename
+            $fileName = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
+            $filePath = $file->storeAs('students/' . $student->id . '/' . $documentType, $fileName, 'public');
+            
+            return $filePath;
+            
+        } catch (\Exception $e) {
+            Log::error('File upload error', ['error' => $e->getMessage(), 'field' => $fieldName]);
+            return null;
+        }
     }
 }
 

@@ -169,6 +169,27 @@ class Teacher extends Model
         return $value ?? $this->extended_profile['professional_license'] ?? null;
     }
 
+    // Profile picture URL accessor
+    public function getProfilePictureAttribute($value)
+    {
+        if (!$value) {
+            return null;
+        }
+        
+        // If already a full URL, return as is
+        if (str_starts_with($value, 'http')) {
+            return $value;
+        }
+        
+        // If value doesn't start with 'storage/', add it
+        if (!str_starts_with($value, 'storage/')) {
+            return url('storage/' . $value);
+        }
+        
+        // Value already has 'storage/', just construct full URL
+        return url($value);
+    }
+
     // Accessors
     public function getFullNameAttribute()
     {
