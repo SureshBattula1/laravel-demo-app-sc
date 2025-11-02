@@ -378,53 +378,92 @@ class TeacherController extends Controller
                 ]);
             }
 
-            // Create teacher profile with fields that exist in DB
+            // Create teacher profile with ONLY fields that ACTUALLY exist in database
+            // Based on actual DB schema (verified via Schema::getColumnListing)
             $teacherData = $request->only([
-                'employee_id', 'category_type', 'designation', 'department_id',
-                'first_name', 'middle_name', 'last_name', 'preferred_name', 'title', 'suffix',
-                'gender', 'date_of_birth', 'place_of_birth', 'pan_number',
-                'aadhaar_number', 'passport_number', 'passport_expiry',
-                'driving_license_number', 'driving_license_expiry', 'voter_id',
-                'nationality', 'religion', 'caste', 'sub_caste', 'blood_group',
-                'mother_tongue', 'languages_known', 'handicap_status',
-                'handicap_details', 'father_name', 'mother_name', 'spouse_name',
-                'spouse_date_of_birth', 'spouse_occupation', 'spouse_phone',
-                'spouse_email', 'number_of_children', 'children_details',
-                'email', 'alternate_email', 'phone', 'alternate_phone', 'whatsapp_number',
-                'landline_number', 'current_address', 'current_city',
-                'current_state', 'current_pincode', 'current_country',
-                'permanent_address', 'permanent_city', 'permanent_state',
-                'permanent_pincode', 'permanent_country', 'joining_date',
-                'employee_type', 'employee_type_detail', 'employment_status',
-                'probation_end_date', 'confirmation_date', 'reporting_manager',
-                'reporting_manager_id', 'subordinates', 'qualification',
-                'educational_qualifications', 'professional_certifications',
-                'training_programs', 'awards_recognitions', 'publications',
-                'research_projects', 'experience_years', 'teaching_experience_years',
-                'industry_experience_years', 'technical_skills', 'soft_skills',
-                'subject_expertise', 'teaching_methodologies', 'medical_history',
-                'allergies', 'current_medications', 'family_doctor_name',
-                'family_doctor_phone', 'family_doctor_address',
-                'last_medical_checkup', 'medical_insurance_details',
-                'emergency_contact_name', 'emergency_contact_phone',
-                'emergency_contact_number', 'emergency_contact_relation',
-                'emergency_contact_2_name', 'emergency_contact_2_phone',
-                'emergency_contact_2_relation', 'emergency_contact_2_address',
-                'epf_number', 'pf_number', 'esi_number', 'uan_number',
-                'gratuity_number', 'basic_salary', 'ctc', 'salary_components',
-                'deductions', 'income_tax_pan', 'bank_name', 'bank_account_number',
-                'bank_ifsc_code', 'account_title', 'bank_branch_name', 'previous_employers',
-                'references'
+                // Foreign Keys
+                'department_id',
+                'reporting_manager_id',
+                
+                // Employment Details
+                'employee_id',
+                'category_type',
+                'joining_date',
+                'leaving_date',
+                'designation',
+                'employee_type',
+                
+                // Professional Details (only columns that actually exist)
+                'specialization',
+                'registration_number',
+                'salary_grade',
+                
+                // Teaching Assignment
+                'subjects',
+                'classes_assigned',
+                'is_class_teacher',
+                'class_teacher_of_grade',
+                'class_teacher_of_section',
+                
+                // Personal Details (only columns that actually exist)
+                'date_of_birth',
+                'gender',
+                
+                // Address (only 'address' field exists, not current_address or permanent_address)
+                'address',
+                
+                // Salary & Financial Details
+                'basic_salary',
+                
+                // Bank Details
+                'bank_name',
+                'bank_account_number',
+                'bank_ifsc_code',
+                'pan_number',
+                'aadhar_number',
+                
+                // Status & Metadata
+                'teacher_status',
+                'remarks',
+                
+                // Documents
+                'documents'
             ]);
             
-            // Store fields that don't have columns in extended_profile JSON
-            $extendedData = $request->only([
-                'professional_memberships', 'professional_license',
-                'performance_reviews', 'appraisals', 'goals_objectives',
-                'training_needs', 'notes', 'hobbies_interests', 'volunteer_work',
-                'community_involvement', 'personal_statement', 'career_objectives',
-                'additional_notes'
+            // Map aadhaar_number to aadhar_number for DB compatibility
+            if ($request->has('aadhaar_number')) {
+                $teacherData['aadhar_number'] = $request->aadhaar_number;
+            }
+            
+            // Map address field (DB only has 'address', not current_address/permanent_address)
+            if ($request->has('current_address')) {
+                $teacherData['address'] = $request->current_address;
+            } elseif ($request->has('permanent_address')) {
+                $teacherData['address'] = $request->permanent_address;
+            }
+            
+            // Store ALL other fields in extended_profile JSON
+            $extendedData = $request->except([
+                // Exclude user fields
+                'first_name', 'last_name', 'email', 'phone', 'password', 'is_active',
+                // Exclude ONLY the actual DB columns that exist in teachers table
+                'id', 'user_id', 'branch_id', 'department_id', 'reporting_manager_id',
+                'employee_id', 'category_type', 'joining_date', 'designation', 'employee_type',
+                'subjects', 'classes_assigned', 'is_class_teacher', 'date_of_birth', 'gender',
+                'address', 'basic_salary', 'bank_account_number', 'teacher_status',
+                'created_at', 'updated_at', 'deleted_at', 'extended_profile',
+                'bank_name', 'bank_ifsc_code', 'pan_number', 'aadhar_number', 'aadhaar_number',
+                'salary_grade', 'specialization', 'registration_number',
+                'class_teacher_of_grade', 'class_teacher_of_section', 'leaving_date',
+                'documents', 'remarks',
+                // Also exclude profile_picture since it's handled separately
+                'profile_picture'
             ]);
+            
+            // Handle profile_picture separately (store in extended_profile)
+            if ($request->has('profile_picture')) {
+                $extendedData['profile_picture'] = $request->profile_picture;
+            }
             
             // Only add extended_profile if there's data
             if (!empty(array_filter($extendedData))) {
@@ -434,9 +473,6 @@ class TeacherController extends Controller
             $teacherData['user_id'] = $user->id;
             $teacherData['branch_id'] = $request->branch_id;
             $teacherData['teacher_status'] = 'Active';
-            
-            // Handle required 'address' field (legacy field, use current_address)
-            $teacherData['address'] = $request->current_address ?? $request->permanent_address ?? '';
 
             $teacher = Teacher::create($teacherData);
 
@@ -656,65 +692,102 @@ class TeacherController extends Controller
 
             $teacher->user->update($userData);
 
-            // Update teacher profile with fields that exist in DB
+            // Update teacher profile with ONLY fields that ACTUALLY exist in database
+            // Based on actual DB schema (verified via Schema::getColumnListing)
             $teacherData = $request->only([
-                'employee_id', 'category_type', 'designation', 'department_id',
-                'first_name', 'middle_name', 'last_name', 'preferred_name', 'title', 'suffix',
-                'gender', 'date_of_birth', 'place_of_birth', 'pan_number',
-                'aadhaar_number', 'passport_number', 'passport_expiry',
-                'driving_license_number', 'driving_license_expiry', 'voter_id',
-                'nationality', 'religion', 'caste', 'sub_caste', 'blood_group',
-                'mother_tongue', 'languages_known', 'handicap_status',
-                'handicap_details', 'father_name', 'mother_name', 'spouse_name',
-                'spouse_date_of_birth', 'spouse_occupation', 'spouse_phone',
-                'spouse_email', 'number_of_children', 'children_details',
-                'email', 'alternate_email', 'phone', 'alternate_phone', 'whatsapp_number',
-                'landline_number', 'current_address', 'current_city',
-                'current_state', 'current_pincode', 'current_country',
-                'permanent_address', 'permanent_city', 'permanent_state',
-                'permanent_pincode', 'permanent_country', 'joining_date',
-                'employee_type', 'employee_type_detail', 'employment_status',
-                'probation_end_date', 'confirmation_date', 'reporting_manager',
-                'reporting_manager_id', 'subordinates', 'qualification',
-                'educational_qualifications', 'professional_certifications',
-                'training_programs', 'awards_recognitions', 'publications',
-                'research_projects', 'experience_years', 'teaching_experience_years',
-                'industry_experience_years', 'technical_skills', 'soft_skills',
-                'subject_expertise', 'teaching_methodologies', 'medical_history',
-                'allergies', 'current_medications', 'family_doctor_name',
-                'family_doctor_phone', 'family_doctor_address',
-                'last_medical_checkup', 'medical_insurance_details',
-                'emergency_contact_name', 'emergency_contact_phone',
-                'emergency_contact_number', 'emergency_contact_relation',
-                'emergency_contact_2_name', 'emergency_contact_2_phone',
-                'emergency_contact_2_relation', 'emergency_contact_2_address',
-                'epf_number', 'pf_number', 'esi_number', 'uan_number',
-                'gratuity_number', 'basic_salary', 'ctc', 'salary_components',
-                'deductions', 'income_tax_pan', 'bank_name', 'bank_account_number',
-                'bank_ifsc_code', 'account_title', 'bank_branch_name', 'previous_employers',
-                'references'
+                // Foreign Keys
+                'department_id',
+                'reporting_manager_id',
+                
+                // Employment Details
+                'employee_id',
+                'category_type',
+                'joining_date',
+                'leaving_date',
+                'designation',
+                'employee_type',
+                
+                // Professional Details (only columns that actually exist)
+                'specialization',
+                'registration_number',
+                'salary_grade',
+                
+                // Teaching Assignment
+                'subjects',
+                'classes_assigned',
+                'is_class_teacher',
+                'class_teacher_of_grade',
+                'class_teacher_of_section',
+                
+                // Personal Details (only columns that actually exist)
+                'date_of_birth',
+                'gender',
+                
+                // Address (only 'address' field exists, not current_address or permanent_address)
+                'address',
+                
+                // Salary & Financial Details
+                'basic_salary',
+                
+                // Bank Details
+                'bank_name',
+                'bank_account_number',
+                'bank_ifsc_code',
+                'pan_number',
+                'aadhar_number',
+                
+                // Status & Metadata
+                'teacher_status',
+                'remarks',
+                
+                // Documents
+                'documents'
             ]);
             
-            // Store fields that don't have columns in extended_profile JSON
-            $extendedData = $request->only([
-                'professional_memberships', 'professional_license',
-                'performance_reviews', 'appraisals', 'goals_objectives',
-                'training_needs', 'notes', 'hobbies_interests', 'volunteer_work',
-                'community_involvement', 'personal_statement', 'career_objectives',
-                'additional_notes'
+            // Map aadhaar_number to aadhar_number for DB compatibility
+            if ($request->has('aadhaar_number')) {
+                $teacherData['aadhar_number'] = $request->aadhaar_number;
+                unset($teacherData['aadhaar_number']);
+            }
+            
+            // Map address fields (form sends current_city, current_state etc. but DB has city, state, pincode)
+            if ($request->has('current_city')) {
+                $teacherData['city'] = $request->current_city;
+            }
+            if ($request->has('current_state')) {
+                $teacherData['state'] = $request->current_state;
+            }
+            if ($request->has('current_pincode')) {
+                $teacherData['pincode'] = $request->current_pincode;
+            }
+            
+            // Store ALL other fields in extended_profile JSON
+            $extendedData = $request->except([
+                // Exclude user fields
+                'first_name', 'last_name', 'email', 'phone', 'password', 'is_active',
+                // Exclude ONLY the actual DB columns that exist in teachers table
+                'id', 'user_id', 'branch_id', 'department_id', 'reporting_manager_id',
+                'employee_id', 'category_type', 'joining_date', 'designation', 'employee_type',
+                'subjects', 'classes_assigned', 'is_class_teacher', 'date_of_birth', 'gender',
+                'address', 'basic_salary', 'bank_account_number', 'teacher_status',
+                'created_at', 'updated_at', 'deleted_at', 'extended_profile',
+                'bank_name', 'bank_ifsc_code', 'pan_number', 'aadhar_number', 'aadhaar_number',
+                'salary_grade', 'specialization', 'registration_number',
+                'class_teacher_of_grade', 'class_teacher_of_section', 'leaving_date',
+                'documents', 'remarks',
+                // Also exclude profile_picture since it's handled separately
+                'profile_picture'
             ]);
+            
+            // Handle profile_picture separately (store in extended_profile)
+            if ($request->has('profile_picture')) {
+                $extendedData['profile_picture'] = $request->profile_picture;
+            }
             
             // Merge with existing extended_profile data
             if (!empty(array_filter($extendedData))) {
                 $existingExtended = $teacher->extended_profile ?? [];
                 $teacherData['extended_profile'] = array_merge($existingExtended, $extendedData);
-            }
-
-            // Handle required 'address' field (legacy field, use current_address)
-            if ($request->has('current_address')) {
-                $teacherData['address'] = $request->current_address;
-            } elseif ($request->has('permanent_address') && !isset($teacherData['address'])) {
-                $teacherData['address'] = $request->permanent_address;
             }
 
             $teacher->update($teacherData);
