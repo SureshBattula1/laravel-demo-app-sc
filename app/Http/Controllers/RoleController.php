@@ -263,6 +263,10 @@ class RoleController extends Controller
 
     /**
      * Assign permissions to role
+     * 
+     * IMPORTANT: When role permissions change, ALL users with this role
+     * automatically get the updated permissions (no user update needed).
+     * User-specific overrides still take precedence over role permissions.
      */
     public function assignPermissions(Request $request, $id)
     {
@@ -279,28 +283,52 @@ class RoleController extends Controller
             ], 422);
         }
 
-        // Delete existing permissions
-        DB::table('role_permissions')->where('role_id', $id)->delete();
+        DB::beginTransaction();
+        try {
+            // Delete existing role permissions
+            DB::table('role_permissions')->where('role_id', $id)->delete();
 
-        // Insert new permissions
-        $permissions = collect($request->permissions)->map(function ($permissionId) use ($id) {
-            return [
-                'role_id' => $id,
-                'permission_id' => $permissionId,
-                'created_at' => now()
-            ];
-        });
+            // Insert new permissions
+            $permissions = collect($request->permissions)->map(function ($permissionId) use ($id) {
+                return [
+                    'role_id' => $id,
+                    'permission_id' => $permissionId,
+                    'created_at' => now(),
+                    'updated_at' => now()
+                ];
+            });
 
-        DB::table('role_permissions')->insert($permissions->toArray());
+            if (!$permissions->isEmpty()) {
+                DB::table('role_permissions')->insert($permissions->toArray());
+            }
 
-        $role = DB::table('roles')->where('id', $id)->first();
-        $role->permissions = $this->getRolePermissions($id);
+            // Get affected users count (for logging/notification)
+            $affectedUsersCount = DB::table('user_roles')
+                ->where('role_id', $id)
+                ->distinct('user_id')
+                ->count();
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Permissions assigned successfully',
-            'data' => $role
-        ]);
+            DB::commit();
+
+            $role = DB::table('roles')->where('id', $id)->first();
+            $role->permissions = $this->getRolePermissions($id);
+
+            return response()->json([
+                'success' => true,
+                'message' => "Permissions updated successfully. {$affectedUsersCount} user(s) will inherit these permissions.",
+                'data' => [
+                    'role' => $role,
+                    'affected_users_count' => $affectedUsersCount,
+                    'permissions_count' => count($request->permissions)
+                ]
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update permissions: ' . $e->getMessage()
+            ], 500);
+        }
     }
 
     /**

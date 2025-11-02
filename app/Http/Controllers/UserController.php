@@ -287,13 +287,18 @@ class UserController extends Controller
     }
 
     /**
-     * Get user's permissions (from roles + user-specific overrides)
+     * Get user's permissions showing role permissions + user-specific overrides
+     * 
+     * Returns:
+     * - from_role: true if permission comes from user's role(s)
+     * - overridden: true if user has specific override for this permission
+     * - granted: final status (true if user has the permission)
      */
     public function getPermissions($id)
     {
-        $user = User::with(['roles.permissions', 'permissions'])->findOrFail($id);
+        $user = User::with(['roles'])->findOrFail($id);
 
-        // Get all permissions with their status
+        // Get ALL available permissions in the system
         $allPermissions = DB::table('permissions')
             ->join('modules', 'permissions.module_id', '=', 'modules.id')
             ->select(
@@ -310,33 +315,35 @@ class UserController extends Controller
             ->orderBy('permissions.id')
             ->get();
 
-        // Get permissions from roles
+        // Get permissions from user's roles (what user gets by default)
         $rolePermissionIds = DB::table('role_permissions')
             ->join('user_roles', 'role_permissions.role_id', '=', 'user_roles.role_id')
             ->where('user_roles.user_id', $id)
+            ->distinct()
             ->pluck('role_permissions.permission_id')
-            ->unique()
             ->toArray();
 
         // Get user-specific permission overrides
-        $userPermissions = DB::table('user_permissions')
+        $userOverrides = DB::table('user_permissions')
             ->where('user_id', $id)
             ->get()
             ->keyBy('permission_id');
 
-        // Build permission list with status
+        // Build permission list with detailed status
         $permissionsData = [];
         foreach ($allPermissions as $permission) {
-            $hasFromRole = in_array($permission->id, $rolePermissionIds);
-            $userOverride = $userPermissions->get($permission->id);
+            $fromRole = in_array($permission->id, $rolePermissionIds);
+            $userOverride = $userOverrides->get($permission->id);
 
-            // Determine final status
-            $granted = $hasFromRole; // Default from role
+            // Calculate final granted status:
+            // 1. If user has override, use override value
+            // 2. Otherwise, use role permission
+            $granted = $fromRole; // Default: from role
             $overridden = false;
 
             if ($userOverride) {
                 $granted = (bool) $userOverride->granted;
-                $overridden = true;
+                $overridden = true; // User has explicit override
             }
 
             $permissionsData[] = [
@@ -348,13 +355,13 @@ class UserController extends Controller
                 'module_slug' => $permission->module_slug,
                 'module_icon' => $permission->module_icon,
                 'module_order' => $permission->module_order,
-                'granted' => $granted,
-                'from_role' => $hasFromRole,
-                'overridden' => $overridden,
+                'granted' => $granted,           // Final status (what user actually has)
+                'from_role' => $fromRole,        // Does role give this permission?
+                'overridden' => $overridden,     // Does user have explicit override?
             ];
         }
 
-        // Group by module
+        // Group by module for easier UI display
         $groupedPermissions = [];
         foreach ($permissionsData as $perm) {
             $moduleSlug = $perm['module_slug'];
@@ -399,7 +406,8 @@ class UserController extends Controller
     }
 
     /**
-     * Assign/Update user permissions
+     * Assign/Update user-specific permission overrides
+     * Only saves permissions that override the role permissions
      */
     public function updatePermissions(Request $request, $id)
     {
@@ -421,16 +429,18 @@ class UserController extends Controller
 
         DB::beginTransaction();
         try {
-            // Clear existing user permissions
+            // Clear existing user-specific permission overrides
             DB::table('user_permissions')->where('user_id', $id)->delete();
 
-            // Insert new permissions
+            // Insert only the permission overrides (changes from role permissions)
             $permissionsToInsert = [];
             foreach ($request->permissions as $perm) {
+                // Always insert the override as sent from frontend
+                // Frontend will only send permissions that are different from role permissions
                 $permissionsToInsert[] = [
                     'user_id' => $id,
                     'permission_id' => $perm['permission_id'],
-                    'granted' => $perm['granted'],
+                    'granted' => (bool) $perm['granted'], // true = grant override, false = revoke override
                     'branch_id' => $user->branch_id,
                     'created_at' => now(),
                     'updated_at' => now()
@@ -445,7 +455,10 @@ class UserController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'User permissions updated successfully'
+                'message' => 'User permission overrides updated successfully',
+                'data' => [
+                    'overrides_count' => count($permissionsToInsert)
+                ]
             ]);
         } catch (\Exception $e) {
             DB::rollBack();

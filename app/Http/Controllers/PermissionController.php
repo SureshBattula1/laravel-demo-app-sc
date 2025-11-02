@@ -105,7 +105,8 @@ class PermissionController extends Controller
     }
 
     /**
-     * Get user's effective permissions
+     * Get user's effective permissions (role permissions + user overrides)
+     * NO CACHING - Always fetches fresh from database
      */
     public function getUserPermissions($userId, Request $request)
     {
@@ -113,31 +114,8 @@ class PermissionController extends Controller
             $user = User::findOrFail($userId);
             $branchId = $request->input('branch_id');
 
-            Log::info('=== FETCHING USER PERMISSIONS ===', [
-                'user_id' => $user->id,
-                'email' => $user->email,
-                'role' => $user->role
-            ]);
-
-            // Debug: Check user's roles
-            $userRoles = $user->roles;
-            Log::info('User roles:', [
-                'count' => $userRoles->count(),
-                'roles' => $userRoles->pluck('slug')->toArray()
-            ]);
-
-            // Debug: Check permissions for each role
-            foreach ($userRoles as $role) {
-                $rolePerms = $role->permissions;
-                Log::info("Role '{$role->slug}' permissions:", [
-                    'count' => $rolePerms->count(),
-                    'permissions' => $rolePerms->pluck('slug')->toArray()
-                ]);
-            }
-
+            // Get all effective permissions (role + overrides applied)
             $permissions = $user->getAllPermissions($branchId);
-            
-            Log::info('Final permissions count:', ['count' => $permissions->count()]);
             
             // Group by module for easier frontend consumption
             $groupedPermissions = $permissions->groupBy('module_id')->map(function($perms) {
@@ -151,28 +129,22 @@ class PermissionController extends Controller
                 });
             });
 
+            // Get permission slugs (what frontend needs for hasPermission checks)
             $permissionSlugs = $permissions->pluck('slug')->toArray();
-            
-            // Log permissions for debugging
-            Log::info('✅ User permissions retrieved', [
-                'user_id' => $user->id,
-                'user_role' => $user->role,
-                'permission_count' => count($permissionSlugs),
-                'sample_permissions' => array_slice($permissionSlugs, 0, 10)
-            ]);
             
             return response()->json([
                 'success' => true,
                 'data' => [
                     'user' => $user->only(['id', 'first_name', 'last_name', 'email', 'role']),
                     'permissions' => $groupedPermissions,
-                    'permission_slugs' => $permissionSlugs
+                    'permission_slugs' => $permissionSlugs,
+                    'total_count' => count($permissionSlugs)
                 ]
             ]);
         } catch (\Exception $e) {
-            Log::error('❌ Get user permissions error', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+            Log::error('Get user permissions error', [
+                'user_id' => $userId,
+                'error' => $e->getMessage()
             ]);
             
             return response()->json([
