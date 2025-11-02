@@ -38,6 +38,7 @@ use App\Http\Controllers\ExamTermController;
 use App\Http\Controllers\ExamScheduleController;
 use App\Http\Controllers\GlobalUploadController;
 use App\Http\Controllers\ExamMarkController;
+use App\Http\Controllers\UserPreferenceController;
 
 /*
 |--------------------------------------------------------------------------
@@ -68,6 +69,14 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::put('/profile', [AuthController::class, 'updateProfile']);
     Route::put('/change-password', [AuthController::class, 'changePassword']);
+    
+    // User Preferences Routes
+    Route::prefix('preferences')->group(function () {
+        Route::get('/', [UserPreferenceController::class, 'index']);
+        Route::put('/', [UserPreferenceController::class, 'update']);
+        Route::put('/{key}', [UserPreferenceController::class, 'updateSingle']);
+        Route::post('/reset', [UserPreferenceController::class, 'reset']);
+    });
     
     // Branch Routes - Enhanced Multi-Branch Management
     Route::prefix('branches')->group(function () {

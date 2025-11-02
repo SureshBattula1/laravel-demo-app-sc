@@ -72,6 +72,14 @@ class User extends Authenticatable
                     ->withTimestamps();
     }
 
+    /**
+     * Get user preferences
+     */
+    public function preferences()
+    {
+        return $this->hasOne(UserPreference::class);
+    }
+
     // Accessors
     public function getFullNameAttribute()
     {

@@ -20,7 +20,12 @@ return Application::configure(basePath: dirname(__DIR__))
             'api.logger' => \App\Http\Middleware\ApiLogger::class,
         ]);
         
-        // Enable CORS
+        // Enable CORS for API routes
+        $middleware->api(prepend: [
+            \Illuminate\Http\Middleware\HandleCors::class,
+        ]);
+        
+        // Disable CSRF for API routes
         $middleware->validateCsrfTokens(except: [
             'api/*',
         ]);

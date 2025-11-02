@@ -10,7 +10,7 @@ return [
 
     'paths' => ['api/*', 'sanctum/csrf-cookie', 'login', 'logout', 'register'],
 
-    'allowed_methods' => ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    'allowed_methods' => ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 
     'allowed_origins' => [
         'http://localhost:4200',
@@ -24,11 +24,11 @@ return [
         '/^http:\/\/127\.0\.0\.1:\d+$/',
     ],
 
-    'allowed_headers' => ['Content-Type', 'X-Requested-With', 'Authorization', 'Accept', 'Origin'],
+    'allowed_headers' => ['*'],
 
-    'exposed_headers' => [],
+    'exposed_headers' => ['Content-Disposition', 'X-Total-Count', 'X-Page', 'X-Per-Page'],
 
-    'max_age' => 0,
+    'max_age' => 86400,
 
     'supports_credentials' => true,
 
