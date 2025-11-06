@@ -58,16 +58,45 @@ class UserController extends Controller
             'Staff' => 'Staff'
         ];
 
-        // Add role_id to each user (no extra queries!)
-        foreach ($users->items() as $user) {
+        // Transform user data to ensure proper serialization
+        $usersData = collect($users->items())->map(function($user) use ($rolesMap, $roleMapping) {
             $roleName = $roleMapping[$user->role] ?? $user->role;
-            $user->role_id = $rolesMap[$roleName] ?? null;
-        }
+            
+            return [
+                'id' => $user->id,
+                'first_name' => $user->first_name,
+                'last_name' => $user->last_name,
+                'full_name' => $user->full_name, // Use the accessor from User model
+                'email' => $user->email,
+                'phone' => $user->phone,
+                'role' => $user->role,
+                'role_id' => $rolesMap[$roleName] ?? null,
+                'branch_id' => $user->branch_id,
+                'branch' => $user->branch ? [
+                    'id' => $user->branch->id,
+                    'name' => $user->branch->name,
+                    'code' => $user->branch->code
+                ] : null,
+                'avatar' => $user->avatar,
+                'is_active' => $user->is_active,
+                'last_login' => $user->last_login,
+                'created_at' => $user->created_at,
+                'updated_at' => $user->updated_at
+            ];
+        })->toArray();
 
         return response()->json([
             'success' => true,
             'message' => 'Users retrieved successfully',
-            'data' => $users
+            'data' => [
+                'data' => $usersData,
+                'total' => $users->total(),
+                'per_page' => $users->perPage(),
+                'current_page' => $users->currentPage(),
+                'last_page' => $users->lastPage(),
+                'from' => $users->firstItem(),
+                'to' => $users->lastItem()
+            ]
         ]);
     }
 
@@ -91,16 +120,37 @@ class UserController extends Controller
             'Staff' => 'Staff'
         ];
 
-        // Add role_id to each user (no extra queries!)
-        foreach ($users as $user) {
+        // Transform user data to ensure proper serialization
+        $usersData = $users->map(function($user) use ($rolesMap, $roleMapping) {
             $roleName = $roleMapping[$user->role] ?? $user->role;
-            $user->role_id = $rolesMap[$roleName] ?? null;
-        }
+            
+            return [
+                'id' => $user->id,
+                'first_name' => $user->first_name,
+                'last_name' => $user->last_name,
+                'full_name' => $user->full_name,
+                'email' => $user->email,
+                'phone' => $user->phone,
+                'role' => $user->role,
+                'role_id' => $rolesMap[$roleName] ?? null,
+                'branch_id' => $user->branch_id,
+                'branch' => $user->branch ? [
+                    'id' => $user->branch->id,
+                    'name' => $user->branch->name,
+                    'code' => $user->branch->code
+                ] : null,
+                'avatar' => $user->avatar,
+                'is_active' => $user->is_active,
+                'last_login' => $user->last_login,
+                'created_at' => $user->created_at,
+                'updated_at' => $user->updated_at
+            ];
+        })->toArray();
 
         return response()->json([
             'success' => true,
             'message' => 'Users retrieved successfully',
-            'data' => $users
+            'data' => $usersData
         ]);
     }
 
