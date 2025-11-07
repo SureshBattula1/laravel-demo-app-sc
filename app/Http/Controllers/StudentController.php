@@ -271,6 +271,96 @@ class StudentController extends Controller
     }
 
     /**
+     * Get student by user_id (for logged-in student to view their own profile)
+     */
+    public function getByUserId($userId)
+    {
+        try {
+            $student = DB::table('students')
+                ->join('users', 'students.user_id', '=', 'users.id')
+                ->leftJoin('branches', 'students.branch_id', '=', 'branches.id')
+                ->leftJoin('grades', 'students.grade', '=', 'grades.value')
+                ->where('students.user_id', $userId)
+                ->select(
+                    'students.id',
+                    'students.user_id',
+                    'students.admission_number',
+                    'students.admission_date',
+                    'students.roll_number',
+                    'students.grade',
+                    'grades.label as grade_label',
+                    'students.section',
+                    'students.academic_year',
+                    'students.stream',
+                    'students.date_of_birth',
+                    'students.gender',
+                    'students.blood_group',
+                    'students.current_address',
+                    'students.city',
+                    'students.state',
+                    'students.country',
+                    'students.pincode',
+                    'students.father_name',
+                    'students.father_phone',
+                    'students.father_email',
+                    'students.father_occupation',
+                    'students.mother_name',
+                    'students.mother_phone',
+                    'students.mother_email',
+                    'students.mother_occupation',
+                    'students.emergency_contact_name',
+                    'students.emergency_contact_phone',
+                    'students.emergency_contact_relation',
+                    'students.previous_school',
+                    'students.previous_grade',
+                    'students.medical_history',
+                    'students.allergies',
+                    'students.student_status',
+                    'students.created_at',
+                    'students.updated_at',
+                    'users.first_name',
+                    'users.last_name',
+                    'users.email',
+                    'users.phone',
+                    'users.is_active',
+                    DB::raw('JSON_OBJECT("id", branches.id, "name", branches.name, "code", branches.code) as branch')
+                )
+                ->first();
+
+            if (!$student) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Student profile not found'
+                ], 404);
+            }
+
+            // Convert to array and parse JSON fields
+            $studentData = (array) $student;
+            
+            if (isset($studentData['branch']) && is_string($studentData['branch'])) {
+                $studentData['branch'] = json_decode($studentData['branch']);
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => $studentData
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Get student by user_id error', [
+                'user_id' => $userId,
+                'error' => $e->getMessage()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch student profile',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+            ], 500);
+        }
+    }
+
+    /**
      * Create new student
      */
     public function store(Request $request)
