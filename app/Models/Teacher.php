@@ -15,11 +15,14 @@ class Teacher extends Model
         'id', 'user_id', 'branch_id', 'department_id', 'reporting_manager_id',
         'employee_id', 'category_type', 'joining_date', 'designation', 'employee_type',
         'subjects', 'classes_assigned', 'is_class_teacher', 'date_of_birth', 'gender',
-        'address', 'basic_salary', 'bank_account_number', 'teacher_status',
+        'current_address', 'permanent_address', 'city', 'state', 'pincode',
+        'emergency_contact_name', 'emergency_contact_phone', 'emergency_contact_relation',
+        'basic_salary', 'bank_account_number', 'teacher_status',
         'created_at', 'updated_at', 'deleted_at', 'extended_profile',
         'bank_name', 'bank_ifsc_code', 'pan_number', 'aadhar_number',
         'salary_grade', 'specialization', 'registration_number',
         'class_teacher_of_grade', 'class_teacher_of_section', 'leaving_date',
+        'blood_group', 'religion', 'nationality',
         'documents', 'remarks'
     ];
     

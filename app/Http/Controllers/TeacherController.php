@@ -405,14 +405,24 @@ class TeacherController extends Controller
                 'class_teacher_of_grade',
                 'class_teacher_of_section',
                 
-                // Personal Details (only columns that actually exist)
+                // Personal Details
                 'date_of_birth',
                 'gender',
                 
-                // Address (only 'address' field exists, not current_address or permanent_address)
-                'address',
+                // Address Fields
+                'current_address',
+                'permanent_address',
+                'city',
+                'state',
+                'pincode',
+                
+                // Emergency Contact
+                'emergency_contact_name',
+                'emergency_contact_phone',
+                'emergency_contact_relation',
                 
                 // Salary & Financial Details
+                'salary_grade',
                 'basic_salary',
                 
                 // Bank Details
@@ -435,11 +445,20 @@ class TeacherController extends Controller
                 $teacherData['aadhar_number'] = $request->aadhaar_number;
             }
             
-            // Map address field (DB only has 'address', not current_address/permanent_address)
-            if ($request->has('current_address')) {
-                $teacherData['address'] = $request->current_address;
-            } elseif ($request->has('permanent_address')) {
-                $teacherData['address'] = $request->permanent_address;
+            // Map current_city/current_state/current_pincode to city/state/pincode
+            if ($request->has('current_city')) {
+                $teacherData['city'] = $request->current_city;
+            }
+            if ($request->has('current_state')) {
+                $teacherData['state'] = $request->current_state;
+            }
+            if ($request->has('current_pincode')) {
+                $teacherData['pincode'] = $request->current_pincode;
+            }
+            
+            // Handle "Same as Current Address" logic
+            if ($request->has('same_as_current_address') && $request->same_as_current_address) {
+                $teacherData['permanent_address'] = $request->current_address;
             }
             
             // Store ALL other fields in extended_profile JSON
@@ -450,12 +469,17 @@ class TeacherController extends Controller
                 'id', 'user_id', 'branch_id', 'department_id', 'reporting_manager_id',
                 'employee_id', 'category_type', 'joining_date', 'designation', 'employee_type',
                 'subjects', 'classes_assigned', 'is_class_teacher', 'date_of_birth', 'gender',
-                'address', 'basic_salary', 'bank_account_number', 'teacher_status',
+                'current_address', 'permanent_address', 'city', 'state', 'pincode',
+                // Also exclude frontend field names that map to DB columns
+                'current_city', 'current_state', 'current_pincode',
+                'permanent_city', 'permanent_state', 'permanent_pincode', 'current_country', 'permanent_country',
+                'emergency_contact_name', 'emergency_contact_phone', 'emergency_contact_relation',
+                'basic_salary', 'bank_account_number', 'teacher_status',
                 'created_at', 'updated_at', 'deleted_at', 'extended_profile',
                 'bank_name', 'bank_ifsc_code', 'pan_number', 'aadhar_number', 'aadhaar_number',
                 'salary_grade', 'specialization', 'registration_number',
                 'class_teacher_of_grade', 'class_teacher_of_section', 'leaving_date',
-                'documents', 'remarks',
+                'documents', 'remarks', 'same_as_current_address',
                 // Also exclude profile_picture since it's handled separately
                 'profile_picture'
             ]);
@@ -719,14 +743,24 @@ class TeacherController extends Controller
                 'class_teacher_of_grade',
                 'class_teacher_of_section',
                 
-                // Personal Details (only columns that actually exist)
+                // Personal Details
                 'date_of_birth',
                 'gender',
                 
-                // Address (only 'address' field exists, not current_address or permanent_address)
-                'address',
+                // Address Fields
+                'current_address',
+                'permanent_address',
+                'city',
+                'state',
+                'pincode',
+                
+                // Emergency Contact
+                'emergency_contact_name',
+                'emergency_contact_phone',
+                'emergency_contact_relation',
                 
                 // Salary & Financial Details
+                'salary_grade',
                 'basic_salary',
                 
                 // Bank Details
@@ -750,7 +784,7 @@ class TeacherController extends Controller
                 unset($teacherData['aadhaar_number']);
             }
             
-            // Map address fields (form sends current_city, current_state etc. but DB has city, state, pincode)
+            // Map current_city/current_state/current_pincode to city/state/pincode
             if ($request->has('current_city')) {
                 $teacherData['city'] = $request->current_city;
             }
@@ -761,6 +795,11 @@ class TeacherController extends Controller
                 $teacherData['pincode'] = $request->current_pincode;
             }
             
+            // Handle "Same as Current Address" logic for update
+            if ($request->has('same_as_current_address') && $request->same_as_current_address) {
+                $teacherData['permanent_address'] = $request->current_address;
+            }
+            
             // Store ALL other fields in extended_profile JSON
             $extendedData = $request->except([
                 // Exclude user fields
@@ -769,12 +808,17 @@ class TeacherController extends Controller
                 'id', 'user_id', 'branch_id', 'department_id', 'reporting_manager_id',
                 'employee_id', 'category_type', 'joining_date', 'designation', 'employee_type',
                 'subjects', 'classes_assigned', 'is_class_teacher', 'date_of_birth', 'gender',
-                'address', 'basic_salary', 'bank_account_number', 'teacher_status',
+                'current_address', 'permanent_address', 'city', 'state', 'pincode',
+                // Also exclude frontend field names that map to DB columns
+                'current_city', 'current_state', 'current_pincode',
+                'permanent_city', 'permanent_state', 'permanent_pincode', 'current_country', 'permanent_country',
+                'emergency_contact_name', 'emergency_contact_phone', 'emergency_contact_relation',
+                'basic_salary', 'bank_account_number', 'teacher_status',
                 'created_at', 'updated_at', 'deleted_at', 'extended_profile',
                 'bank_name', 'bank_ifsc_code', 'pan_number', 'aadhar_number', 'aadhaar_number',
                 'salary_grade', 'specialization', 'registration_number',
                 'class_teacher_of_grade', 'class_teacher_of_section', 'leaving_date',
-                'documents', 'remarks',
+                'documents', 'remarks', 'same_as_current_address',
                 // Also exclude profile_picture since it's handled separately
                 'profile_picture'
             ]);
