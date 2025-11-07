@@ -77,6 +77,29 @@ return new class extends Migration
             $table->index(['branch_id', 'grade_level']);
             $table->index('is_active');
         });
+
+        // CLASSES TABLE - Grade-section combinations
+        Schema::create('classes', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('branch_id')->constrained('branches')->onDelete('cascade');
+            $table->string('grade'); // "10", "11", "12"
+            $table->string('section')->nullable(); // "A", "B", "C"
+            $table->string('class_name'); // "Grade 10-A"
+            $table->string('academic_year'); // "2024-2025"
+            $table->foreignId('class_teacher_id')->nullable()->constrained('users')->onDelete('set null');
+            $table->integer('capacity')->default(40);
+            $table->integer('current_strength')->default(0);
+            $table->string('room_number')->nullable();
+            $table->text('description')->nullable();
+            $table->boolean('is_active')->default(true);
+            $table->timestamps();
+            
+            // Unique constraint: one class per grade-section-branch-year
+            $table->unique(['branch_id', 'grade', 'section', 'academic_year'], 'unique_class');
+            $table->index(['branch_id', 'grade']);
+            $table->index(['grade', 'section']);
+            $table->index('is_active');
+        });
     }
 
     /**
@@ -84,6 +107,7 @@ return new class extends Migration
      */
     public function down(): void
     {
+        Schema::dropIfExists('classes');
         Schema::dropIfExists('sections');
         Schema::dropIfExists('grades');
     }
