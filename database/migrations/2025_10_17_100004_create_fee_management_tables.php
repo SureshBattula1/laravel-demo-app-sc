@@ -134,6 +134,7 @@ return new class extends Migration
             $table->date('payment_date')->nullable();
             $table->date('due_date');
             $table->enum('status', ['Paid', 'Pending', 'Overdue', 'Cancelled', 'Partial'])->default('Pending');
+            $table->enum('payment_status', ['Completed', 'Pending', 'Partial', 'Failed', 'Refunded'])->default('Pending');
             $table->enum('payment_method', ['Cash', 'Card', 'Bank Transfer', 'Cheque', 'Online'])->nullable();
             $table->string('transaction_id')->nullable();
             $table->text('remarks')->nullable();
@@ -145,6 +146,7 @@ return new class extends Migration
             $table->index(['student_id', 'academic_year']);
             $table->index(['branch_id', 'status']);
             $table->index(['due_date', 'status']);
+            $table->index('payment_status');
         });
     }
 
