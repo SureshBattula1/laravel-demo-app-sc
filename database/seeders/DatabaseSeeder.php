@@ -3,254 +3,169 @@
 namespace Database\Seeders;
 
 use Illuminate\Database\Seeder;
-use App\Models\User;
-use App\Models\Branch;
-use App\Models\Role;
-use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use App\Models\User;
+use App\Models\Role;
 
 class DatabaseSeeder extends Seeder
 {
     /**
      * Seed the application's database.
+     * This seeder creates:
+     * - 6 Roles (Super Admin, Branch Admin, Teacher, Staff, Accountant, Student)
+     * - 2 Super Admin users
+     * - NO other users (teachers/students will be created by application)
      */
     public function run(): void
     {
         DB::beginTransaction();
-
+        
         try {
-            // Create Main Branch
-            $mainBranch = Branch::firstOrCreate(
-                ['code' => 'MAIN001'],
-                [
-                'name' => 'Main Campus',
-                'address' => '123 Education Street',
-                'city' => 'New York',
-                'state' => 'New York',
-                'country' => 'USA',
-                'pincode' => '10001',
-                'phone' => '+1234567890',
-                'email' => 'main@myschool.com',
-                'principal_name' => 'Dr. John Smith',
-                'principal_contact' => '+1234567891',
-                'principal_email' => 'principal@myschool.com',
-                'established_date' => '2010-01-01',
-                'affiliation_number' => 'AFF-2010-001',
-                'is_main_branch' => true,
-                'is_active' => true,
-                'settings' => [
-                    'academicYearStart' => 'April',
-                    'academicYearEnd' => 'March',
-                    'workingDays' => ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
-                    'schoolTimings' => [
-                        'startTime' => '08:00',
-                        'endTime' => '15:00'
-                    ],
-                    'currency' => 'USD',
-                    'language' => 'English',
-                    'timezone' => 'America/New_York'
-                ]
-                ]
-            );
-
-            // Create Second Branch
-            $secondBranch = Branch::firstOrCreate(
-                ['code' => 'EAST001'],
-                [
-                'name' => 'East Campus',
-                'address' => '456 Learning Avenue',
-                'city' => 'Boston',
-                'state' => 'Massachusetts',
-                'country' => 'USA',
-                'pincode' => '02101',
-                'phone' => '+1234567892',
-                'email' => 'east@myschool.com',
-                'principal_name' => 'Dr. Jane Doe',
-                'principal_contact' => '+1234567893',
-                'principal_email' => 'principal.east@myschool.com',
-                'established_date' => '2015-06-01',
-                'affiliation_number' => 'AFF-2015-002',
-                'is_main_branch' => false,
-                'is_active' => true,
-                'settings' => [
-                    'academicYearStart' => 'April',
-                    'academicYearEnd' => 'March',
-                    'workingDays' => ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
-                    'schoolTimings' => [
-                        'startTime' => '08:30',
-                        'endTime' => '15:30'
-                    ],
-                    'currency' => 'USD',
-                    'language' => 'English',
-                    'timezone' => 'America/New_York'
-                ]
-                ]
-            );
-
-            // Get roles (must exist from PermissionSeeder)
-            $superAdminRole = Role::where('slug', 'super-admin')->first();
-            $branchAdminRole = Role::where('slug', 'branch-admin')->first();
-            $teacherRole = Role::where('slug', 'teacher')->first();
-            $studentRole = Role::where('slug', 'student')->first();
-            $parentRole = Role::where('slug', 'parent')->first();
-
-            // Create Super Admin User
-            $adminUser = User::firstOrCreate(
-                ['email' => 'admin@myschool.com'],
-                [
-                'first_name' => 'Super',
-                'last_name' => 'Admin',
-                'email' => 'admin@myschool.com',
-                'phone' => '+1234567899',
-                'password' => Hash::make('Admin@123'),
-                'role' => 'SuperAdmin',
-                'branch_id' => $mainBranch->id,
-                'is_active' => true,
-                'email_verified_at' => now()
-                ]
-            );
-            // Assign role in user_roles table
-            if ($superAdminRole && !$adminUser->roles()->where('roles.id', $superAdminRole->id)->exists()) {
-                $adminUser->roles()->attach($superAdminRole->id, [
-                    'is_primary' => true,
-                    'branch_id' => $mainBranch->id,
-                    'created_at' => now(),
-                    'updated_at' => now()
-                ]);
-            }
-
-            // Create Branch Admin for Main Campus
-            $managerUser = User::firstOrCreate(
-                ['email' => 'manager@myschool.com'],
-                [
-                'first_name' => 'John',
-                'last_name' => 'Manager',
-                'email' => 'manager@myschool.com',
-                'phone' => '+1234567898',
-                'password' => Hash::make('Manager@123'),
-                'role' => 'BranchAdmin',
-                'branch_id' => $mainBranch->id,
-                'is_active' => true,
-                'email_verified_at' => now()
-                ]
-            );
-            // Assign role in user_roles table
-            if ($branchAdminRole && !$managerUser->roles()->where('roles.id', $branchAdminRole->id)->exists()) {
-                $managerUser->roles()->attach($branchAdminRole->id, [
-                    'is_primary' => true,
-                    'branch_id' => $mainBranch->id,
-                    'created_at' => now(),
-                    'updated_at' => now()
-                ]);
-            }
-
-            // Create Sample Teacher
-            $teacherUser = User::firstOrCreate(
-                ['email' => 'teacher@myschool.com'],
-                [
-                'first_name' => 'Sarah',
-                'last_name' => 'Teacher',
-                'email' => 'teacher@myschool.com',
-                'phone' => '+1234567897',
-                'password' => Hash::make('Teacher@123'),
-                'role' => 'Teacher',
-                'branch_id' => $mainBranch->id,
-                'is_active' => true,
-                'email_verified_at' => now()
-                ]
-            );
-            // Assign role in user_roles table
-            if ($teacherRole && !$teacherUser->roles()->where('roles.id', $teacherRole->id)->exists()) {
-                $teacherUser->roles()->attach($teacherRole->id, [
-                    'is_primary' => true,
-                    'branch_id' => $mainBranch->id,
-                    'created_at' => now(),
-                    'updated_at' => now()
-                ]);
-            }
-
-            // Create Sample Student
-            $studentUser = User::firstOrCreate(
-                ['email' => 'student@myschool.com'],
-                [
-                'first_name' => 'Alice',
-                'last_name' => 'Student',
-                'email' => 'student@myschool.com',
-                'phone' => '+1234567896',
-                'password' => Hash::make('Student@123'),
-                'role' => 'Student',
-                'branch_id' => $mainBranch->id,
-                'is_active' => true,
-                'email_verified_at' => now()
-                ]
-            );
-            // Assign role in user_roles table
-            if ($studentRole && !$studentUser->roles()->where('roles.id', $studentRole->id)->exists()) {
-                $studentUser->roles()->attach($studentRole->id, [
-                    'is_primary' => true,
-                    'branch_id' => $mainBranch->id,
-                    'created_at' => now(),
-                    'updated_at' => now()
-                ]);
-            }
-
-            // Create Sample Parent
-            $parentUser = User::firstOrCreate(
-                ['email' => 'parent@myschool.com'],
-                [
-                'first_name' => 'Bob',
-                'last_name' => 'Parent',
-                'email' => 'parent@myschool.com',
-                'phone' => '+1234567895',
-                'password' => Hash::make('Parent@123'),
-                'role' => 'Parent',
-                'branch_id' => $mainBranch->id,
-                'is_active' => true,
-                'email_verified_at' => now()
-                ]
-            );
-            // Assign role in user_roles table
-            if ($parentRole && !$parentUser->roles()->where('roles.id', $parentRole->id)->exists()) {
-                $parentUser->roles()->attach($parentRole->id, [
-                    'is_primary' => true,
-                    'branch_id' => $mainBranch->id,
-                    'created_at' => now(),
-                    'updated_at' => now()
-                ]);
-            }
-
+            $this->command->info('🌱 Seeding database...');
+            
+            // Step 1: Create Roles
+            $this->createRoles();
+            
+            // Step 2: Create Super Admin Users
+            $this->createSuperAdmins();
+            
             DB::commit();
-
-            // Seed comprehensive demo data
-            $this->call([
-                DemoDataSeeder::class,
-                // DashboardDataSeeder::class, // Optional: uncomment if needed
-            ]);
-
-            $this->command->info('✅ Database seeded successfully!');
+            
+            $this->command->info('✅ Database seeding completed successfully!');
             $this->command->info('');
-            $this->command->info('Default Login Credentials:');
-            $this->command->info('================================');
-            $this->command->info('Super Admin:');
-            $this->command->info('Email: admin@myschool.com');
-            $this->command->info('Password: Admin@123');
+            $this->command->info('📋 Summary:');
+            $this->command->info('   - 6 Roles created');
+            $this->command->info('   - 2 Super Admin users created');
             $this->command->info('');
-            $this->command->info('Branch Admin:');
-            $this->command->info('Email: manager@myschool.com');
-            $this->command->info('Password: Manager@123');
+            $this->command->info('🔑 Super Admin Credentials:');
+            $this->command->info('   Email: superadmin@school.com | Password: Admin@123');
+            $this->command->info('   Email: admin@school.com | Password: Admin@123');
             $this->command->info('');
-            $this->command->info('Teacher:');
-            $this->command->info('Email: teacher@myschool.com');
-            $this->command->info('Password: Teacher@123');
-            $this->command->info('');
-            $this->command->info('Student:');
-            $this->command->info('Email: student@myschool.com');
-            $this->command->info('Password: Student@123');
-
+            $this->command->info('💡 Note: Teacher and Student roles are automatically assigned');
+            $this->command->info('   when teachers/students are created via the application.');
+            
         } catch (\Exception $e) {
             DB::rollBack();
-            $this->command->error('Seeding failed: ' . $e->getMessage());
+            $this->command->error('❌ Error seeding database: ' . $e->getMessage());
             throw $e;
+        }
+    }
+    
+    /**
+     * Create system roles
+     */
+    private function createRoles(): void
+    {
+        $this->command->info('📝 Creating roles...');
+        
+        $roles = [
+            [
+                'name' => 'Super Admin',
+                'slug' => 'super-admin',
+                'description' => 'Full system access with all permissions',
+                'level' => 1,
+                'is_system_role' => true,
+                'is_active' => true
+            ],
+            [
+                'name' => 'Branch Admin',
+                'slug' => 'branch-admin',
+                'description' => 'Branch-level administration access',
+                'level' => 2,
+                'is_system_role' => true,
+                'is_active' => true
+            ],
+            [
+                'name' => 'Teacher',
+                'slug' => 'teacher',
+                'description' => 'Teaching staff with student and academic access',
+                'level' => 3,
+                'is_system_role' => true,
+                'is_active' => true
+            ],
+            [
+                'name' => 'Staff',
+                'slug' => 'staff',
+                'description' => 'Administrative staff access',
+                'level' => 4,
+                'is_system_role' => true,
+                'is_active' => true
+            ],
+            [
+                'name' => 'Accountant',
+                'slug' => 'accountant',
+                'description' => 'Accounting and finance management',
+                'level' => 4,
+                'is_system_role' => true,
+                'is_active' => true
+            ],
+            [
+                'name' => 'Student',
+                'slug' => 'student',
+                'description' => 'Student access to view own information',
+                'level' => 5,
+                'is_system_role' => true,
+                'is_active' => true
+            ],
+        ];
+        
+        foreach ($roles as $roleData) {
+            Role::create($roleData);
+            $this->command->info("   ✓ Created role: {$roleData['name']}");
+        }
+    }
+    
+    /**
+     * Create 2 Super Admin users
+     */
+    private function createSuperAdmins(): void
+    {
+        $this->command->info('👤 Creating Super Admin users...');
+        
+        $superAdminRole = Role::where('slug', 'super-admin')->first();
+        
+        if (!$superAdminRole) {
+            $this->command->error('   ❌ Super Admin role not found!');
+            return;
+        }
+        
+        $superAdmins = [
+            [
+                'first_name' => 'Super',
+                'last_name' => 'Admin',
+                'email' => 'superadmin@school.com',
+                'phone' => '1234567890',
+                'password' => Hash::make('Admin@123'),
+                'role' => 'SuperAdmin',
+                'user_type' => 'Admin',
+                'is_active' => true,
+            ],
+            [
+                'first_name' => 'System',
+                'last_name' => 'Administrator',
+                'email' => 'admin@school.com',
+                'phone' => '0987654321',
+                'password' => Hash::make('Admin@123'),
+                'role' => 'SuperAdmin',
+                'user_type' => 'Admin',
+                'is_active' => true,
+            ],
+        ];
+        
+        foreach ($superAdmins as $adminData) {
+            // Create user
+            $user = User::create($adminData);
+            
+            // Assign Super Admin role
+            $user->roles()->attach($superAdminRole->id, [
+                'is_primary' => true,
+                'branch_id' => null, // Super Admin has access to all branches
+                'created_at' => now(),
+                'updated_at' => now()
+            ]);
+            
+            $this->command->info("   ✓ Created Super Admin: {$adminData['email']}");
         }
     }
 }

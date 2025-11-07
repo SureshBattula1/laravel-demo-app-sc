@@ -19,6 +19,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        // Register Model Observers for automatic role assignment
+        \App\Models\Student::observe(\App\Observers\StudentObserver::class);
+        \App\Models\Teacher::observe(\App\Observers\TeacherObserver::class);
     }
 }
