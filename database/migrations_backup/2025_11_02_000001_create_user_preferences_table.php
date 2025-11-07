@@ -7,7 +7,10 @@ use Illuminate\Support\Facades\Schema;
 return new class extends Migration
 {
     /**
-     * Run the migrations - User preferences table
+     * Run the migrations.
+     * 
+     * This table stores user-specific preferences and settings
+     * Benefits: Scalable, easy to add new preferences, keeps users table clean
      */
     public function up(): void
     {
@@ -32,19 +35,20 @@ return new class extends Migration
             $table->integer('items_per_page')->default(10);
             
             // Dashboard Preferences
-            $table->json('dashboard_widgets')->nullable();
-            $table->string('default_view', 50)->default('grid');
+            $table->json('dashboard_widgets')->nullable(); // Store active widgets and their positions
+            $table->string('default_view', 50)->default('grid'); // grid, list, compact
             
             // Accessibility Preferences
             $table->boolean('high_contrast')->default(false);
-            $table->string('font_size', 20)->default('medium');
+            $table->string('font_size', 20)->default('medium'); // small, medium, large
             $table->boolean('reduce_motion')->default(false);
             
-            // Additional Settings
+            // Additional Settings (JSON for flexibility)
             $table->json('additional_settings')->nullable();
             
             $table->timestamps();
             
+            // Indexes
             $table->unique('user_id');
             $table->index('theme');
         });
@@ -58,4 +62,5 @@ return new class extends Migration
         Schema::dropIfExists('user_preferences');
     }
 };
+
 

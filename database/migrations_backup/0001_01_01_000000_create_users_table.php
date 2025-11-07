@@ -29,11 +29,6 @@ return new class extends Migration
             $table->rememberToken();
             $table->timestamps();
             $table->softDeletes();
-            
-            $table->index('email');
-            $table->index('role');
-            $table->index(['branch_id', 'role']);
-            $table->index('is_active');
         });
 
         Schema::create('password_reset_tokens', function (Blueprint $table) {
@@ -57,9 +52,8 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::dropIfExists('sessions');
-        Schema::dropIfExists('password_reset_tokens');
         Schema::dropIfExists('users');
+        Schema::dropIfExists('password_reset_tokens');
+        Schema::dropIfExists('sessions');
     }
 };
-
