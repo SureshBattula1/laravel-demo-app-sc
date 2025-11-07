@@ -29,12 +29,19 @@ return new class extends Migration
 
         // FEE STRUCTURES TABLE
         Schema::create('fee_structures', function (Blueprint $table) {
-            $table->id();
+            $table->uuid('id')->primary();
             $table->foreignId('branch_id')->constrained('branches')->onDelete('cascade');
-            $table->string('name');
+            $table->string('grade'); // Frontend sends 'grade' not 'grade_level'
             $table->string('fee_type'); // VARCHAR for flexibility
-            $table->string('grade_level');
+            $table->decimal('amount', 10, 2); // Main amount field
             $table->string('academic_year');
+            $table->date('due_date')->nullable();
+            $table->text('description')->nullable();
+            $table->boolean('is_recurring')->default(false);
+            $table->string('recurrence_period')->nullable(); // Monthly, Quarterly, Annually
+            $table->boolean('is_active')->default(true);
+            
+            // Optional: Breakdown fields (if frontend sends them)
             $table->decimal('tuition_fee', 10, 2)->default(0);
             $table->decimal('admission_fee', 10, 2)->default(0);
             $table->decimal('exam_fee', 10, 2)->default(0);
@@ -43,19 +50,25 @@ return new class extends Migration
             $table->decimal('sports_fee', 10, 2)->default(0);
             $table->decimal('lab_fee', 10, 2)->default(0);
             $table->json('other_fees')->nullable();
-            $table->decimal('total_amount', 10, 2);
-            $table->boolean('is_active')->default(true);
+            $table->decimal('total_amount', 10, 2)->nullable();
+            
+            // Tracking
+            $table->foreignId('created_by')->nullable()->constrained('users')->onDelete('set null');
+            $table->foreignId('updated_by')->nullable()->constrained('users')->onDelete('set null');
+            
             $table->timestamps();
             $table->softDeletes();
             
-            $table->index(['branch_id', 'grade_level', 'academic_year']);
+            $table->index(['branch_id', 'grade', 'academic_year']);
             $table->index('is_active');
+            $table->index('fee_type');
         });
 
         // FEE INSTALLMENTS TABLE
         Schema::create('fee_installments', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('fee_structure_id')->constrained('fee_structures')->onDelete('cascade');
+            $table->uuid('fee_structure_id');
+            $table->foreign('fee_structure_id')->references('id')->on('fee_structures')->onDelete('cascade');
             $table->integer('installment_number');
             $table->decimal('amount', 10, 2);
             $table->date('due_date');
@@ -87,7 +100,8 @@ return new class extends Migration
         Schema::create('student_fees', function (Blueprint $table) {
             $table->id();
             $table->foreignId('student_id')->constrained('students')->onDelete('cascade');
-            $table->foreignId('fee_structure_id')->constrained('fee_structures')->onDelete('cascade');
+            $table->uuid('fee_structure_id');
+            $table->foreign('fee_structure_id')->references('id')->on('fee_structures')->onDelete('cascade');
             $table->string('academic_year');
             $table->decimal('original_amount', 10, 2);
             $table->decimal('discount_amount', 10, 2)->default(0);
@@ -107,7 +121,8 @@ return new class extends Migration
             $table->id();
             $table->foreignId('branch_id')->constrained('branches')->onDelete('cascade');
             $table->foreignId('student_id')->constrained('users')->onDelete('cascade');
-            $table->foreignId('fee_structure_id')->constrained('fee_structures')->onDelete('cascade');
+            $table->uuid('fee_structure_id');
+            $table->foreign('fee_structure_id')->references('id')->on('fee_structures')->onDelete('cascade');
             $table->string('invoice_number')->unique();
             $table->string('grade_level');
             $table->string('section')->nullable();

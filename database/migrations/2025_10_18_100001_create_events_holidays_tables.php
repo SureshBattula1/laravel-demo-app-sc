@@ -37,6 +37,7 @@ return new class extends Migration
             $table->id();
             $table->foreignId('branch_id')->nullable()->constrained('branches')->onDelete('cascade');
             $table->foreignId('created_by')->nullable()->constrained('users')->onDelete('set null');
+            $table->string('name'); // Same as title (for backward compatibility)
             $table->string('title');
             $table->text('description')->nullable();
             $table->date('date');
@@ -45,6 +46,7 @@ return new class extends Migration
             $table->enum('type', ['National', 'State', 'School', 'Optional', 'Restricted', 'Religious', 'Regional'])->default('School');
             $table->string('color', 20)->nullable();
             $table->boolean('is_recurring')->default(false);
+            $table->string('academic_year')->nullable();
             $table->boolean('is_active')->default(true);
             $table->timestamps();
             $table->softDeletes();
@@ -52,6 +54,7 @@ return new class extends Migration
             $table->index(['branch_id', 'date']);
             $table->index(['type', 'is_active']);
             $table->index(['start_date', 'end_date']);
+            $table->index('academic_year');
         });
     }
 

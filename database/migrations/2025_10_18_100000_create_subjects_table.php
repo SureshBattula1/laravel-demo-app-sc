@@ -38,6 +38,7 @@ return new class extends Migration
             $table->foreignId('section_id')->constrained('sections')->onDelete('cascade');
             $table->foreignId('subject_id')->constrained('subjects')->onDelete('cascade');
             $table->foreignId('teacher_id')->nullable()->constrained('users')->onDelete('set null');
+            $table->foreignId('branch_id')->constrained('branches')->onDelete('cascade');
             $table->string('academic_year');
             $table->integer('weekly_periods')->default(0);
             $table->boolean('is_active')->default(true);
@@ -45,6 +46,7 @@ return new class extends Migration
             
             $table->unique(['section_id', 'subject_id', 'academic_year'], 'unique_section_subject');
             $table->index(['section_id', 'is_active']);
+            $table->index(['branch_id', 'academic_year']);
             $table->index('teacher_id');
         });
     }

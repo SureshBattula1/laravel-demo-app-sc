@@ -36,8 +36,9 @@ return new class extends Migration
             $table->foreignId('exam_term_id')->nullable()->constrained('exam_terms')->onDelete('set null');
             $table->foreignId('subject_id')->nullable()->constrained('subjects')->onDelete('set null');
             $table->string('name');
+            $table->text('description')->nullable();
             $table->string('type')->nullable(); // Changed to string for flexibility
-            $table->string('grade_level');
+            $table->string('grade_level')->nullable();
             $table->string('section')->nullable();
             $table->date('date')->nullable();
             $table->date('start_date')->nullable();
