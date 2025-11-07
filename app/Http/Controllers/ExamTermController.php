@@ -40,6 +40,20 @@ class ExamTermController extends Controller
                 $query->where('is_active', $request->boolean('is_active'));
             }
 
+            // Search filter - search across name, code, academic_year, and branch name
+            if ($request->has('search') && !empty($request->search)) {
+                $search = strip_tags($request->search);
+                $query->where(function($q) use ($search) {
+                    $q->where('name', 'like', $search . '%')
+                      ->orWhere('code', 'like', $search . '%')
+                      ->orWhere('academic_year', 'like', $search . '%')
+                      ->orWhereHas('branch', function($q) use ($search) {
+                          $q->where('name', 'like', $search . '%')
+                            ->orWhere('code', 'like', $search . '%');
+                      });
+                });
+            }
+
             $terms = $this->paginateAndSort($query, $request, [
                 'id', 'name', 'code', 'start_date', 'end_date', 'weightage', 'is_active', 'created_at'
             ], 'start_date', 'desc');

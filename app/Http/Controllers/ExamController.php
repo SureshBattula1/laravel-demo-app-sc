@@ -24,6 +24,11 @@ class ExamController extends Controller
                 $query->where('branch_id', $request->branch_id);
             }
 
+            // Filter by exam term
+            if ($request->has('exam_term_id')) {
+                $query->where('exam_term_id', $request->exam_term_id);
+            }
+
             // Filter by academic year
             if ($request->has('academic_year')) {
                 $query->where('academic_year', $request->academic_year);
@@ -40,7 +45,15 @@ class ExamController extends Controller
                 $query->where(function($q) use ($search) {
                     $q->where('name', 'like', "{$search}%")  // ✅ Can use index
                       ->orWhere('exam_type', 'like', "{$search}%")
-                      ->orWhere('academic_year', 'like', "{$search}%");
+                      ->orWhere('academic_year', 'like', "{$search}%")
+                      ->orWhereHas('branch', function($q) use ($search) {
+                          $q->where('name', 'like', "{$search}%")
+                            ->orWhere('code', 'like', "{$search}%");
+                      })
+                      ->orWhereHas('examTerm', function($q) use ($search) {
+                          $q->where('name', 'like', "{$search}%")
+                            ->orWhere('code', 'like', "{$search}%");
+                      });
                 });
             }
 
@@ -95,8 +108,6 @@ class ExamController extends Controller
                 'academic_year' => 'required|string|max:20',
                 'start_date' => 'nullable|date',
                 'end_date' => 'nullable|date|after_or_equal:start_date',
-                'total_marks' => 'nullable|numeric|min:0',
-                'passing_marks' => 'nullable|numeric|min:0|lte:total_marks',
                 'description' => 'nullable|string',
                 'is_active' => 'boolean'
             ]);
@@ -111,9 +122,12 @@ class ExamController extends Controller
 
             // Prepare data with proper date formatting
             $examData = $request->only([
-                'exam_term_id', 'branch_id', 'name', 'exam_type', 'academic_year',
-                'total_marks', 'passing_marks', 'description'
+                'exam_term_id', 'branch_id', 'name', 'exam_type', 'academic_year', 'description'
             ]);
+            
+            // Set default values for total_marks and passing_marks
+            $examData['total_marks'] = 0;
+            $examData['passing_marks'] = 0;
             
             // Format dates properly
             if ($request->has('start_date')) {
@@ -189,8 +203,6 @@ class ExamController extends Controller
                 'academic_year' => 'string|max:20',
                 'start_date' => 'nullable|date',
                 'end_date' => 'nullable|date|after_or_equal:start_date',
-                'total_marks' => 'nullable|numeric|min:0',
-                'passing_marks' => 'nullable|numeric|min:0',
                 'description' => 'nullable|string',
                 'is_active' => 'boolean'
             ]);
@@ -205,8 +217,7 @@ class ExamController extends Controller
 
             // Prepare update data with proper date formatting
             $updateData = $request->only([
-                'exam_term_id', 'branch_id', 'name', 'exam_type', 'academic_year',
-                'total_marks', 'passing_marks', 'description', 'is_active'
+                'exam_term_id', 'branch_id', 'name', 'exam_type', 'academic_year', 'description', 'is_active'
             ]);
             
             // Format dates properly
