@@ -5,6 +5,7 @@ namespace Database\Seeders;
 use Illuminate\Database\Seeder;
 use App\Models\User;
 use App\Models\Branch;
+use App\Models\Role;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\DB;
 
@@ -86,8 +87,15 @@ class DatabaseSeeder extends Seeder
                 ]
             );
 
+            // Get roles (must exist from PermissionSeeder)
+            $superAdminRole = Role::where('slug', 'super-admin')->first();
+            $branchAdminRole = Role::where('slug', 'branch-admin')->first();
+            $teacherRole = Role::where('slug', 'teacher')->first();
+            $studentRole = Role::where('slug', 'student')->first();
+            $parentRole = Role::where('slug', 'parent')->first();
+
             // Create Super Admin User
-            User::firstOrCreate(
+            $adminUser = User::firstOrCreate(
                 ['email' => 'admin@myschool.com'],
                 [
                 'first_name' => 'Super',
@@ -101,9 +109,18 @@ class DatabaseSeeder extends Seeder
                 'email_verified_at' => now()
                 ]
             );
+            // Assign role in user_roles table
+            if ($superAdminRole && !$adminUser->roles()->where('roles.id', $superAdminRole->id)->exists()) {
+                $adminUser->roles()->attach($superAdminRole->id, [
+                    'is_primary' => true,
+                    'branch_id' => $mainBranch->id,
+                    'created_at' => now(),
+                    'updated_at' => now()
+                ]);
+            }
 
             // Create Branch Admin for Main Campus
-            User::firstOrCreate(
+            $managerUser = User::firstOrCreate(
                 ['email' => 'manager@myschool.com'],
                 [
                 'first_name' => 'John',
@@ -117,9 +134,18 @@ class DatabaseSeeder extends Seeder
                 'email_verified_at' => now()
                 ]
             );
+            // Assign role in user_roles table
+            if ($branchAdminRole && !$managerUser->roles()->where('roles.id', $branchAdminRole->id)->exists()) {
+                $managerUser->roles()->attach($branchAdminRole->id, [
+                    'is_primary' => true,
+                    'branch_id' => $mainBranch->id,
+                    'created_at' => now(),
+                    'updated_at' => now()
+                ]);
+            }
 
             // Create Sample Teacher
-            User::firstOrCreate(
+            $teacherUser = User::firstOrCreate(
                 ['email' => 'teacher@myschool.com'],
                 [
                 'first_name' => 'Sarah',
@@ -133,9 +159,18 @@ class DatabaseSeeder extends Seeder
                 'email_verified_at' => now()
                 ]
             );
+            // Assign role in user_roles table
+            if ($teacherRole && !$teacherUser->roles()->where('roles.id', $teacherRole->id)->exists()) {
+                $teacherUser->roles()->attach($teacherRole->id, [
+                    'is_primary' => true,
+                    'branch_id' => $mainBranch->id,
+                    'created_at' => now(),
+                    'updated_at' => now()
+                ]);
+            }
 
             // Create Sample Student
-            User::firstOrCreate(
+            $studentUser = User::firstOrCreate(
                 ['email' => 'student@myschool.com'],
                 [
                 'first_name' => 'Alice',
@@ -149,9 +184,18 @@ class DatabaseSeeder extends Seeder
                 'email_verified_at' => now()
                 ]
             );
+            // Assign role in user_roles table
+            if ($studentRole && !$studentUser->roles()->where('roles.id', $studentRole->id)->exists()) {
+                $studentUser->roles()->attach($studentRole->id, [
+                    'is_primary' => true,
+                    'branch_id' => $mainBranch->id,
+                    'created_at' => now(),
+                    'updated_at' => now()
+                ]);
+            }
 
             // Create Sample Parent
-            User::firstOrCreate(
+            $parentUser = User::firstOrCreate(
                 ['email' => 'parent@myschool.com'],
                 [
                 'first_name' => 'Bob',
@@ -165,6 +209,15 @@ class DatabaseSeeder extends Seeder
                 'email_verified_at' => now()
                 ]
             );
+            // Assign role in user_roles table
+            if ($parentRole && !$parentUser->roles()->where('roles.id', $parentRole->id)->exists()) {
+                $parentUser->roles()->attach($parentRole->id, [
+                    'is_primary' => true,
+                    'branch_id' => $mainBranch->id,
+                    'created_at' => now(),
+                    'updated_at' => now()
+                ]);
+            }
 
             DB::commit();
 
