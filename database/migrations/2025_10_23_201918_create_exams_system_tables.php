@@ -67,8 +67,8 @@ return new class extends Migration
             $table->id();
             $table->foreignId('exam_id')->constrained('exams')->onDelete('cascade');
             $table->foreignId('subject_id')->constrained('subjects')->onDelete('cascade');
-            $table->foreignId('branch_id')->constrained('branches')->onDelete('cascade');
-            $table->string('grade'); // Changed from grade_level to match controller
+            $table->foreignId('branch_id')->nullable()->constrained('branches')->onDelete('cascade');
+            $table->string('grade')->nullable(); // Nullable - can be derived from exam
             $table->string('section')->nullable();
             $table->date('exam_date');
             $table->time('start_time');
