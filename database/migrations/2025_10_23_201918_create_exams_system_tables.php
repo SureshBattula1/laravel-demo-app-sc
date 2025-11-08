@@ -68,7 +68,7 @@ return new class extends Migration
             $table->foreignId('exam_id')->constrained('exams')->onDelete('cascade');
             $table->foreignId('subject_id')->constrained('subjects')->onDelete('cascade');
             $table->foreignId('branch_id')->constrained('branches')->onDelete('cascade');
-            $table->string('grade_level');
+            $table->string('grade'); // Changed from grade_level to match controller
             $table->string('section')->nullable();
             $table->date('exam_date');
             $table->time('start_time');
@@ -83,8 +83,8 @@ return new class extends Migration
             $table->boolean('is_active')->default(true);
             $table->timestamps();
             
-            $table->unique(['exam_id', 'subject_id', 'grade_level', 'section'], 'unique_exam_subject_schedule');
-            $table->index(['exam_id', 'grade_level', 'section']);
+            $table->unique(['exam_id', 'subject_id', 'grade', 'section'], 'unique_exam_subject_schedule');
+            $table->index(['exam_id', 'grade', 'section']);
             $table->index(['exam_date', 'start_time']);
             $table->index(['branch_id', 'exam_date']);
         });

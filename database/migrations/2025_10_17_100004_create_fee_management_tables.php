@@ -118,35 +118,42 @@ return new class extends Migration
 
         // FEE PAYMENTS TABLE
         Schema::create('fee_payments', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('branch_id')->constrained('branches')->onDelete('cascade');
+            $table->uuid('id')->primary();
+            $table->foreignId('branch_id')->nullable()->constrained('branches')->onDelete('cascade');
             $table->foreignId('student_id')->constrained('users')->onDelete('cascade');
             $table->uuid('fee_structure_id');
             $table->foreign('fee_structure_id')->references('id')->on('fee_structures')->onDelete('cascade');
-            $table->string('invoice_number')->unique();
-            $table->string('grade_level');
+            $table->string('receipt_number')->unique();
+            $table->string('invoice_number')->unique()->nullable();
+            $table->string('grade_level')->nullable();
             $table->string('section')->nullable();
             $table->decimal('total_amount', 10, 2);
-            $table->decimal('paid_amount', 10, 2)->default(0);
-            $table->decimal('due_amount', 10, 2);
+            $table->decimal('amount_paid', 10, 2); // Controller sends amount_paid
+            $table->decimal('paid_amount', 10, 2)->default(0); // Backward compatibility
+            $table->decimal('due_amount', 10, 2)->default(0);
             $table->decimal('discount_amount', 10, 2)->default(0);
+            $table->decimal('late_fee', 10, 2)->default(0); // Late fee charges
             $table->string('discount_reason')->nullable();
             $table->date('payment_date')->nullable();
-            $table->date('due_date');
+            $table->date('due_date')->nullable();
             $table->enum('status', ['Paid', 'Pending', 'Overdue', 'Cancelled', 'Partial'])->default('Pending');
             $table->enum('payment_status', ['Completed', 'Pending', 'Partial', 'Failed', 'Refunded'])->default('Pending');
             $table->enum('payment_method', ['Cash', 'Card', 'Bank Transfer', 'Cheque', 'Online'])->nullable();
             $table->string('transaction_id')->nullable();
             $table->text('remarks')->nullable();
-            $table->string('academic_year');
+            $table->string('academic_year')->nullable();
+            $table->foreignId('created_by')->nullable()->constrained('users')->onDelete('set null');
+            $table->foreignId('updated_by')->nullable()->constrained('users')->onDelete('set null');
             $table->timestamps();
             $table->softDeletes();
             
             $table->index('invoice_number');
+            $table->index('receipt_number');
             $table->index(['student_id', 'academic_year']);
             $table->index(['branch_id', 'status']);
             $table->index(['due_date', 'status']);
             $table->index('payment_status');
+            $table->index('payment_date');
         });
     }
 
