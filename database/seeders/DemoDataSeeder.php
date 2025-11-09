@@ -282,6 +282,7 @@ class DemoDataSeeder extends Seeder
     
     private function createTeachers(): void
     {
+        $faker = \Faker\Factory::create();
         $designations = ['Senior Teacher', 'Teacher', 'Junior Teacher', 'PGT', 'TGT', 'PRT'];
         $qualifications = ['B.Ed', 'M.Ed', 'B.A. B.Ed', 'M.A. B.Ed', 'M.Sc. B.Ed', 'Ph.D.'];
         
@@ -330,6 +331,8 @@ class DemoDataSeeder extends Seeder
                         'joining_date' => Carbon::now()->subMonths(rand(1, 60))->format('Y-m-d'),
                         'date_of_birth' => Carbon::now()->subYears(rand(25, 55))->format('Y-m-d'),
                         'gender' => $gender,
+                        'address' => $faker->address,
+                        'current_address' => $faker->address,
                         'basic_salary' => rand(30000, 80000),
                         'subjects' => $this->getRandomSubjects(),
                         'classes_assigned' => [],
@@ -473,16 +476,14 @@ class DemoDataSeeder extends Seeder
                         'father_phone' => '+1-' . rand(200, 999) . '-' . rand(200, 999) . '-' . rand(1000, 9999),
                         'father_email' => strtolower($fatherFirstName . '.' . $lastName . '@email.com'),
                         'father_occupation' => ['Engineer', 'Doctor', 'Teacher', 'Businessman', 'Government Employee'][array_rand(['Engineer', 'Doctor', 'Teacher', 'Businessman', 'Government Employee'])],
-                        'father_annual_income' => rand(30000, 150000),
                         'mother_name' => $motherFirstName . ' ' . $lastName,
                         'mother_phone' => '+1-' . rand(200, 999) . '-' . rand(200, 999) . '-' . rand(1000, 9999),
                         'mother_email' => strtolower($motherFirstName . '.' . $lastName . '@email.com'),
                         'mother_occupation' => ['Engineer', 'Doctor', 'Teacher', 'Homemaker', 'Businesswoman'][array_rand(['Engineer', 'Doctor', 'Teacher', 'Homemaker', 'Businesswoman'])],
-                        'mother_annual_income' => rand(0, 120000),
                         'emergency_contact_name' => $fatherFirstName . ' ' . $lastName,
                         'emergency_contact_phone' => '+1-' . rand(200, 999) . '-' . rand(200, 999) . '-' . rand(1000, 9999),
+                        'emergency_contact_relation' => 'Father',
                         'student_status' => 'Active',
-                        'admission_status' => 'Admitted',
                         'created_at' => now(),
                         'updated_at' => now()
                     ]);
