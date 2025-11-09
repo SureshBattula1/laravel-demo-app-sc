@@ -11,6 +11,7 @@ class AccountCategory extends Model
     use HasFactory, SoftDeletes;
 
     protected $fillable = [
+        'branch_id',
         'name',
         'code',
         'type',
@@ -27,6 +28,11 @@ class AccountCategory extends Model
     }
 
     // Relationships
+    public function branch()
+    {
+        return $this->belongsTo(Branch::class);
+    }
+
     public function transactions()
     {
         return $this->hasMany(Transaction::class, 'category_id');

@@ -17,8 +17,9 @@ class AccountCategorySeeder extends Seeder
 
         try {
             $categories = [
-                // Income Categories
+                // Income Categories (Global - available for all branches)
                 [
+                    'branch_id' => null, // NULL = Global category
                     'name' => 'Tuition Fees',
                     'code' => 'INC-001',
                     'type' => 'Income',
@@ -27,6 +28,7 @@ class AccountCategorySeeder extends Seeder
                     'is_active' => true
                 ],
                 [
+                    'branch_id' => null,
                     'name' => 'Admission Fees',
                     'code' => 'INC-002',
                     'type' => 'Income',
@@ -247,6 +249,10 @@ class AccountCategorySeeder extends Seeder
             ];
 
             foreach ($categories as $category) {
+                // Ensure branch_id is set (null = global)
+                if (!isset($category['branch_id'])) {
+                    $category['branch_id'] = null;
+                }
                 AccountCategory::create($category);
             }
 

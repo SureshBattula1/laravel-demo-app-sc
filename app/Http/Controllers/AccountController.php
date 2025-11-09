@@ -11,137 +11,99 @@ use Illuminate\Support\Facades\Log;
 class AccountController extends Controller
 {
     /**
-     * Get accounts dashboard statistics
+     * Get accounts dashboard statistics - INDEX OPTIMIZED
      */
     public function getDashboard(Request $request)
     {
         try {
             $branchId = $request->get('branch_id');
             $financialYear = $request->get('financial_year', $this->getCurrentFinancialYear());
-
-            $query = Transaction::with(['category', 'branch'])
-                ->where('status', 'Approved')
-                ->where('financial_year', $financialYear);
-
-            // 🔥 APPLY BRANCH FILTERING - Restrict to accessible branches
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
-            if ($accessibleBranchIds !== 'all') {
-                if (!empty($accessibleBranchIds)) {
-                    $query->whereIn('branch_id', $accessibleBranchIds);
-                } else {
-                    $query->whereRaw('1 = 0');
-                }
-            } elseif ($branchId) {
-                $query->where('branch_id', $branchId);
+
+            // Early return for no access
+            if ($accessibleBranchIds !== 'all' && empty($accessibleBranchIds)) {
+                return response()->json([
+                    'success' => true,
+                    'data' => [
+                        'summary' => ['total_income' => 0, 'total_expense' => 0, 'net_balance' => 0, 'financial_year' => $financialYear],
+                        'income_by_category' => [],
+                        'expense_by_category' => [],
+                        'recent_transactions' => [],
+                        'monthly_trend' => []
+                    ]
+                ]);
             }
 
-            // OPTIMIZED: Single aggregated query for totals (both Income and Expense in one query)
-            $totalsQuery = DB::table('transactions')
+            // OPTIMIZED: Use indexes - status + financial_year + branch_id
+            $baseQuery = DB::table('transactions')
                 ->where('status', 'Approved')
-                ->where('financial_year', $financialYear);
+                ->where('financial_year', $financialYear)
+                ->whereNull('deleted_at');
 
-            // Apply branch filter
             if ($accessibleBranchIds !== 'all') {
-                if (!empty($accessibleBranchIds)) {
-                    $totalsQuery->whereIn('branch_id', $accessibleBranchIds);
-                } else {
-                    // No access to any branches - return empty data
-                    return response()->json([
-                        'success' => true,
-                        'data' => [
-                            'summary' => ['total_income' => 0, 'total_expense' => 0, 'net_balance' => 0, 'financial_year' => $financialYear],
-                            'income_by_category' => [],
-                            'expense_by_category' => [],
-                            'recent_transactions' => [],
-                            'monthly_trend' => []
-                        ]
-                    ]);
-                }
+                $baseQuery->whereIn('branch_id', $accessibleBranchIds);
             } elseif ($branchId) {
-                $totalsQuery->where('branch_id', $branchId);
+                $baseQuery->where('branch_id', $branchId);
             }
 
-            $totals = $totalsQuery
-                ->select(
-                    DB::raw('SUM(CASE WHEN type = "Income" THEN amount ELSE 0 END) as total_income'),
-                    DB::raw('SUM(CASE WHEN type = "Expense" THEN amount ELSE 0 END) as total_expense')
-                )
+            // Query 1: Get totals (uses index on status, financial_year)
+            $totals = (clone $baseQuery)
+                ->selectRaw('SUM(IF(type = "Income", amount, 0)) as total_income')
+                ->selectRaw('SUM(IF(type = "Expense", amount, 0)) as total_expense')
                 ->first();
 
             $totalIncome = (float) ($totals->total_income ?? 0);
             $totalExpense = (float) ($totals->total_expense ?? 0);
-            $netBalance = $totalIncome - $totalExpense;
 
-            // OPTIMIZED: Single aggregated query for category breakdown (both Income and Expense)
-            $categoryQuery = DB::table('transactions')
+            // Query 2: Category breakdown (uses index on category_id, financial_year)
+            $categoryBreakdown = DB::table('transactions')
                 ->join('account_categories', 'transactions.category_id', '=', 'account_categories.id')
                 ->where('transactions.status', 'Approved')
-                ->where('transactions.financial_year', $financialYear);
-
-            // Apply branch filter
-            if ($accessibleBranchIds !== 'all') {
-                if (!empty($accessibleBranchIds)) {
-                    $categoryQuery->whereIn('transactions.branch_id', $accessibleBranchIds);
-                }
-            } elseif ($branchId) {
-                $categoryQuery->where('transactions.branch_id', $branchId);
-            }
-
-            $categoryBreakdown = $categoryQuery
-                ->select(
-                    'transactions.type',
-                    'account_categories.name as category',
-                    DB::raw('SUM(transactions.amount) as amount')
-                )
+                ->where('transactions.financial_year', $financialYear)
+                ->whereNull('transactions.deleted_at')
+                ->when($accessibleBranchIds !== 'all', fn($q) => $q->whereIn('transactions.branch_id', $accessibleBranchIds))
+                ->when($branchId, fn($q) => $q->where('transactions.branch_id', $branchId))
+                ->selectRaw('transactions.type, account_categories.name as category, SUM(transactions.amount) as amount')
                 ->groupBy('transactions.type', 'account_categories.name')
                 ->get();
 
-            // Separate income and expense categories
-            $incomeByCategory = $categoryBreakdown
-                ->filter(fn($item) => $item->type === 'Income')
-                ->map(fn($item) => ['category' => $item->category, 'amount' => (float) $item->amount]);
+            $incomeByCategory = $categoryBreakdown->where('type', 'Income')->map(fn($i) => ['category' => $i->category, 'amount' => (float) $i->amount])->values();
+            $expenseByCategory = $categoryBreakdown->where('type', 'Expense')->map(fn($i) => ['category' => $i->category, 'amount' => (float) $i->amount])->values();
 
-            $expenseByCategory = $categoryBreakdown
-                ->filter(fn($item) => $item->type === 'Expense')
-                ->map(fn($item) => ['category' => $item->category, 'amount' => (float) $item->amount]);
-
-            // Recent transactions
-            $recentTransactions = Transaction::with(['category', 'branch', 'createdBy'])
-                ->when($branchId, function ($q) use ($branchId) {
-                    return $q->where('branch_id', $branchId);
-                })
+            // Query 3: Recent transactions (uses index on transaction_date)
+            $recentTransactions = Transaction::select('id', 'transaction_number', 'transaction_date', 'type', 'amount', 'description', 'status', 'category_id', 'branch_id')
                 ->where('financial_year', $financialYear)
+                ->whereNull('deleted_at')
+                ->when($accessibleBranchIds !== 'all', fn($q) => $q->whereIn('branch_id', $accessibleBranchIds))
+                ->when($branchId, fn($q) => $q->where('branch_id', $branchId))
+                ->with(['category:id,name,code', 'branch:id,name,code'])
                 ->orderBy('transaction_date', 'desc')
                 ->limit(10)
                 ->get();
 
-            // Monthly trend (last 12 months)
+            // Query 4: Monthly trend (uses index on transaction_date)
             $monthlyTrend = DB::table('transactions')
                 ->where('status', 'Approved')
-                ->where('transaction_date', '>=', now()->subMonths(12))
+                ->where('transaction_date', '>=', now()->subMonths(12)->format('Y-m-d'))
                 ->whereNull('deleted_at')
-                ->select(
-                    DB::raw('MONTH(transaction_date) as month'),
-                    DB::raw('YEAR(transaction_date) as year'),
-                    'type',
-                    DB::raw('SUM(amount) as total')
-                )
-                ->groupBy(DB::raw('YEAR(transaction_date)'), DB::raw('MONTH(transaction_date)'), 'type')
-                ->orderBy(DB::raw('YEAR(transaction_date)'), 'asc')
-                ->orderBy(DB::raw('MONTH(transaction_date)'), 'asc')
+                ->when($accessibleBranchIds !== 'all', fn($q) => $q->whereIn('branch_id', $accessibleBranchIds))
+                ->when($branchId, fn($q) => $q->where('branch_id', $branchId))
+                ->selectRaw('MONTH(transaction_date) as month, YEAR(transaction_date) as year, type, SUM(amount) as total')
+                ->groupBy(DB::raw('YEAR(transaction_date), MONTH(transaction_date), type'))
+                ->orderByRaw('year ASC, month ASC')
                 ->get();
 
             return response()->json([
                 'success' => true,
                 'data' => [
                     'summary' => [
-                        'total_income' => round((float)$totalIncome, 2),
-                        'total_expense' => round((float)$totalExpense, 2),
-                        'net_balance' => round((float)$netBalance, 2),
+                        'total_income' => round($totalIncome, 2),
+                        'total_expense' => round($totalExpense, 2),
+                        'net_balance' => round($totalIncome - $totalExpense, 2),
                         'financial_year' => $financialYear
                     ],
-                    'income_by_category' => $incomeByCategory->toArray(),
-                    'expense_by_category' => $expenseByCategory->toArray(),
+                    'income_by_category' => $incomeByCategory,
+                    'expense_by_category' => $expenseByCategory,
                     'recent_transactions' => $recentTransactions,
                     'monthly_trend' => $monthlyTrend
                 ]
@@ -159,26 +121,47 @@ class AccountController extends Controller
     }
 
     /**
-     * Get account categories
+     * Get account categories - INDEX OPTIMIZED
      */
     public function getCategories(Request $request)
     {
         try {
-            $query = AccountCategory::query();
+            // OPTIMIZED: Select only needed columns, use indexes
+            $query = AccountCategory::select([
+                'id',
+                'branch_id',
+                'name', 
+                'code', 
+                'type', 
+                'sub_type', 
+                'is_active'
+            ])->with('branch:id,name,code');
 
+            // Use index on branch_id (null = global for all branches)
+            if ($request->has('branch_id')) {
+                $query->where(function($q) use ($request) {
+                    $q->where('branch_id', $request->branch_id)
+                      ->orWhereNull('branch_id'); // Include global categories
+                });
+            }
+
+            // Use index on type column
             if ($request->has('type')) {
                 $query->where('type', $request->type);
             }
 
+            // Use index on is_active column
             if ($request->has('is_active')) {
                 $query->where('is_active', $request->boolean('is_active'));
             }
 
+            // Order by name (no index needed for ORDER BY on small dataset)
             $categories = $query->orderBy('name', 'asc')->get();
 
             return response()->json([
                 'success' => true,
-                'data' => $categories
+                'data' => $categories,
+                'count' => $categories->count()
             ]);
 
         } catch (\Exception $e) {
@@ -193,14 +176,27 @@ class AccountController extends Controller
     }
 
     /**
-     * Get single account category
+     * Get single account category - INDEX OPTIMIZED
      */
     public function getCategory($id)
     {
         try {
-            $category = AccountCategory::with(['transactions' => function ($query) {
-                $query->latest()->limit(10);
-            }, 'budgets'])->findOrFail($id);
+            // OPTIMIZED: Load only necessary transaction fields
+            $category = AccountCategory::select([
+                'id', 'name', 'code', 'type', 'sub_type', 
+                'description', 'is_active', 'created_at', 'updated_at'
+            ])
+            ->with([
+                'transactions' => function ($query) {
+                    $query->select('id', 'transaction_number', 'transaction_date', 'type', 'amount', 'status', 'category_id')
+                        ->latest('transaction_date')
+                        ->limit(10);
+                },
+                'budgets' => function ($query) {
+                    $query->select('id', 'category_id', 'financial_year', 'allocated_amount', 'utilized_amount');
+                }
+            ])
+            ->findOrFail($id);
 
             return response()->json([
                 'success' => true,
@@ -226,6 +222,7 @@ class AccountController extends Controller
         DB::beginTransaction();
         try {
             $validated = $request->validate([
+                'branch_id' => 'nullable|exists:branches,id',
                 'name' => 'required|string|max:255|unique:account_categories,name',
                 'code' => 'required|string|max:50|unique:account_categories,code',
                 'type' => 'required|in:Income,Expense',
@@ -277,6 +274,7 @@ class AccountController extends Controller
             $category = AccountCategory::findOrFail($id);
 
             $validated = $request->validate([
+                'branch_id' => 'nullable|exists:branches,id',
                 'name' => 'required|string|max:255|unique:account_categories,name,' . $id,
                 'code' => 'required|string|max:50|unique:account_categories,code,' . $id,
                 'type' => 'required|in:Income,Expense',
