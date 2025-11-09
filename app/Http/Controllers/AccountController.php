@@ -70,21 +70,21 @@ class AccountController extends Controller
             $incomeByCategory = $categoryBreakdown->where('type', 'Income')->map(fn($i) => ['category' => $i->category, 'amount' => (float) $i->amount])->values();
             $expenseByCategory = $categoryBreakdown->where('type', 'Expense')->map(fn($i) => ['category' => $i->category, 'amount' => (float) $i->amount])->values();
 
-            // Query 3: Recent transactions (uses index on transaction_date)
-            $recentTransactions = Transaction::select('id', 'transaction_number', 'transaction_date', 'type', 'amount', 'description', 'status', 'category_id', 'branch_id')
+            // Query 3: Recent transactions (uses index on transaction_date) - MINIMAL DATA
+            $recentTransactions = Transaction::select('id', 'transaction_number', 'transaction_date', 'type', 'amount', 'status', 'category_id')
                 ->where('financial_year', $financialYear)
                 ->whereNull('deleted_at')
                 ->when($accessibleBranchIds !== 'all', fn($q) => $q->whereIn('branch_id', $accessibleBranchIds))
                 ->when($branchId, fn($q) => $q->where('branch_id', $branchId))
-                ->with(['category:id,name,code', 'branch:id,name,code'])
+                ->with('category:id,name')
                 ->orderBy('transaction_date', 'desc')
-                ->limit(10)
+                ->limit(5)
                 ->get();
 
-            // Query 4: Monthly trend (uses index on transaction_date)
+            // Query 4: Monthly trend (uses index on transaction_date) - REDUCED TO 6 MONTHS
             $monthlyTrend = DB::table('transactions')
                 ->where('status', 'Approved')
-                ->where('transaction_date', '>=', now()->subMonths(12)->format('Y-m-d'))
+                ->where('transaction_date', '>=', now()->subMonths(6)->format('Y-m-d'))
                 ->whereNull('deleted_at')
                 ->when($accessibleBranchIds !== 'all', fn($q) => $q->whereIn('branch_id', $accessibleBranchIds))
                 ->when($branchId, fn($q) => $q->where('branch_id', $branchId))
