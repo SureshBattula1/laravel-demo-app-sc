@@ -13,22 +13,9 @@ return new class extends Migration
     public function up(): void
     {
         // ACCOUNT CATEGORIES TABLE
-        Schema::create('account_categories', function (Blueprint $table) {
-            $table->id();
-            $table->string('name', 100);
-            $table->string('code', 50)->unique();
-            $table->enum('type', ['Income', 'Expense']);
-            $table->enum('sub_type', [
-                'Fee', 'Donation', 'Grant', 'Other Income',
-                'Salary', 'Maintenance', 'Utilities', 'Supplies', 
-                'Transport', 'Food', 'Tips', 'Other Expense'
-            ])->nullable();
-            $table->text('description')->nullable();
-            $table->boolean('is_active')->default(true);
-            $table->timestamps();
-            
-            $table->index(['type', 'is_active']);
-        });
+        // MOVED TO: 2024_01_01_000001_create_account_categories_table.php
+        // This table is now created by a separate migration with improved schema
+        // (VARCHAR instead of ENUM for sub_type, and includes soft deletes)
 
         // TRANSACTIONS TABLE - Main accounting table
         Schema::create('transactions', function (Blueprint $table) {
@@ -191,51 +178,7 @@ return new class extends Migration
             $table->index('transaction_id');
         });
 
-        // Seed default categories
-        $this->seedAccountCategories();
-    }
-
-    /**
-     * Seed default account categories
-     */
-    private function seedAccountCategories(): void
-    {
-        $categories = [
-            // Income
-            ['name' => 'Student Fees', 'code' => 'INC-FEE', 'type' => 'Income', 'sub_type' => 'Fee'],
-            ['name' => 'Admission Fees', 'code' => 'INC-ADM', 'type' => 'Income', 'sub_type' => 'Fee'],
-            ['name' => 'Exam Fees', 'code' => 'INC-EXM', 'type' => 'Income', 'sub_type' => 'Fee'],
-            ['name' => 'Donations', 'code' => 'INC-DON', 'type' => 'Income', 'sub_type' => 'Donation'],
-            ['name' => 'Grants', 'code' => 'INC-GRN', 'type' => 'Income', 'sub_type' => 'Grant'],
-            ['name' => 'Other Income', 'code' => 'INC-OTH', 'type' => 'Income', 'sub_type' => 'Other Income'],
-            
-            // Expenses
-            ['name' => 'Teacher Salaries', 'code' => 'EXP-SAL-TCH', 'type' => 'Expense', 'sub_type' => 'Salary'],
-            ['name' => 'Staff Salaries', 'code' => 'EXP-SAL-STF', 'type' => 'Expense', 'sub_type' => 'Salary'],
-            ['name' => 'Building Maintenance', 'code' => 'EXP-MNT-BLD', 'type' => 'Expense', 'sub_type' => 'Maintenance'],
-            ['name' => 'Equipment Maintenance', 'code' => 'EXP-MNT-EQP', 'type' => 'Expense', 'sub_type' => 'Maintenance'],
-            ['name' => 'Electricity', 'code' => 'EXP-UTL-ELC', 'type' => 'Expense', 'sub_type' => 'Utilities'],
-            ['name' => 'Water', 'code' => 'EXP-UTL-WTR', 'type' => 'Expense', 'sub_type' => 'Utilities'],
-            ['name' => 'Internet', 'code' => 'EXP-UTL-NET', 'type' => 'Expense', 'sub_type' => 'Utilities'],
-            ['name' => 'Stationery', 'code' => 'EXP-SUP-STA', 'type' => 'Expense', 'sub_type' => 'Supplies'],
-            ['name' => 'Books & Materials', 'code' => 'EXP-SUP-BKS', 'type' => 'Expense', 'sub_type' => 'Supplies'],
-            ['name' => 'Transport', 'code' => 'EXP-TRP', 'type' => 'Expense', 'sub_type' => 'Transport'],
-            ['name' => 'Food & Canteen', 'code' => 'EXP-FOD', 'type' => 'Expense', 'sub_type' => 'Food'],
-            ['name' => 'Tips & Gratuity', 'code' => 'EXP-TIP', 'type' => 'Expense', 'sub_type' => 'Tips'],
-            ['name' => 'Other Expenses', 'code' => 'EXP-OTH', 'type' => 'Expense', 'sub_type' => 'Other Expense'],
-        ];
-
-        foreach ($categories as $category) {
-            DB::table('account_categories')->insert([
-                'name' => $category['name'],
-                'code' => $category['code'],
-                'type' => $category['type'],
-                'sub_type' => $category['sub_type'],
-                'is_active' => true,
-                'created_at' => now(),
-                'updated_at' => now()
-            ]);
-        }
+        // NOTE: account_categories are now seeded by AccountCategorySeeder
     }
 
     /**
@@ -248,7 +191,7 @@ return new class extends Migration
         Schema::dropIfExists('budgets');
         Schema::dropIfExists('salary_payments');
         Schema::dropIfExists('transactions');
-        Schema::dropIfExists('account_categories');
+        // account_categories dropped by its own migration
     }
 };
 

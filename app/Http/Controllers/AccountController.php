@@ -193,6 +193,205 @@ class AccountController extends Controller
     }
 
     /**
+     * Get single account category
+     */
+    public function getCategory($id)
+    {
+        try {
+            $category = AccountCategory::with(['transactions' => function ($query) {
+                $query->latest()->limit(10);
+            }, 'budgets'])->findOrFail($id);
+
+            return response()->json([
+                'success' => true,
+                'data' => $category
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Get category error', ['error' => $e->getMessage()]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Category not found',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+            ], 404);
+        }
+    }
+
+    /**
+     * Create new account category
+     */
+    public function createCategory(Request $request)
+    {
+        DB::beginTransaction();
+        try {
+            $validated = $request->validate([
+                'name' => 'required|string|max:255|unique:account_categories,name',
+                'code' => 'required|string|max:50|unique:account_categories,code',
+                'type' => 'required|in:Income,Expense',
+                'sub_type' => 'nullable|string|max:255',
+                'description' => 'nullable|string',
+                'is_active' => 'boolean'
+            ]);
+
+            // Convert empty strings to null for nullable fields
+            $validated['sub_type'] = !empty($validated['sub_type']) ? $validated['sub_type'] : null;
+            $validated['description'] = !empty($validated['description']) ? $validated['description'] : null;
+
+            $category = AccountCategory::create($validated);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'data' => $category,
+                'message' => 'Account category created successfully'
+            ], 201);
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Create category error', ['error' => $e->getMessage()]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to create category',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Update account category
+     */
+    public function updateCategory(Request $request, $id)
+    {
+        DB::beginTransaction();
+        try {
+            $category = AccountCategory::findOrFail($id);
+
+            $validated = $request->validate([
+                'name' => 'required|string|max:255|unique:account_categories,name,' . $id,
+                'code' => 'required|string|max:50|unique:account_categories,code,' . $id,
+                'type' => 'required|in:Income,Expense',
+                'sub_type' => 'nullable|string|max:255',
+                'description' => 'nullable|string',
+                'is_active' => 'boolean'
+            ]);
+
+            // Convert empty strings to null for nullable fields
+            if (isset($validated['sub_type'])) {
+                $validated['sub_type'] = !empty($validated['sub_type']) ? $validated['sub_type'] : null;
+            }
+            if (isset($validated['description'])) {
+                $validated['description'] = !empty($validated['description']) ? $validated['description'] : null;
+            }
+
+            $category->update($validated);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'data' => $category->fresh(),
+                'message' => 'Account category updated successfully'
+            ]);
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Update category error', ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update category',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Delete account category
+     */
+    public function deleteCategory($id)
+    {
+        DB::beginTransaction();
+        try {
+            $category = AccountCategory::findOrFail($id);
+
+            // Check if category has transactions
+            if ($category->transactions()->count() > 0) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Cannot delete category with existing transactions. Consider deactivating instead.'
+                ], 422);
+            }
+
+            $category->delete();
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Account category deleted successfully'
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Delete category error', ['error' => $e->getMessage()]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to delete category',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Toggle category status
+     */
+    public function toggleCategoryStatus($id)
+    {
+        DB::beginTransaction();
+        try {
+            $category = AccountCategory::findOrFail($id);
+            $category->is_active = !$category->is_active;
+            $category->save();
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'data' => $category,
+                'message' => 'Category status updated successfully'
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Toggle category status error', ['error' => $e->getMessage()]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to toggle status',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+            ], 500);
+        }
+    }
+
+    /**
      * Get current financial year
      */
     private function getCurrentFinancialYear(): string

@@ -311,6 +311,11 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     Route::prefix('accounts')->group(function () {
         Route::get('dashboard', [AccountController::class, 'getDashboard']);
         Route::get('categories', [AccountController::class, 'getCategories']);
+        Route::get('categories/{id}', [AccountController::class, 'getCategory']);
+        Route::post('categories', [AccountController::class, 'createCategory']);
+        Route::put('categories/{id}', [AccountController::class, 'updateCategory']);
+        Route::delete('categories/{id}', [AccountController::class, 'deleteCategory']);
+        Route::put('categories/{id}/toggle-status', [AccountController::class, 'toggleCategoryStatus']);
     });
     
     // Transaction Routes - Full CRUD
