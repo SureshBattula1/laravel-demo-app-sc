@@ -224,6 +224,194 @@ class FeeController extends Controller
         }
     }
 
+    /**
+     * Get today's payments dashboard overview
+     * ✅ OPTIMIZED: Returns aggregated data for dashboard view
+     */
+    public function getTodayPayments(Request $request)
+    {
+        try {
+            $today = \Carbon\Carbon::today()->toDateString();
+            
+            // Log for debugging
+            Log::info('Today\'s Payments Dashboard Request', [
+                'today' => $today,
+                'filters' => $request->all()
+            ]);
+            
+            // Base query for today's completed payments
+            // Get branch_id from fee_structure (more reliable than student record)
+            $baseQuery = DB::table('fee_payments as fp')
+                ->join('users as u', 'fp.student_id', '=', 'u.id')
+                ->leftJoin('students as s', 'u.id', '=', 's.user_id')
+                ->leftJoin('fee_structures as fs', 'fp.fee_structure_id', '=', 'fs.id')
+                ->leftJoin('branches as b', 'fs.branch_id', '=', 'b.id') // Get branch from fee_structure
+                ->leftJoin('grades as g', 's.grade', '=', 'g.value')
+                ->whereDate('fp.payment_date', $today)
+                ->where('fp.payment_status', 'Completed');
+
+            // 🔥 APPLY BRANCH FILTERING - Restrict to accessible branches
+            // Use branch_id from fee_structure (more reliable)
+            $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+            if ($accessibleBranchIds !== 'all') {
+                if (!empty($accessibleBranchIds)) {
+                    $baseQuery->whereIn('fs.branch_id', $accessibleBranchIds);
+                } else {
+                    $baseQuery->whereRaw('1 = 0');
+                }
+            }
+
+            // Filter by branch
+            if ($request->has('branch_id') && $request->branch_id) {
+                $baseQuery->where('fs.branch_id', $request->branch_id);
+            }
+
+            // Filter by grade/class
+            if ($request->has('grade') && $request->grade) {
+                $baseQuery->where('s.grade', $request->grade);
+            }
+
+            // Filter by section
+            if ($request->has('section') && $request->section) {
+                $baseQuery->where('s.section', $request->section);
+            }
+
+            // Filter by payment method
+            if ($request->has('payment_method') && $request->payment_method) {
+                $baseQuery->where('fp.payment_method', $request->payment_method);
+            }
+
+            // ✅ Get Total Amount Paid
+            $totalAmount = (float) (clone $baseQuery)->sum('fp.amount_paid');
+
+            // ✅ Get Total Count
+            $totalCount = (clone $baseQuery)->count('fp.id');
+            
+            // Log for debugging
+            Log::info('Today\'s Payments Summary', [
+                'total_amount' => $totalAmount,
+                'total_count' => $totalCount,
+                'today' => $today
+            ]);
+
+            // ✅ Get Class/Grade Wise Breakdown
+            $byGrade = (clone $baseQuery)
+                ->select(
+                    's.grade',
+                    DB::raw('COALESCE(g.label, CONCAT("Grade ", s.grade)) as grade_label'),
+                    DB::raw('COUNT(DISTINCT fp.id) as payment_count'),
+                    DB::raw('SUM(fp.amount_paid) as total_amount'),
+                    DB::raw('COUNT(DISTINCT s.id) as student_count')
+                )
+                ->groupBy('s.grade', 'g.label')
+                ->orderBy('s.grade')
+                ->get()
+                ->map(function($item) {
+                    return [
+                        'grade' => $item->grade,
+                        'grade_label' => $item->grade_label,
+                        'payment_count' => (int) $item->payment_count,
+                        'total_amount' => (float) $item->total_amount,
+                        'student_count' => (int) $item->student_count
+                    ];
+                });
+
+            // ✅ Get Section Wise Breakdown
+            $bySection = (clone $baseQuery)
+                ->select(
+                    's.grade',
+                    DB::raw('COALESCE(g.label, CONCAT("Grade ", s.grade)) as grade_label'),
+                    's.section',
+                    DB::raw('COUNT(DISTINCT fp.id) as payment_count'),
+                    DB::raw('SUM(fp.amount_paid) as total_amount'),
+                    DB::raw('COUNT(DISTINCT fp.student_id) as student_count')
+                )
+                ->whereNotNull('s.section')
+                ->whereNotNull('s.grade')
+                ->groupBy('s.grade', 'g.label', 's.section')
+                ->orderBy('s.grade')
+                ->orderBy('s.section')
+                ->get()
+                ->map(function($item) {
+                    return [
+                        'grade' => $item->grade,
+                        'grade_label' => $item->grade_label,
+                        'section' => $item->section,
+                        'payment_count' => (int) $item->payment_count,
+                        'total_amount' => (float) $item->total_amount,
+                        'student_count' => (int) $item->student_count
+                    ];
+                });
+
+            // ✅ Get Branch Wise Breakdown
+            // Use branch_id from fee_structure
+            $byBranch = (clone $baseQuery)
+                ->select(
+                    'fs.branch_id',
+                    'b.name as branch_name',
+                    'b.code as branch_code',
+                    DB::raw('COUNT(DISTINCT fp.id) as payment_count'),
+                    DB::raw('SUM(fp.amount_paid) as total_amount'),
+                    DB::raw('COUNT(DISTINCT fp.student_id) as student_count')
+                )
+                ->whereNotNull('fs.branch_id')
+                ->groupBy('fs.branch_id', 'b.name', 'b.code')
+                ->orderBy('b.name')
+                ->get()
+                ->map(function($item) {
+                    return [
+                        'branch_id' => $item->branch_id,
+                        'branch_name' => $item->branch_name,
+                        'branch_code' => $item->branch_code,
+                        'payment_count' => (int) $item->payment_count,
+                        'total_amount' => (float) $item->total_amount,
+                        'student_count' => (int) $item->student_count
+                    ];
+                });
+
+            // ✅ Get Payment Method Breakdown
+            $byPaymentMethod = (clone $baseQuery)
+                ->select(
+                    'fp.payment_method',
+                    DB::raw('COUNT(DISTINCT fp.id) as payment_count'),
+                    DB::raw('SUM(fp.amount_paid) as total_amount')
+                )
+                ->groupBy('fp.payment_method')
+                ->orderBy('fp.payment_method')
+                ->get()
+                ->map(function($item) {
+                    return [
+                        'payment_method' => $item->payment_method,
+                        'payment_count' => (int) $item->payment_count,
+                        'total_amount' => (float) $item->total_amount
+                    ];
+                });
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Today\'s payments dashboard retrieved successfully',
+                'data' => [
+                    'summary' => [
+                        'total_amount' => $totalAmount,
+                        'total_count' => $totalCount,
+                        'date' => $today
+                    ],
+                    'by_grade' => $byGrade,
+                    'by_section' => $bySection,
+                    'by_branch' => $byBranch,
+                    'by_payment_method' => $byPaymentMethod
+                ]
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error fetching today\'s payments dashboard: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Error fetching today\'s payments dashboard',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+            ], 500);
+        }
+    }
+
     // Fee Payments
     public function indexPayments(Request $request)
     {

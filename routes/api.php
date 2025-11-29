@@ -249,9 +249,13 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     Route::put('fee-structures/{id}', [FeeController::class, 'updateStructure']);
     Route::delete('fee-structures/{id}', [FeeController::class, 'destroyStructure']);
     
-    Route::get('fee-payments', [FeeController::class, 'indexPayments']);
-    Route::post('fee-payments', [FeeController::class, 'recordPayment']);
-    Route::get('fee-payments/{id}', [FeeController::class, 'showPayment']);
+    // Fee Payments Routes - Specific routes MUST come before parameterized routes
+    Route::prefix('fee-payments')->group(function () {
+        Route::get('today', [FeeController::class, 'getTodayPayments']);
+        Route::get('/', [FeeController::class, 'indexPayments']);
+        Route::post('/', [FeeController::class, 'recordPayment']);
+        Route::get('{id}', [FeeController::class, 'showPayment']);
+    });
     Route::get('students/{studentId}/fees', [FeeController::class, 'getStudentFees']);
     
     // Attendance Routes (specific routes MUST come before apiResource)
