@@ -460,15 +460,18 @@ class TeacherController extends Controller
                 $teacherData['aadhar_number'] = $request->aadhaar_number;
             }
             
+            // Map current_address - now nullable in database, use default only if needed
+            $teacherData['current_address'] = $request->current_address ?? $request->address ?? null;
+            
             // Map current_city/current_state/current_pincode to city/state/pincode
-            // Use empty string as default to prevent null constraint violations
-            $teacherData['city'] = $request->current_city ?? $request->city ?? '';
-            $teacherData['state'] = $request->current_state ?? $request->state ?? '';
-            $teacherData['pincode'] = $request->current_pincode ?? $request->pincode ?? '';
+            // Now nullable in database - no default needed
+            $teacherData['city'] = $request->current_city ?? $request->city ?? null;
+            $teacherData['state'] = $request->current_state ?? $request->state ?? null;
+            $teacherData['pincode'] = $request->current_pincode ?? $request->pincode ?? null;
             
             // Handle "Same as Current Address" logic
             if ($request->has('same_as_current_address') && $request->same_as_current_address) {
-                $teacherData['permanent_address'] = $request->current_address;
+                $teacherData['permanent_address'] = $teacherData['current_address'];
             }
             
             // Store ALL other fields in extended_profile JSON
@@ -801,15 +804,22 @@ class TeacherController extends Controller
                 unset($teacherData['aadhaar_number']);
             }
             
+            // Map current_address with default value to prevent null constraint violations
+            if (isset($teacherData['current_address']) && empty($teacherData['current_address'])) {
+                $teacherData['current_address'] = $request->address ?? 'N/A';
+            } elseif (!isset($teacherData['current_address']) && $request->has('current_address')) {
+                $teacherData['current_address'] = $request->current_address ?? $request->address ?? 'N/A';
+            }
+            
             // Map current_city/current_state/current_pincode to city/state/pincode
-            // Use empty string as default to prevent null constraint violations
-            $teacherData['city'] = $request->current_city ?? $request->city ?? '';
-            $teacherData['state'] = $request->current_state ?? $request->state ?? '';
-            $teacherData['pincode'] = $request->current_pincode ?? $request->pincode ?? '';
+            // Now nullable in database - no default needed
+            $teacherData['city'] = $request->current_city ?? $request->city ?? null;
+            $teacherData['state'] = $request->current_state ?? $request->state ?? null;
+            $teacherData['pincode'] = $request->current_pincode ?? $request->pincode ?? null;
             
             // Handle "Same as Current Address" logic for update
             if ($request->has('same_as_current_address') && $request->same_as_current_address) {
-                $teacherData['permanent_address'] = $request->current_address;
+                $teacherData['permanent_address'] = $teacherData['current_address'] ?? $request->current_address ?? null;
             }
             
             // Store ALL other fields in extended_profile JSON

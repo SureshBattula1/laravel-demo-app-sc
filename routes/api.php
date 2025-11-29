@@ -4,7 +4,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BranchController;
-use App\Http\Controllers\EnhancedBranchController;
 use App\Http\Controllers\BranchTransferController;
 use App\Http\Controllers\DepartmentController;
 use App\Http\Controllers\SubjectController;
@@ -20,7 +19,6 @@ use App\Http\Controllers\TimetableController;
 use App\Http\Controllers\TeacherController;
 use App\Http\Controllers\StudentController;
 use App\Http\Controllers\DashboardController;
-use App\Http\Controllers\ClassSectionController;
 use App\Http\Controllers\StudentGroupController;
 use App\Http\Controllers\ClassController;
 use App\Http\Controllers\SectionController;
@@ -395,17 +393,17 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
         Route::get('/all', [PermissionManagementController::class, 'all']);
         Route::get('/by-module', [PermissionManagementController::class, 'byModule']);
         Route::post('/', [PermissionManagementController::class, 'store']);
-        Route::put('/{id}', [PermissionManagementController::class, 'update']);
-        Route::delete('/{id}', [PermissionManagementController::class, 'destroy']);
         
-        // Legacy permission controller endpoints
+        // Legacy permission controller endpoints - MUST be before /{id} routes
         Route::get('/roles', [App\Http\Controllers\PermissionController::class, 'getRoles']);
         Route::get('/modules', [App\Http\Controllers\PermissionController::class, 'getModules']);
         Route::get('/list', [App\Http\Controllers\PermissionController::class, 'getPermissions']);
         Route::get('/user/{id}/permissions', [App\Http\Controllers\PermissionController::class, 'getUserPermissions']);
         
-        // Details endpoint for settings
+        // Details endpoint for settings - MUST be after specific routes
         Route::get('/{id}', [PermissionManagementController::class, 'show']);
+        Route::put('/{id}', [PermissionManagementController::class, 'update']);
+        Route::delete('/{id}', [PermissionManagementController::class, 'destroy']);
         
         // Admin-only permission management
         Route::middleware('role:SuperAdmin,BranchAdmin')->group(function () {

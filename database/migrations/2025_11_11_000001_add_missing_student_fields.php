@@ -14,68 +14,186 @@ return new class extends Migration
     {
         Schema::table('students', function (Blueprint $table) {
             // Identity Documents (Missing ones)
-            $table->string('voter_id', 20)->nullable()->after('aadhaar_number');
-            $table->string('ration_card_number', 30)->nullable()->after('pen_number');
-            $table->string('domicile_certificate_number', 50)->nullable()->after('ration_card_number');
-            $table->string('income_certificate_number', 50)->nullable()->after('domicile_certificate_number');
-            $table->string('caste_certificate_number', 50)->nullable()->after('income_certificate_number');
+            // Add after transfer_certificate_number (which exists in the table)
+            if (!Schema::hasColumn('students', 'voter_id')) {
+                $table->string('voter_id', 20)->nullable()->after('transfer_certificate_number');
+            }
+            if (!Schema::hasColumn('students', 'ration_card_number')) {
+                $table->string('ration_card_number', 30)->nullable()->after('voter_id');
+            }
+            if (!Schema::hasColumn('students', 'domicile_certificate_number')) {
+                $table->string('domicile_certificate_number', 50)->nullable()->after('ration_card_number');
+            }
+            if (!Schema::hasColumn('students', 'income_certificate_number')) {
+                $table->string('income_certificate_number', 50)->nullable()->after('domicile_certificate_number');
+            }
+            if (!Schema::hasColumn('students', 'caste_certificate_number')) {
+                $table->string('caste_certificate_number', 50)->nullable()->after('income_certificate_number');
+            }
             
             // Enhanced Previous Education (Missing fields)
-            $table->string('tc_number', 50)->nullable()->after('transfer_certificate_number');
-            $table->date('tc_date')->nullable()->after('tc_number');
-            $table->string('previous_student_id', 50)->nullable()->after('tc_date');
-            $table->string('medium_of_instruction', 50)->default('English')->after('previous_student_id');
-            $table->json('language_preferences')->nullable()->after('medium_of_instruction');
+            if (!Schema::hasColumn('students', 'tc_number')) {
+                $table->string('tc_number', 50)->nullable()->after('transfer_certificate_number');
+            }
+            if (!Schema::hasColumn('students', 'tc_date')) {
+                $table->date('tc_date')->nullable()->after('tc_number');
+            }
+            if (!Schema::hasColumn('students', 'previous_student_id')) {
+                $table->string('previous_student_id', 50)->nullable()->after('tc_date');
+            }
+            if (!Schema::hasColumn('students', 'medium_of_instruction')) {
+                $table->string('medium_of_instruction', 50)->default('English')->after('previous_student_id');
+            }
+            if (!Schema::hasColumn('students', 'language_preferences')) {
+                $table->json('language_preferences')->nullable()->after('medium_of_instruction');
+            }
             
             // Enhanced Health & Medical (Missing fields)
-            $table->string('vision_status', 50)->nullable()->after('weight_kg');
-            $table->string('hearing_status', 50)->nullable()->after('vision_status');
-            $table->text('chronic_conditions')->nullable()->after('hearing_status');
-            $table->text('current_medications')->nullable()->after('chronic_conditions');
-            $table->boolean('medical_insurance')->default(false)->after('current_medications');
-            $table->string('insurance_provider', 100)->nullable()->after('medical_insurance');
-            $table->string('insurance_policy_number', 50)->nullable()->after('insurance_provider');
-            $table->date('last_health_checkup')->nullable()->after('insurance_policy_number');
-            $table->string('family_doctor_name', 100)->nullable()->after('last_health_checkup');
-            $table->string('family_doctor_phone', 20)->nullable()->after('family_doctor_name');
-            $table->string('vaccination_status', 50)->default('Complete')->after('family_doctor_phone');
-            $table->json('vaccination_records')->nullable()->after('vaccination_status');
-            $table->boolean('special_needs')->default(false)->after('vaccination_records');
-            $table->text('special_needs_details')->nullable()->after('special_needs');
+            if (!Schema::hasColumn('students', 'vision_status')) {
+                $table->string('vision_status', 50)->nullable()->after('weight_kg');
+            }
+            if (!Schema::hasColumn('students', 'hearing_status')) {
+                $table->string('hearing_status', 50)->nullable()->after('vision_status');
+            }
+            if (!Schema::hasColumn('students', 'chronic_conditions')) {
+                $table->text('chronic_conditions')->nullable()->after('hearing_status');
+            }
+            if (!Schema::hasColumn('students', 'current_medications')) {
+                $table->text('current_medications')->nullable()->after('chronic_conditions');
+            }
+            if (!Schema::hasColumn('students', 'medical_insurance')) {
+                $table->boolean('medical_insurance')->default(false)->after('current_medications');
+            }
+            if (!Schema::hasColumn('students', 'insurance_provider')) {
+                $table->string('insurance_provider', 100)->nullable()->after('medical_insurance');
+            }
+            if (!Schema::hasColumn('students', 'insurance_policy_number')) {
+                $table->string('insurance_policy_number', 50)->nullable()->after('insurance_provider');
+            }
+            if (!Schema::hasColumn('students', 'last_health_checkup')) {
+                $table->date('last_health_checkup')->nullable()->after('insurance_policy_number');
+            }
+            if (!Schema::hasColumn('students', 'family_doctor_name')) {
+                $table->string('family_doctor_name', 100)->nullable()->after('last_health_checkup');
+            }
+            if (!Schema::hasColumn('students', 'family_doctor_phone')) {
+                $table->string('family_doctor_phone', 20)->nullable()->after('family_doctor_name');
+            }
+            if (!Schema::hasColumn('students', 'vaccination_status')) {
+                $table->string('vaccination_status', 50)->default('Complete')->after('family_doctor_phone');
+            }
+            if (!Schema::hasColumn('students', 'vaccination_records')) {
+                $table->json('vaccination_records')->nullable()->after('vaccination_status');
+            }
+            if (!Schema::hasColumn('students', 'special_needs')) {
+                $table->boolean('special_needs')->default(false)->after('vaccination_records');
+            }
+            if (!Schema::hasColumn('students', 'special_needs_details')) {
+                $table->text('special_needs_details')->nullable()->after('special_needs');
+            }
             
             // Additional Student Information (Missing fields)
-            $table->json('hobbies_interests')->nullable()->after('remarks');
-            $table->json('extra_curricular_activities')->nullable()->after('hobbies_interests');
-            $table->json('achievements')->nullable()->after('extra_curricular_activities');
-            $table->json('sports_participation')->nullable()->after('achievements');
-            $table->json('cultural_activities')->nullable()->after('sports_participation');
-            $table->text('behavior_records')->nullable()->after('cultural_activities');
-            $table->text('counselor_notes')->nullable()->after('behavior_records');
-            $table->text('special_instructions')->nullable()->after('counselor_notes');
+            if (!Schema::hasColumn('students', 'hobbies_interests')) {
+                $table->json('hobbies_interests')->nullable()->after('remarks');
+            }
+            if (!Schema::hasColumn('students', 'extra_curricular_activities')) {
+                $table->json('extra_curricular_activities')->nullable()->after('hobbies_interests');
+            }
+            if (!Schema::hasColumn('students', 'achievements')) {
+                $table->json('achievements')->nullable()->after('extra_curricular_activities');
+            }
+            if (!Schema::hasColumn('students', 'sports_participation')) {
+                $table->json('sports_participation')->nullable()->after('achievements');
+            }
+            if (!Schema::hasColumn('students', 'cultural_activities')) {
+                $table->json('cultural_activities')->nullable()->after('sports_participation');
+            }
+            if (!Schema::hasColumn('students', 'behavior_records')) {
+                $table->text('behavior_records')->nullable()->after('cultural_activities');
+            }
+            if (!Schema::hasColumn('students', 'counselor_notes')) {
+                $table->text('counselor_notes')->nullable()->after('behavior_records');
+            }
+            if (!Schema::hasColumn('students', 'special_instructions')) {
+                $table->text('special_instructions')->nullable()->after('counselor_notes');
+            }
             
-            // Hostel Information (Missing fields)
-            $table->boolean('hostel_required')->default(false)->after('transport_fee');
-            $table->string('hostel_name', 100)->nullable()->after('hostel_required');
-            $table->string('hostel_room_number', 20)->nullable()->after('hostel_name');
-            $table->decimal('hostel_fee', 8, 2)->nullable()->after('hostel_room_number');
+            // Hostel Information (Missing fields) - Add after remarks instead of transport_fee
+            if (!Schema::hasColumn('students', 'hostel_required')) {
+                $table->boolean('hostel_required')->default(false)->after('special_instructions');
+            }
+            if (!Schema::hasColumn('students', 'hostel_name')) {
+                $table->string('hostel_name', 100)->nullable()->after('hostel_required');
+            }
+            if (!Schema::hasColumn('students', 'hostel_room_number')) {
+                $table->string('hostel_room_number', 20)->nullable()->after('hostel_name');
+            }
+            if (!Schema::hasColumn('students', 'hostel_fee')) {
+                $table->decimal('hostel_fee', 8, 2)->nullable()->after('hostel_room_number');
+            }
             
-            // Library Information (Missing fields)
-            $table->string('library_card_number', 50)->nullable()->after('student_id_card_number');
-            $table->date('library_card_issue_date')->nullable()->after('library_card_number');
-            $table->date('library_card_expiry_date')->nullable()->after('library_card_issue_date');
+            // Library Information (Missing fields) - Add after profile_picture instead of student_id_card_number
+            if (!Schema::hasColumn('students', 'library_card_number')) {
+                $table->string('library_card_number', 50)->nullable()->after('profile_picture');
+            }
+            if (!Schema::hasColumn('students', 'library_card_issue_date')) {
+                $table->date('library_card_issue_date')->nullable()->after('library_card_number');
+            }
+            if (!Schema::hasColumn('students', 'library_card_expiry_date')) {
+                $table->date('library_card_expiry_date')->nullable()->after('library_card_issue_date');
+            }
             
             // Admission related (Missing fields)
-            $table->enum('admission_type', ['Regular', 'Transfer', 'Readmission'])->default('Regular')->after('admission_date');
-            $table->date('leaving_date')->nullable()->after('admission_type');
-            $table->string('leaving_reason', 255)->nullable()->after('leaving_date');
-            $table->string('tc_issued_number', 50)->nullable()->after('leaving_reason');
+            if (!Schema::hasColumn('students', 'admission_type')) {
+                $table->enum('admission_type', ['Regular', 'Transfer', 'Readmission'])->default('Regular')->after('admission_date');
+            }
+            if (!Schema::hasColumn('students', 'leaving_date')) {
+                $table->date('leaving_date')->nullable()->after('admission_type');
+            }
+            if (!Schema::hasColumn('students', 'leaving_reason')) {
+                $table->string('leaving_reason', 255)->nullable()->after('leaving_date');
+            }
+            if (!Schema::hasColumn('students', 'tc_issued_number')) {
+                $table->string('tc_issued_number', 50)->nullable()->after('leaving_reason');
+            }
             
-            // Add indexes for frequently queried fields
-            $table->index('voter_id');
-            $table->index('ration_card_number');
-            $table->index('library_card_number');
-            $table->index(['transport_required', 'transport_route']);
-            $table->index(['hostel_required', 'hostel_name']);
+            // Add indexes for frequently queried fields (only if columns exist)
+            if (Schema::hasColumn('students', 'voter_id')) {
+                try {
+                    $table->index('voter_id');
+                } catch (\Exception $e) {
+                    // Index might already exist
+                }
+            }
+            if (Schema::hasColumn('students', 'ration_card_number')) {
+                try {
+                    $table->index('ration_card_number');
+                } catch (\Exception $e) {
+                    // Index might already exist
+                }
+            }
+            if (Schema::hasColumn('students', 'library_card_number')) {
+                try {
+                    $table->index('library_card_number');
+                } catch (\Exception $e) {
+                    // Index might already exist
+                }
+            }
+            // Only add transport index if columns exist
+            if (Schema::hasColumn('students', 'transport_required') && Schema::hasColumn('students', 'transport_route')) {
+                try {
+                    $table->index(['transport_required', 'transport_route']);
+                } catch (\Exception $e) {
+                    // Index might already exist
+                }
+            }
+            if (Schema::hasColumn('students', 'hostel_required') && Schema::hasColumn('students', 'hostel_name')) {
+                try {
+                    $table->index(['hostel_required', 'hostel_name']);
+                } catch (\Exception $e) {
+                    // Index might already exist
+                }
+            }
         });
     }
 
@@ -85,12 +203,34 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('students', function (Blueprint $table) {
-            // Drop indexes first
-            $table->dropIndex(['transport_required', 'transport_route']);
-            $table->dropIndex(['hostel_required', 'hostel_name']);
-            $table->dropIndex(['voter_id']);
-            $table->dropIndex(['ration_card_number']);
-            $table->dropIndex(['library_card_number']);
+            // Drop indexes first (only if they exist)
+            if (Schema::hasColumn('students', 'transport_required') && Schema::hasColumn('students', 'transport_route')) {
+                try {
+                    $table->dropIndex(['transport_required', 'transport_route']);
+                } catch (\Exception $e) {
+                    // Index might not exist, ignore
+                }
+            }
+            try {
+                $table->dropIndex(['hostel_required', 'hostel_name']);
+            } catch (\Exception $e) {
+                // Index might not exist, ignore
+            }
+            try {
+                $table->dropIndex(['voter_id']);
+            } catch (\Exception $e) {
+                // Index might not exist, ignore
+            }
+            try {
+                $table->dropIndex(['ration_card_number']);
+            } catch (\Exception $e) {
+                // Index might not exist, ignore
+            }
+            try {
+                $table->dropIndex(['library_card_number']);
+            } catch (\Exception $e) {
+                // Index might not exist, ignore
+            }
             
             // Drop columns
             $table->dropColumn([
