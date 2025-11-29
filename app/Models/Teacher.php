@@ -10,47 +10,25 @@ class Teacher extends Model
 {
     use HasFactory, SoftDeletes;
 
+    // ONLY actual database columns (verified via Schema::getColumnListing)
     protected $fillable = [
-        // Core fields (actual DB columns)
-        'user_id', 'branch_id', 'employee_id', 'category_type', 'department_id',
-        'joining_date', 'designation', 'employee_type', 'subjects', 'classes_assigned',
-        'is_class_teacher', 'date_of_birth', 'gender', 'address', 'basic_salary',
-        'bank_account_number', 'teacher_status', 'reporting_manager_id',
-        'pan_number', 'aadhaar_number', 'blood_group', 'nationality',
-        'father_name', 'mother_name', 'phone', 'email', 'alternate_phone',
-        'whatsapp_number', 'emergency_contact_name', 'emergency_contact_phone',
-        'emergency_contact_relation', 'epf_number', 'ctc', 'bank_name',
-        'bank_ifsc_code', 'profile_picture', 'extended_profile',
-        // Address fields
-        'current_address', 'current_city', 'current_state', 'current_pincode', 'current_country',
-        'permanent_address', 'permanent_city', 'permanent_state', 'permanent_pincode', 'permanent_country',
-        // Additional fields that exist in DB
-        'first_name', 'middle_name', 'last_name', 'preferred_name', 'title', 'suffix',
-        'passport_number', 'passport_expiry', 'driving_license_number', 'driving_license_expiry',
-        'voter_id', 'place_of_birth', 'religion', 'caste', 'sub_caste', 'mother_tongue',
-        'languages_known', 'handicap_status', 'handicap_details', 'spouse_name',
-        'spouse_date_of_birth', 'spouse_occupation', 'spouse_phone', 'spouse_email',
-        'number_of_children', 'children_details', 'alternate_email', 'landline_number',
-        'employee_type_detail', 'employment_status', 'probation_end_date',
-        'confirmation_date', 'reporting_manager', 'subordinates', 'qualification',
-        'educational_qualifications', 'professional_certifications', 'training_programs',
-        'awards_recognitions', 'publications', 'research_projects', 'experience_years',
-        'teaching_experience_years', 'industry_experience_years', 'technical_skills',
-        'soft_skills', 'subject_expertise', 'teaching_methodologies', 'medical_history',
-        'allergies', 'current_medications', 'family_doctor_name', 'family_doctor_phone',
-        'family_doctor_address', 'last_medical_checkup', 'medical_insurance_details',
-        'emergency_contact_number', 'emergency_contact_2_name', 'emergency_contact_2_phone',
-        'emergency_contact_2_relation', 'emergency_contact_2_address', 'pf_number',
-        'esi_number', 'uan_number', 'gratuity_number', 'salary_components', 'deductions',
-        'income_tax_pan', 'account_title', 'bank_branch_name', 'previous_employers',
-        'references', 'professional_memberships', 'professional_license',
-        'performance_reviews', 'appraisals', 'goals_objectives', 'training_needs',
-        'hobbies_interests', 'volunteer_work', 'community_involvement',
-        'personal_statement', 'career_objectives', 'notes', 'additional_notes'
+        'id', 'user_id', 'branch_id', 'department_id', 'reporting_manager_id',
+        'employee_id', 'category_type', 'joining_date', 'designation', 'employee_type',
+        'subjects', 'classes_assigned', 'is_class_teacher', 'date_of_birth', 'gender',
+        'current_address', 'permanent_address', 'city', 'state', 'pincode',
+        'emergency_contact_name', 'emergency_contact_phone', 'emergency_contact_relation',
+        'basic_salary', 'bank_account_number', 'teacher_status',
+        'created_at', 'updated_at', 'deleted_at', 'extended_profile',
+        'bank_name', 'bank_ifsc_code', 'pan_number', 'aadhar_number',
+        'salary_grade', 'specialization', 'registration_number',
+        'class_teacher_of_grade', 'class_teacher_of_section', 'leaving_date',
+        'blood_group', 'religion', 'nationality', 'qualification', 'experience_years',
+        'documents', 'remarks'
     ];
     
-    // Virtual attributes stored in extended_profile JSON
-    protected $appends = [];
+    // Virtual attributes to append to JSON output
+    // These will pull from extended_profile via their accessors
+    protected $appends = ['profile_picture', 'aadhaar_number'];
     
     protected $extendedFields = [
         'first_name', 'middle_name', 'last_name', 'preferred_name', 'title', 'suffix',
@@ -144,6 +122,7 @@ class Teacher extends Model
     }
 
     // Accessors for extended_profile fields
+    // These accessors allow accessing extended_profile fields as if they were regular attributes
     public function getNotesAttribute($value)
     {
         return $value ?? $this->extended_profile['notes'] ?? null;
@@ -168,10 +147,48 @@ class Teacher extends Model
     {
         return $value ?? $this->extended_profile['professional_license'] ?? null;
     }
+    
+    // Add accessor for qualification (database column)
+    public function getQualificationAttribute($value)
+    {
+        // First check actual database column, then extended_profile for backward compatibility
+        if (isset($this->attributes['qualification'])) {
+            return $this->attributes['qualification'];
+        }
+        return $value ?? $this->extended_profile['qualification'] ?? null;
+    }
+    
+    // Add accessor for experience_years (database column)
+    public function getExperienceYearsAttribute($value)
+    {
+        // First check actual database column, then extended_profile for backward compatibility
+        if (isset($this->attributes['experience_years'])) {
+            return $this->attributes['experience_years'];
+        }
+        return $value ?? $this->extended_profile['experience_years'] ?? 0;
+    }
+    
+    // ✅ Add accessor for aadhaar_number (frontend expects this name, DB has aadhar_number)
+    public function getAadhaarNumberAttribute()
+    {
+        return $this->attributes['aadhar_number'] ?? null;
+    }
 
     // Profile picture URL accessor
-    public function getProfilePictureAttribute($value)
+    // Since profile_picture is not a DB column, it's stored in extended_profile JSON
+    public function getProfilePictureAttribute()
     {
+        $value = null;
+        
+        // Extract from extended_profile JSON
+        if (isset($this->attributes['extended_profile'])) {
+            $extendedProfile = is_string($this->attributes['extended_profile']) 
+                ? json_decode($this->attributes['extended_profile'], true) 
+                : $this->attributes['extended_profile'];
+            
+            $value = $extendedProfile['profile_picture'] ?? null;
+        }
+        
         if (!$value) {
             return null;
         }
@@ -181,16 +198,37 @@ class Teacher extends Model
             return $value;
         }
         
-        // If value doesn't start with 'storage/', add it
-        if (!str_starts_with($value, 'storage/')) {
-            return url('storage/' . $value);
-        }
+        // Remove 'storage/' prefix if it exists (we'll add it back)
+        $value = preg_replace('/^storage\//', '', $value);
         
-        // Value already has 'storage/', just construct full URL
-        return url($value);
+        // Construct full URL with /storage/ prefix
+        // The file path includes 'uploads/' so keep it: uploads/teachers/31/profile_picture
+        return url('storage/' . $value);
     }
 
     // Accessors
+    /**
+     * Override toArray to merge extended_profile fields into main object
+     */
+    public function toArray()
+    {
+        $array = parent::toArray();
+        
+        // Merge extended_profile fields into main array for easier frontend access
+        if (isset($array['extended_profile']) && is_array($array['extended_profile'])) {
+            $extendedData = $array['extended_profile'];
+            unset($array['extended_profile']);  // Remove the nested object
+            $array = array_merge($array, $extendedData);  // Merge fields to root level
+        }
+        
+        // ✅ Ensure profile_picture uses the accessor (converts relative path to full URL)
+        if (isset($array['profile_picture'])) {
+            $array['profile_picture'] = $this->getProfilePictureAttribute();
+        }
+        
+        return $array;
+    }
+
     public function getFullNameAttribute()
     {
         $name = $this->first_name ?? $this->user->first_name ?? '';

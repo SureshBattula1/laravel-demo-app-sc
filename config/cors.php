@@ -12,12 +12,9 @@ return [
 
     'allowed_methods' => ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
 
-    'allowed_origins' => [
-        'http://localhost:4200',
-        'http://localhost:63993',
-        'http://127.0.0.1:4200',
-        'http://127.0.0.1:63993',
-    ],
+    'allowed_origins' => array_filter(
+        explode(',', env('CORS_ALLOWED_ORIGINS', 'http://localhost:4200,http://127.0.0.1:4200'))
+    ),
 
     'allowed_origins_patterns' => [
         '/^http:\/\/localhost:\d+$/',

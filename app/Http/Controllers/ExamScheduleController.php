@@ -23,11 +23,18 @@ class ExamScheduleController extends Controller
                 'exam_date', 'start_time', 'end_time', 'duration', 
                 'total_marks', 'passing_marks', 'room_number', 'invigilator_id', 'created_at'
             ])->with([
-                'exam:id,name',
+                'exam:id,name,branch_id',
+                'exam.branch:id,name,code',
                 'subject:id,name,code'
             ]);
 
             // Filters
+            if ($request->has('branch_id')) {
+                $query->whereHas('exam', function($q) use ($request) {
+                    $q->where('branch_id', $request->branch_id);
+                });
+            }
+
             if ($request->has('exam_id')) {
                 $query->where('exam_id', $request->exam_id);
             }
@@ -38,6 +45,27 @@ class ExamScheduleController extends Controller
 
             if ($request->has('exam_date')) {
                 $query->whereDate('exam_date', $request->exam_date);
+            }
+
+            // Search filter - search across exam name, subject name, grade, room, and branch name
+            if ($request->has('search') && !empty($request->search)) {
+                $search = strip_tags($request->search);
+                $query->where(function($q) use ($search) {
+                    $q->where('grade', 'like', $search . '%')
+                      ->orWhere('section', 'like', $search . '%')
+                      ->orWhere('room_number', 'like', $search . '%')
+                      ->orWhereHas('exam', function($q) use ($search) {
+                          $q->where('name', 'like', $search . '%')
+                            ->orWhereHas('branch', function($q) use ($search) {
+                                $q->where('name', 'like', $search . '%')
+                                  ->orWhere('code', 'like', $search . '%');
+                            });
+                      })
+                      ->orWhereHas('subject', function($q) use ($search) {
+                          $q->where('name', 'like', $search . '%')
+                            ->orWhere('code', 'like', $search . '%');
+                      });
+                });
             }
 
             $schedules = $this->paginateAndSort($query, $request, [

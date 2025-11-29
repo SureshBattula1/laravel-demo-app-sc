@@ -75,3 +75,4 @@ class AssignSuperAdminPermissions extends Seeder
 }
 
 
+

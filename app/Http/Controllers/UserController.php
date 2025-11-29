@@ -48,15 +48,55 @@ class UserController extends Controller
         // OPTIMIZED: Cache roles array to avoid N+1 queries
         $rolesMap = DB::table('roles')->pluck('id', 'name')->toArray();
 
-        // Add role_id to each user (no extra queries!)
-        foreach ($users->items() as $user) {
-            $user->role_id = $rolesMap[$user->role] ?? null;
-        }
+        // Map enum values to role table names
+        $roleMapping = [
+            'SuperAdmin' => 'Super Admin',
+            'BranchAdmin' => 'Branch Admin',
+            'Teacher' => 'Teacher',
+            'Student' => 'Student',
+            'Parent' => 'Parent',
+            'Staff' => 'Staff'
+        ];
+
+        // Transform user data to ensure proper serialization
+        $usersData = collect($users->items())->map(function($user) use ($rolesMap, $roleMapping) {
+            $roleName = $roleMapping[$user->role] ?? $user->role;
+            
+            return [
+                'id' => $user->id,
+                'first_name' => $user->first_name,
+                'last_name' => $user->last_name,
+                'full_name' => $user->full_name, // Use the accessor from User model
+                'email' => $user->email,
+                'phone' => $user->phone,
+                'role' => $user->role,
+                'role_id' => $rolesMap[$roleName] ?? null,
+                'branch_id' => $user->branch_id,
+                'branch' => $user->branch ? [
+                    'id' => $user->branch->id,
+                    'name' => $user->branch->name,
+                    'code' => $user->branch->code
+                ] : null,
+                'avatar' => $user->avatar,
+                'is_active' => $user->is_active,
+                'last_login' => $user->last_login,
+                'created_at' => $user->created_at,
+                'updated_at' => $user->updated_at
+            ];
+        })->toArray();
 
         return response()->json([
             'success' => true,
             'message' => 'Users retrieved successfully',
-            'data' => $users
+            'data' => [
+                'data' => $usersData,
+                'total' => $users->total(),
+                'per_page' => $users->perPage(),
+                'current_page' => $users->currentPage(),
+                'last_page' => $users->lastPage(),
+                'from' => $users->firstItem(),
+                'to' => $users->lastItem()
+            ]
         ]);
     }
 
@@ -70,15 +110,47 @@ class UserController extends Controller
         // OPTIMIZED: Cache roles array to avoid N+1 queries
         $rolesMap = DB::table('roles')->pluck('id', 'name')->toArray();
 
-        // Add role_id to each user (no extra queries!)
-        foreach ($users as $user) {
-            $user->role_id = $rolesMap[$user->role] ?? null;
-        }
+        // Map enum values to role table names
+        $roleMapping = [
+            'SuperAdmin' => 'Super Admin',
+            'BranchAdmin' => 'Branch Admin',
+            'Teacher' => 'Teacher',
+            'Student' => 'Student',
+            'Parent' => 'Parent',
+            'Staff' => 'Staff'
+        ];
+
+        // Transform user data to ensure proper serialization
+        $usersData = $users->map(function($user) use ($rolesMap, $roleMapping) {
+            $roleName = $roleMapping[$user->role] ?? $user->role;
+            
+            return [
+                'id' => $user->id,
+                'first_name' => $user->first_name,
+                'last_name' => $user->last_name,
+                'full_name' => $user->full_name,
+                'email' => $user->email,
+                'phone' => $user->phone,
+                'role' => $user->role,
+                'role_id' => $rolesMap[$roleName] ?? null,
+                'branch_id' => $user->branch_id,
+                'branch' => $user->branch ? [
+                    'id' => $user->branch->id,
+                    'name' => $user->branch->name,
+                    'code' => $user->branch->code
+                ] : null,
+                'avatar' => $user->avatar,
+                'is_active' => $user->is_active,
+                'last_login' => $user->last_login,
+                'created_at' => $user->created_at,
+                'updated_at' => $user->updated_at
+            ];
+        })->toArray();
 
         return response()->json([
             'success' => true,
             'message' => 'Users retrieved successfully',
-            'data' => $users
+            'data' => $usersData
         ]);
     }
 
@@ -89,8 +161,18 @@ class UserController extends Controller
     {
         $user = User::with(['branch'])->findOrFail($id);
 
-        // OPTIMIZED: Single query for role_id
-        $roleRecord = DB::table('roles')->where('name', $user->role)->select('id')->first();
+        // OPTIMIZED: Single query for role_id with enum to role name mapping
+        $roleMapping = [
+            'SuperAdmin' => 'Super Admin',
+            'BranchAdmin' => 'Branch Admin',
+            'Teacher' => 'Teacher',
+            'Student' => 'Student',
+            'Parent' => 'Parent',
+            'Staff' => 'Staff'
+        ];
+        
+        $roleName = $roleMapping[$user->role] ?? $user->role;
+        $roleRecord = DB::table('roles')->where('name', $roleName)->select('id')->first();
         $user->role_id = $roleRecord ? $roleRecord->id : null;
 
         return response()->json([

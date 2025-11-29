@@ -62,11 +62,19 @@ class FeeController extends Controller
             // Apply pagination and sorting (default: 25 per page)
             $structures = $this->paginateAndSort($query, $request, $sortableColumns, 'grade', 'asc');
 
+            // Map data to ensure fee_type is never empty
+            $data = collect($structures->items())->map(function($fee) {
+                if (empty($fee->fee_type)) {
+                    $fee->fee_type = 'General Fee';
+                }
+                return $fee;
+            });
+
             // Return standardized paginated response
             return response()->json([
                 'success' => true,
                 'message' => 'Fee structures retrieved successfully',
-                'data' => $structures->items(),
+                'data' => $data,
                 'meta' => [
                     'current_page' => $structures->currentPage(),
                     'per_page' => $structures->perPage(),
@@ -267,10 +275,18 @@ class FeeController extends Controller
             // Apply pagination and sorting
             $payments = $this->paginateAndSort($query, $request, $sortableColumns, 'payment_date', 'desc');
 
+            // Map data to ensure fee_type is never empty in feeStructure relationship
+            $data = collect($payments->items())->map(function($payment) {
+                if ($payment->feeStructure && empty($payment->feeStructure->fee_type)) {
+                    $payment->feeStructure->fee_type = 'General Fee';
+                }
+                return $payment;
+            });
+
             return response()->json([
                 'success' => true,
                 'message' => 'Fee payments retrieved successfully',
-                'data' => $payments->items(),
+                'data' => $data,
                 'meta' => [
                     'current_page' => $payments->currentPage(),
                     'per_page' => $payments->perPage(),
@@ -304,7 +320,7 @@ class FeeController extends Controller
                 'transaction_id' => 'nullable|string',
                 'discount_amount' => 'nullable|numeric|min:0',
                 'late_fee' => 'nullable|numeric|min:0',
-                'payment_status' => 'required|string|in:Pending,Completed,Failed,Refunded',
+                'payment_status' => 'required|string|in:Pending,Partial,Completed,Failed,Refunded',
                 'remarks' => 'nullable|string'
             ]);
 
@@ -345,30 +361,106 @@ class FeeController extends Controller
     public function getStudentFees(string $studentId)
     {
         try {
-            // OPTIMIZED: Use SQL aggregation instead of PHP sum
+            // Get student details to filter fee structures by branch and grade
+            // studentId here is actually the user_id
+            $student = \App\Models\Student::where('user_id', $studentId)->first();
+            
+            // If no student record exists, return empty data instead of error
+            if (!$student) {
+                Log::warning('No student record found for user_id', ['user_id' => $studentId]);
+                return response()->json([
+                    'success' => true,
+                    'data' => [
+                        'payments' => [],
+                        'pending_fees' => [],
+                        'total_paid' => 0,
+                        'pending_count' => 0
+                    ],
+                    'message' => 'No student record found for this user'
+                ]);
+            }
+            
+            // Log student details for debugging
+            Log::info('Getting fees for student', [
+                'user_id' => $studentId,
+                'student_id' => $student->id,
+                'branch_id' => $student->branch_id,
+                'grade' => $student->grade
+            ]);
+            
+            // OPTIMIZED: Use SQL aggregation - Count completed AND partial payments
             $totalPaid = FeePayment::where('student_id', $studentId)
+                ->whereIn('payment_status', ['Completed', 'Partial'])
                 ->sum('total_amount');
 
-            // OPTIMIZED: Get paid structure IDs (only IDs, not full objects)
+            // OPTIMIZED: Get FULLY paid structure IDs - Only from completed payments (not partial)
+            // Partial payments keep the fee in pending list
             $paidStructureIds = FeePayment::where('student_id', $studentId)
+                ->where('payment_status', 'Completed')  // Only "Completed" removes from pending
                 ->pluck('fee_structure_id')
                 ->filter()
                 ->unique()
                 ->toArray();
 
-            // OPTIMIZED: Get pending fees using left join instead of whereNotIn
+            // Check all fee structures for this branch (without grade filter first)
+            $allBranchFees = FeeStructure::where('is_active', true)
+                ->where('branch_id', $student->branch_id)
+                ->get();
+            
+            Log::info('Fee structures debugging', [
+                'student_user_id' => $studentId,
+                'student_branch_id' => $student->branch_id,
+                'student_grade' => $student->grade,
+                'student_grade_type' => gettype($student->grade),
+                'total_branch_fees' => $allBranchFees->count(),
+                'grades_in_fee_structures' => $allBranchFees->pluck('grade')->unique()->toArray()
+            ]);
+
+            // OPTIMIZED: Get pending fees - Only for student's branch and grade
+            // Use flexible grade matching (handles "1", "Grade 1", "I", etc.)
             $pending = FeeStructure::where('is_active', true)
+                ->where('branch_id', $student->branch_id)
+                ->where(function($q) use ($student) {
+                    // Exact match
+                    $q->where('grade', $student->grade)
+                      // Try with "Grade " prefix
+                      ->orWhere('grade', 'Grade ' . $student->grade)
+                      // Try without "Grade " prefix if student has it
+                      ->orWhere('grade', str_replace('Grade ', '', $student->grade));
+                })
                 ->when(!empty($paidStructureIds), function($q) use ($paidStructureIds) {
                     return $q->whereNotIn('id', $paidStructureIds);
                 })
-                ->get();
+                ->get()
+                ->map(function($fee) {
+                    // Ensure fee_type is never null
+                    if (empty($fee->fee_type)) {
+                        $fee->fee_type = 'General Fee';
+                    }
+                    return $fee;
+                });
 
-            // OPTIMIZED: Get payments with pagination (limit to recent payments)
+            // OPTIMIZED: Get payments with pagination (limit to recent 50 payments)
             $payments = FeePayment::with(['feeStructure', 'creator'])
                 ->where('student_id', $studentId)
                 ->orderBy('payment_date', 'desc')
-                ->limit(50) // Limit to recent 50 payments
-                ->get();
+                ->limit(50)
+                ->get()
+                ->map(function($payment) {
+                    // Ensure fee_type is never null in fee_structure relationship
+                    if ($payment->feeStructure && empty($payment->feeStructure->fee_type)) {
+                        $payment->feeStructure->fee_type = 'General Fee';
+                    }
+                    return $payment;
+                });
+
+            Log::info('Fee data summary', [
+                'pending_fees_count' => $pending->count(),
+                'payments_count' => $payments->count(),
+                'total_paid' => $totalPaid,
+                'paid_structure_ids' => $paidStructureIds,
+                'pending_fee_types' => $pending->pluck('fee_type')->toArray()
+            ]);
 
             return response()->json([
                 'success' => true,
@@ -396,6 +488,11 @@ class FeeController extends Controller
         try {
             $structure = FeeStructure::with(['branch', 'creator', 'updater'])->findOrFail($id);
             
+            // Ensure fee_type is never empty
+            if (empty($structure->fee_type)) {
+                $structure->fee_type = 'General Fee';
+            }
+            
             return response()->json([
                 'success' => true,
                 'data' => $structure
@@ -415,6 +512,11 @@ class FeeController extends Controller
     {
         try {
             $payment = FeePayment::with(['feeStructure', 'student', 'creator'])->findOrFail($id);
+            
+            // Ensure fee_type is never empty in feeStructure relationship
+            if ($payment->feeStructure && empty($payment->feeStructure->fee_type)) {
+                $payment->feeStructure->fee_type = 'General Fee';
+            }
             
             return response()->json([
                 'success' => true,

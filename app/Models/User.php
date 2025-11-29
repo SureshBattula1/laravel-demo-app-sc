@@ -21,6 +21,7 @@ class User extends Authenticatable
         'phone',
         'mobile',
         'password',
+        'remember_token',
         'role',
         'user_type',
         'user_type_id',
@@ -70,6 +71,14 @@ class User extends Authenticatable
         return $this->belongsToMany(Permission::class, 'user_permissions')
                     ->withPivot(['granted', 'branch_id'])
                     ->withTimestamps();
+    }
+
+    /**
+     * Get user preferences
+     */
+    public function preferences()
+    {
+        return $this->hasOne(UserPreference::class);
     }
 
     // Accessors

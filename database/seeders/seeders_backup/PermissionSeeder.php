@@ -130,19 +130,27 @@ class PermissionSeeder extends Seeder
                 'permissions' => ['view', 'create', 'edit', 'delete', 'export']
             ],
             [
-                'name' => 'Attendance',
-                'slug' => 'attendance',
-                'icon' => 'check_circle',
-                'route' => '/attendance',
+                'name' => 'Student Attendance',
+                'slug' => 'student_attendance',
+                'icon' => 'fact_check',
+                'route' => '/attendance/student',
                 'order' => 4,
-                'permissions' => ['view', 'mark', 'edit', 'report', 'export']
+                'permissions' => ['view', 'create', 'mark', 'edit', 'delete', 'report', 'export']
+            ],
+            [
+                'name' => 'Teacher Attendance',
+                'slug' => 'teacher_attendance',
+                'icon' => 'assignment_turned_in',
+                'route' => '/attendance/teacher',
+                'order' => 5,
+                'permissions' => ['view', 'create', 'mark', 'edit', 'delete', 'report', 'export']
             ],
             [
                 'name' => 'Branches',
                 'slug' => 'branches',
                 'icon' => 'business',
                 'route' => '/branches',
-                'order' => 5,
+                'order' => 6,
                 'permissions' => ['view', 'create', 'edit', 'delete', 'stats']
             ],
             [
@@ -150,7 +158,7 @@ class PermissionSeeder extends Seeder
                 'slug' => 'accounts',
                 'icon' => 'account_balance',
                 'route' => '/accounts',
-                'order' => 6,
+                'order' => 7,
                 'permissions' => ['view', 'create', 'edit', 'delete', 'approve', 'export']
             ],
             [
@@ -158,7 +166,7 @@ class PermissionSeeder extends Seeder
                 'slug' => 'transactions',
                 'icon' => 'receipt',
                 'route' => '/accounts/transactions',
-                'order' => 7,
+                'order' => 8,
                 'permissions' => ['view', 'create', 'edit', 'delete', 'approve', 'reject']
             ],
             [
@@ -166,7 +174,7 @@ class PermissionSeeder extends Seeder
                 'slug' => 'fees',
                 'icon' => 'payment',
                 'route' => '/fees',
-                'order' => 8,
+                'order' => 9,
                 'permissions' => ['view', 'create', 'edit', 'delete', 'collect', 'report']
             ],
             [
@@ -174,7 +182,7 @@ class PermissionSeeder extends Seeder
                 'slug' => 'exams',
                 'icon' => 'assignment',
                 'route' => '/exams',
-                'order' => 9,
+                'order' => 10,
                 'permissions' => ['view', 'create', 'edit', 'delete', 'results']
             ],
             [
@@ -182,7 +190,7 @@ class PermissionSeeder extends Seeder
                 'slug' => 'grades',
                 'icon' => 'grade',
                 'route' => '/grades',
-                'order' => 10,
+                'order' => 11,
                 'permissions' => ['view', 'create', 'edit', 'delete']
             ],
             [
@@ -190,7 +198,7 @@ class PermissionSeeder extends Seeder
                 'slug' => 'sections',
                 'icon' => 'class',
                 'route' => '/sections',
-                'order' => 11,
+                'order' => 12,
                 'permissions' => ['view', 'create', 'edit', 'delete']
             ],
             [
@@ -198,7 +206,7 @@ class PermissionSeeder extends Seeder
                 'slug' => 'subjects',
                 'icon' => 'book',
                 'route' => '/subjects',
-                'order' => 12,
+                'order' => 13,
                 'permissions' => ['view', 'create', 'edit', 'delete']
             ],
             [
@@ -206,7 +214,7 @@ class PermissionSeeder extends Seeder
                 'slug' => 'departments',
                 'icon' => 'domain',
                 'route' => '/departments',
-                'order' => 13,
+                'order' => 14,
                 'permissions' => ['view', 'create', 'edit', 'delete']
             ],
             [
@@ -214,7 +222,7 @@ class PermissionSeeder extends Seeder
                 'slug' => 'holidays',
                 'icon' => 'event',
                 'route' => '/holidays',
-                'order' => 14,
+                'order' => 15,
                 'permissions' => ['view', 'create', 'edit', 'delete']
             ],
             [
@@ -222,7 +230,7 @@ class PermissionSeeder extends Seeder
                 'slug' => 'invoices',
                 'icon' => 'description',
                 'route' => '/invoices',
-                'order' => 15,
+                'order' => 16,
                 'permissions' => ['view', 'create', 'edit', 'delete', 'send', 'payment']
             ],
             [
@@ -230,7 +238,7 @@ class PermissionSeeder extends Seeder
                 'slug' => 'groups',
                 'icon' => 'group',
                 'route' => '/groups',
-                'order' => 16,
+                'order' => 17,
                 'permissions' => ['view', 'create', 'edit', 'delete']
             ],
             [
@@ -238,7 +246,7 @@ class PermissionSeeder extends Seeder
                 'slug' => 'reports',
                 'icon' => 'assessment',
                 'route' => '/reports',
-                'order' => 17,
+                'order' => 18,
                 'permissions' => ['view', 'generate', 'export']
             ],
             [
@@ -246,7 +254,7 @@ class PermissionSeeder extends Seeder
                 'slug' => 'roles',
                 'icon' => 'admin_panel_settings',
                 'route' => '/settings/roles',
-                'order' => 18,
+                'order' => 19,
                 'permissions' => ['view', 'create', 'edit', 'delete', 'update']
             ],
             [
@@ -254,7 +262,7 @@ class PermissionSeeder extends Seeder
                 'slug' => 'permissions',
                 'icon' => 'shield',
                 'route' => '/settings/permissions',
-                'order' => 19,
+                'order' => 20,
                 'permissions' => ['view', 'create', 'edit', 'delete', 'update']
             ],
             [
@@ -262,7 +270,7 @@ class PermissionSeeder extends Seeder
                 'slug' => 'users',
                 'icon' => 'people',
                 'route' => '/settings/users',
-                'order' => 20,
+                'order' => 21,
                 'permissions' => ['view', 'create', 'edit', 'delete', 'update']
             ],
             [
@@ -270,7 +278,7 @@ class PermissionSeeder extends Seeder
                 'slug' => 'settings',
                 'icon' => 'settings',
                 'route' => '/settings',
-                'order' => 21,
+                'order' => 22,
                 'permissions' => ['view', 'edit']
             ]
         ];
@@ -313,8 +321,12 @@ class PermissionSeeder extends Seeder
                 'students.export', 'students.promote', 'students.transfer',
                 // Teachers - full access
                 'teachers.view', 'teachers.create', 'teachers.edit', 'teachers.delete', 'teachers.export',
-                // Attendance - full access
-                'attendance.view', 'attendance.mark', 'attendance.edit', 'attendance.report', 'attendance.export',
+                // Student Attendance - full access
+                'student_attendance.view', 'student_attendance.create', 'student_attendance.mark', 
+                'student_attendance.edit', 'student_attendance.delete', 'student_attendance.report', 'student_attendance.export',
+                // Teacher Attendance - full access
+                'teacher_attendance.view', 'teacher_attendance.create', 'teacher_attendance.mark', 
+                'teacher_attendance.edit', 'teacher_attendance.delete', 'teacher_attendance.report', 'teacher_attendance.export',
                 // Branches - full access (ADDED)
                 'branches.view', 'branches.create', 'branches.edit', 'branches.delete', 'branches.stats',
                 // Fees - collection only (not full financial access)
@@ -350,7 +362,7 @@ class PermissionSeeder extends Seeder
             Permission::whereIn('slug', [
                 'dashboard.view',
                 'students.view',
-                'attendance.view', 'attendance.mark',
+                'student_attendance.view', 'student_attendance.create', 'student_attendance.mark',
                 'exams.view', 'exams.results',
                 'grades.view',
                 'sections.view',
@@ -367,7 +379,8 @@ class PermissionSeeder extends Seeder
                 'dashboard.view',
                 'students.view', 'students.create', 'students.edit',
                 'teachers.view',
-                'attendance.view', 'attendance.mark',
+                'student_attendance.view', 'student_attendance.create', 'student_attendance.mark',
+                'teacher_attendance.view', 'teacher_attendance.create', 'teacher_attendance.mark',
                 'fees.view', 'fees.collect',
                 'holidays.view',
                 'groups.view',
@@ -393,7 +406,7 @@ class PermissionSeeder extends Seeder
         $student->syncPermissions(
             Permission::whereIn('slug', [
                 'dashboard.view',
-                'attendance.view',
+                'student_attendance.view',
                 'exams.view',
                 'fees.view',
                 'holidays.view',
@@ -406,7 +419,7 @@ class PermissionSeeder extends Seeder
             Permission::whereIn('slug', [
                 'dashboard.view',
                 'students.view', // Own children only
-                'attendance.view', // Children's attendance
+                'student_attendance.view', // Children's attendance
                 'exams.view', // Children's results
                 'fees.view', // Children's fees
                 'holidays.view',

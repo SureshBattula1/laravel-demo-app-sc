@@ -241,16 +241,57 @@ class AuthController extends Controller
             $user->update(['remember_token' => $resetToken]);
 
             DB::commit();
+            
+            // Verify token was saved
+            $user->refresh();
+            Log::info('Reset token saved', [
+                'user_id' => $user->id,
+                'token_length' => strlen($resetToken),
+                'token_saved' => $user->remember_token === $resetToken ? 'YES' : 'NO',
+                'token_in_db' => substr($user->remember_token, 0, 10) . '...'
+            ]);
 
-            // TODO: Send email with reset link
-            // Mail::to($user->email)->send(new ResetPasswordMail($resetToken));
+            // Send password reset email
+            try {
+                \Mail::to($user->email)->send(new \App\Mail\ResetPasswordMail($user, $resetToken));
+                Log::info('Password reset email sent successfully', [
+                    'user_id' => $user->id,
+                    'email' => $user->email,
+                    'mail_driver' => config('mail.default')
+                ]);
+            } catch (\Exception $mailError) {
+                Log::error('Failed to send password reset email', [
+                    'user_id' => $user->id,
+                    'email' => $user->email,
+                    'error' => $mailError->getMessage(),
+                    'trace' => $mailError->getTraceAsString(),
+                    'mail_config' => [
+                        'driver' => config('mail.default'),
+                        'host' => config('mail.mailers.smtp.host'),
+                        'port' => config('mail.mailers.smtp.port'),
+                        'username' => config('mail.mailers.smtp.username') ? 'SET' : 'NOT SET',
+                        'from' => config('mail.from.address')
+                    ]
+                ]);
+                
+                // Return error if in local environment so user knows
+                if (app()->environment('local')) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Failed to send email: ' . $mailError->getMessage(),
+                        'reset_token' => $resetToken // Provide token for manual testing
+                    ], 500);
+                }
+                
+                // In production, don't reveal email errors but user still has token
+            }
 
             Log::info('Password reset requested', ['user_id' => $user->id]);
 
             return response()->json([
                 'success' => true,
                 'message' => 'Password reset link sent to your email',
-                'reset_token' => $resetToken // Remove in production
+                'reset_token' => app()->environment('local') ? $resetToken : null // Only show token in development
             ]);
 
         } catch (\Exception $e) {
@@ -292,9 +333,22 @@ class AuthController extends Controller
             $user = User::where('remember_token', $request->token)->first();
 
             if (!$user) {
+                // Debug: Check if token exists at all
+                $tokenExists = User::whereNotNull('remember_token')->count();
+                Log::warning('Reset token not found', [
+                    'token' => $request->token,
+                    'token_length' => strlen($request->token),
+                    'users_with_tokens' => $tokenExists
+                ]);
+                
                 return response()->json([
                     'success' => false,
-                    'message' => 'Invalid or expired reset token'
+                    'message' => 'Invalid or expired reset token',
+                    'debug' => app()->environment('local') ? [
+                        'token_received' => $request->token,
+                        'token_length' => strlen($request->token),
+                        'users_with_reset_tokens' => $tokenExists
+                    ] : null
                 ], 400);
             }
 

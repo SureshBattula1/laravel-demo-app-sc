@@ -38,6 +38,7 @@ use App\Http\Controllers\ExamTermController;
 use App\Http\Controllers\ExamScheduleController;
 use App\Http\Controllers\GlobalUploadController;
 use App\Http\Controllers\ExamMarkController;
+use App\Http\Controllers\UserPreferenceController;
 
 /*
 |--------------------------------------------------------------------------
@@ -60,14 +61,22 @@ Route::get('/health', function () {
     ]);
 });
 
-// Protected Routes with rate limiting
-Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
+// Protected Routes with rate limiting (180 requests per minute = 3 per second)
+Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
     
     // Auth Routes
     Route::get('/me', [AuthController::class, 'me']);
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::put('/profile', [AuthController::class, 'updateProfile']);
     Route::put('/change-password', [AuthController::class, 'changePassword']);
+    
+    // User Preferences Routes
+    Route::prefix('preferences')->group(function () {
+        Route::get('/', [UserPreferenceController::class, 'index']);
+        Route::put('/', [UserPreferenceController::class, 'update']);
+        Route::put('/{key}', [UserPreferenceController::class, 'updateSingle']);
+        Route::post('/reset', [UserPreferenceController::class, 'reset']);
+    });
     
     // Branch Routes - Enhanced Multi-Branch Management
     Route::prefix('branches')->group(function () {
@@ -133,16 +142,19 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     Route::get('teachers/export', [TeacherController::class, 'export']);
     Route::get('teachers/{id}', [TeacherController::class, 'show']);
     Route::put('teachers/{id}', [TeacherController::class, 'update']);
-    Route::delete('teachers/{id}', [TeacherController::class, 'destroy']);
+    Route::delete('teachers/{id}', [TeacherController::class, 'destroy']); // Soft delete (deactivate)
+    Route::post('teachers/{id}/restore', [TeacherController::class, 'restore']); // Restore (reactivate)
     Route::post('teachers/{id}/upload-profile-picture', [TeacherController::class, 'uploadProfilePicture']);
     
     // Student Routes
     Route::get('students', [StudentController::class, 'index']);
     Route::post('students', [StudentController::class, 'store']);
     Route::get('students/export', [StudentController::class, 'export']);
+    Route::get('students/by-user/{userId}', [StudentController::class, 'getByUserId']);
     Route::get('students/{id}', [StudentController::class, 'show']);
     Route::put('students/{id}', [StudentController::class, 'update']);
-    Route::delete('students/{id}', [StudentController::class, 'destroy']);
+    Route::delete('students/{id}', [StudentController::class, 'destroy']); // Soft delete (deactivate)
+    Route::post('students/{id}/restore', [StudentController::class, 'restore']); // Restore (reactivate)
     Route::post('students/promote', [StudentController::class, 'promote']);
     Route::post('students/{id}/upload-profile-picture', [StudentController::class, 'uploadProfilePicture']);
     
@@ -403,8 +415,8 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
         Route::delete('/{id}', [ModuleController::class, 'destroy']);
     });
     
-    // Import Module - Data Import System
-    Route::prefix('imports')->group(function () {
+    // Import Module - Data Import System (Rate limited - 30 per minute)
+    Route::prefix('imports')->middleware('throttle:30,1')->group(function () {
         Route::get('/modules', [App\Http\Controllers\ImportController::class, 'getModules']);
         Route::get('/history', [App\Http\Controllers\ImportController::class, 'history']);
         Route::get('/template/{entity}', [App\Http\Controllers\ImportController::class, 'downloadTemplate']);
@@ -417,8 +429,8 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
         Route::delete('/{entity}/cancel/{batchId}', [App\Http\Controllers\ImportController::class, 'cancel']);
     });
 
-    // Global File Upload Routes
-    Route::prefix('uploads')->group(function () {
+    // Global File Upload Routes (Rate limited - 60 per minute)
+    Route::prefix('uploads')->middleware('throttle:60,1')->group(function () {
         Route::post('/', [GlobalUploadController::class, 'upload']);
         Route::post('/multiple', [GlobalUploadController::class, 'uploadMultiple']);
         Route::delete('/', [GlobalUploadController::class, 'delete']);
