@@ -57,6 +57,41 @@ trait PaginatesAndSorts
     }
     
     /**
+     * Apply sorting to a query builder (works with both Eloquent and DB query builder)
+     *
+     * @param \Illuminate\Database\Query\Builder|\Illuminate\Database\Eloquent\Builder $query
+     * @param Request $request
+     * @param array $sortableColumns - Array of columns that can be sorted
+     * @param string $defaultSortColumn - Default column to sort by
+     * @param string $defaultSortDirection - Default sort direction (asc/desc)
+     * @return \Illuminate\Database\Query\Builder|\Illuminate\Database\Eloquent\Builder
+     */
+    protected function applySorting(
+        $query,
+        Request $request,
+        array $sortableColumns = [],
+        string $defaultSortColumn = 'created_at',
+        string $defaultSortDirection = 'desc'
+    ) {
+        // Get sort parameters from request
+        $sortBy = $request->get('sort_by', $defaultSortColumn);
+        $sortDirection = $request->get('sort_direction', $request->get('sort_order', $defaultSortDirection));
+        
+        // Validate sort direction
+        $sortDirection = in_array(strtolower($sortDirection), ['asc', 'desc']) 
+            ? strtolower($sortDirection) 
+            : $defaultSortDirection;
+        
+        // Validate sort column - only allow whitelisted columns
+        if (!empty($sortableColumns) && !in_array($sortBy, $sortableColumns)) {
+            $sortBy = $defaultSortColumn;
+        }
+        
+        // Apply sorting to query
+        return $query->orderBy($sortBy, $sortDirection);
+    }
+    
+    /**
      * Format paginated response with metadata
      *
      * @param \Illuminate\Contracts\Pagination\LengthAwarePaginator $paginator

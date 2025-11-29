@@ -39,6 +39,8 @@ use App\Http\Controllers\ExamScheduleController;
 use App\Http\Controllers\GlobalUploadController;
 use App\Http\Controllers\ExamMarkController;
 use App\Http\Controllers\UserPreferenceController;
+use App\Http\Controllers\AdmissionController;
+use App\Http\Controllers\CommunicationController;
 
 /*
 |--------------------------------------------------------------------------
@@ -444,6 +446,41 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
         Route::get('/{module}/{moduleId}', [GlobalUploadController::class, 'getAttachments']);
         Route::get('/{module}/{moduleId}/{attachmentId}/download', [GlobalUploadController::class, 'downloadAttachment']);
         Route::delete('/{module}/{moduleId}/{attachmentId}', [GlobalUploadController::class, 'deleteAttachment']);
+    });
+    
+    // Admission Management Routes
+    Route::prefix('admissions')->group(function () {
+        Route::get('/', [AdmissionController::class, 'index']);
+        Route::post('/', [AdmissionController::class, 'store']);
+        Route::get('/export', [AdmissionController::class, 'export']);
+        Route::get('/{id}', [AdmissionController::class, 'show']);
+        Route::put('/{id}', [AdmissionController::class, 'update']);
+        Route::delete('/{id}', [AdmissionController::class, 'destroy']);
+        Route::post('/{id}/update-status', [AdmissionController::class, 'updateStatus']);
+        Route::post('/{id}/convert-to-student', [AdmissionController::class, 'convertToStudent']);
+    });
+    
+    // Communication System Routes
+    Route::prefix('communications')->group(function () {
+        // Notifications
+        Route::get('/notifications', [CommunicationController::class, 'getNotifications']);
+        Route::post('/notifications', [CommunicationController::class, 'createNotification']);
+        Route::post('/notifications/{id}/read', [CommunicationController::class, 'markAsRead']);
+        
+        // Announcements
+        Route::get('/announcements', [CommunicationController::class, 'getAnnouncements']);
+        Route::post('/announcements', [CommunicationController::class, 'createAnnouncement']);
+        Route::get('/announcements/{id}', [CommunicationController::class, 'getAnnouncement']);
+        Route::put('/announcements/{id}', [CommunicationController::class, 'updateAnnouncement']);
+        Route::delete('/announcements/{id}', [CommunicationController::class, 'deleteAnnouncement']);
+        
+        // Circulars
+        Route::get('/circulars', [CommunicationController::class, 'getCirculars']);
+        Route::post('/circulars', [CommunicationController::class, 'createCircular']);
+        Route::get('/circulars/{id}', [CommunicationController::class, 'getCircular']);
+        Route::put('/circulars/{id}', [CommunicationController::class, 'updateCircular']);
+        Route::delete('/circulars/{id}', [CommunicationController::class, 'deleteCircular']);
+        Route::post('/circulars/{id}/acknowledge', [CommunicationController::class, 'acknowledgeCircular']);
     });
 });
 
