@@ -22,13 +22,13 @@ class Teacher extends Model
         'bank_name', 'bank_ifsc_code', 'pan_number', 'aadhar_number',
         'salary_grade', 'specialization', 'registration_number',
         'class_teacher_of_grade', 'class_teacher_of_section', 'leaving_date',
-        'blood_group', 'religion', 'nationality',
+        'blood_group', 'religion', 'nationality', 'qualification', 'experience_years',
         'documents', 'remarks'
     ];
     
     // Virtual attributes to append to JSON output
     // These will pull from extended_profile via their accessors
-    protected $appends = ['profile_picture'];
+    protected $appends = ['profile_picture', 'aadhaar_number'];
     
     protected $extendedFields = [
         'first_name', 'middle_name', 'last_name', 'preferred_name', 'title', 'suffix',
@@ -148,16 +148,30 @@ class Teacher extends Model
         return $value ?? $this->extended_profile['professional_license'] ?? null;
     }
     
-    // Add accessor for qualification (now in extended_profile)
+    // Add accessor for qualification (database column)
     public function getQualificationAttribute($value)
     {
+        // First check actual database column, then extended_profile for backward compatibility
+        if (isset($this->attributes['qualification'])) {
+            return $this->attributes['qualification'];
+        }
         return $value ?? $this->extended_profile['qualification'] ?? null;
     }
     
-    // Add accessor for experience_years (now in extended_profile)
+    // Add accessor for experience_years (database column)
     public function getExperienceYearsAttribute($value)
     {
+        // First check actual database column, then extended_profile for backward compatibility
+        if (isset($this->attributes['experience_years'])) {
+            return $this->attributes['experience_years'];
+        }
         return $value ?? $this->extended_profile['experience_years'] ?? 0;
+    }
+    
+    // ✅ Add accessor for aadhaar_number (frontend expects this name, DB has aadhar_number)
+    public function getAadhaarNumberAttribute()
+    {
+        return $this->attributes['aadhar_number'] ?? null;
     }
 
     // Profile picture URL accessor
@@ -193,6 +207,28 @@ class Teacher extends Model
     }
 
     // Accessors
+    /**
+     * Override toArray to merge extended_profile fields into main object
+     */
+    public function toArray()
+    {
+        $array = parent::toArray();
+        
+        // Merge extended_profile fields into main array for easier frontend access
+        if (isset($array['extended_profile']) && is_array($array['extended_profile'])) {
+            $extendedData = $array['extended_profile'];
+            unset($array['extended_profile']);  // Remove the nested object
+            $array = array_merge($array, $extendedData);  // Merge fields to root level
+        }
+        
+        // ✅ Ensure profile_picture uses the accessor (converts relative path to full URL)
+        if (isset($array['profile_picture'])) {
+            $array['profile_picture'] = $this->getProfilePictureAttribute();
+        }
+        
+        return $array;
+    }
+
     public function getFullNameAttribute()
     {
         $name = $this->first_name ?? $this->user->first_name ?? '';

@@ -28,7 +28,8 @@ class BranchController extends Controller
             $query = Branch::select([
                 'id', 'name', 'code', 'branch_type', 'city', 'state', 'region',
                 'parent_branch_id', 'status', 'is_active', 'total_capacity',
-                'current_enrollment', 'established_date', 'created_at', 'updated_at'
+                'current_enrollment', 'established_date', 'created_at', 'updated_at',
+                'phone', 'email', 'principal_name', 'principal_contact', 'principal_email', 'logo'
             ])
             ->with([
                 'parentBranch:id,name,code',
@@ -268,9 +269,19 @@ class BranchController extends Controller
                 'is_active' => 'boolean',
                 'settings' => 'nullable|array',
                 
-                // Logo (accept string path from global upload)
+                // Logo (accept string path from global upload or null)
                 'logo' => 'nullable|string|max:500'
             ]);
+            
+            // Clean up logo field before validation passes data
+            $validatedData = $validator->validated();
+            
+            // Handle logo field properly
+            if (isset($validatedData['logo'])) {
+                if ($validatedData['logo'] === '' || $validatedData['logo'] === 'null') {
+                    $validatedData['logo'] = null;
+                }
+            }
 
             if ($validator->fails()) {
                 return response()->json([
@@ -281,7 +292,7 @@ class BranchController extends Controller
 
             DB::beginTransaction();
 
-            $branchData = $request->all();
+            $branchData = $validatedData;
             $branchData['code'] = strtoupper($branchData['code'] ?? '');
             $branchData['status'] = $branchData['status'] ?? 'Active';
             $branchData['current_enrollment'] = 0;
@@ -472,6 +483,12 @@ class BranchController extends Controller
             DB::beginTransaction();
 
             $updateData = $request->except(['id', 'created_at', 'updated_at', 'deleted_at']);
+            
+            // Clean up logo field if empty string
+            if (isset($updateData['logo']) && ($updateData['logo'] === '' || $updateData['logo'] === 'null')) {
+                $updateData['logo'] = null;
+                unset($updateData['logo']); // Remove from update to keep existing logo
+            }
             
             // Sanitize code field
             if (isset($updateData['code'])) {
@@ -975,7 +992,7 @@ class BranchController extends Controller
             
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
             
-            // ✅ OPTIMIZED: Select only necessary columns to reduce data transfer
+            // ✅ OPTIMIZED: Select necessary columns for dropdowns
             $selectColumns = ['id', 'name', 'code', 'branch_type', 'city', 'state', 'parent_branch_id', 'is_active', 'status'];
             
             // SuperAdmin or users with cross-branch permission see all branches
@@ -986,8 +1003,10 @@ class BranchController extends Controller
                     ->get();
             } else {
                 $branches = Branch::select($selectColumns)
-                    ->whereIn('id', $accessibleBranchIds)
                     ->where('is_active', true)
+                    ->where(function($query) use ($accessibleBranchIds) {
+                        $query->whereIn('id', $accessibleBranchIds);
+                    })
                     ->orderBy('name')
                     ->get();
             }

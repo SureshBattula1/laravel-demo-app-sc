@@ -21,7 +21,7 @@ class GlobalUploadController extends Controller
     public function upload(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'file' => 'required|file',
+            'file' => 'required|file|mimes:jpeg,png,jpg,gif,pdf,doc,docx,xls,xlsx,txt,csv|max:10240',
             'upload_path' => 'required|string',
         ]);
 
@@ -66,7 +66,7 @@ class GlobalUploadController extends Controller
     {
         $validator = Validator::make($request->all(), [
             'files' => 'required|array',
-            'files.*' => 'required|file',
+            'files.*' => 'required|file|mimes:jpeg,png,jpg,gif,pdf,doc,docx,xls,xlsx,txt,csv|max:10240',
             'upload_path' => 'required|string',
         ]);
 

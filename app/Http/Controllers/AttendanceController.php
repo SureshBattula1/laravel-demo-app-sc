@@ -17,6 +17,7 @@ use Maatwebsite\Excel\Facades\Excel;
 class AttendanceController extends Controller
 {
     use PaginatesAndSorts;
+    use \App\Http\Traits\FiltersActiveRecords;
 
     /**
      * Get attendance records with server-side pagination and sorting
@@ -562,6 +563,7 @@ class AttendanceController extends Controller
                 ->join('users', 'students.user_id', '=', 'users.id')
                 ->where('students.grade', $grade)
                 ->where('students.section', $section)
+                ->whereNull('students.deleted_at') // ✅ ONLY ACTIVE STUDENTS
                 ->whereDate('student_attendance.date', $date)
                 ->select(
                     'student_attendance.*',
@@ -578,6 +580,7 @@ class AttendanceController extends Controller
                 ->join('students', 'student_attendance.student_id', '=', 'students.user_id')
                 ->where('students.grade', $grade)
                 ->where('students.section', $section)
+                ->whereNull('students.deleted_at') // ✅ ONLY ACTIVE STUDENTS
                 ->whereDate('student_attendance.date', $date)
                 ->select(
                     DB::raw('COUNT(*) as total'),
@@ -964,6 +967,7 @@ class AttendanceController extends Controller
                 ->join('students', 'student_attendance.student_id', '=', 'students.user_id')
                 ->join('users', 'students.user_id', '=', 'users.id')
                 ->leftJoin('grades', 'students.grade', '=', 'grades.value')
+                ->whereNull('students.deleted_at') // ✅ ONLY ACTIVE STUDENTS
                 ->select(
                     'student_attendance.*',
                     'users.first_name',
@@ -978,6 +982,7 @@ class AttendanceController extends Controller
             $query = DB::table('teacher_attendance')
                 ->join('users', 'teacher_attendance.teacher_id', '=', 'users.id')
                 ->leftJoin('teachers', 'users.id', '=', 'teachers.user_id')
+                ->whereNull('teachers.deleted_at') // ✅ ONLY ACTIVE TEACHERS
                 ->select(
                     'teacher_attendance.*',
                     'users.first_name',

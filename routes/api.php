@@ -39,6 +39,8 @@ use App\Http\Controllers\ExamScheduleController;
 use App\Http\Controllers\GlobalUploadController;
 use App\Http\Controllers\ExamMarkController;
 use App\Http\Controllers\UserPreferenceController;
+use App\Http\Controllers\AdmissionController;
+use App\Http\Controllers\CommunicationController;
 
 /*
 |--------------------------------------------------------------------------
@@ -61,8 +63,8 @@ Route::get('/health', function () {
     ]);
 });
 
-// Protected Routes with rate limiting
-Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
+// Protected Routes with rate limiting (180 requests per minute = 3 per second)
+Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
     
     // Auth Routes
     Route::get('/me', [AuthController::class, 'me']);
@@ -142,7 +144,8 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     Route::get('teachers/export', [TeacherController::class, 'export']);
     Route::get('teachers/{id}', [TeacherController::class, 'show']);
     Route::put('teachers/{id}', [TeacherController::class, 'update']);
-    Route::delete('teachers/{id}', [TeacherController::class, 'destroy']);
+    Route::delete('teachers/{id}', [TeacherController::class, 'destroy']); // Soft delete (deactivate)
+    Route::post('teachers/{id}/restore', [TeacherController::class, 'restore']); // Restore (reactivate)
     Route::post('teachers/{id}/upload-profile-picture', [TeacherController::class, 'uploadProfilePicture']);
     
     // Student Routes
@@ -152,7 +155,8 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     Route::get('students/by-user/{userId}', [StudentController::class, 'getByUserId']);
     Route::get('students/{id}', [StudentController::class, 'show']);
     Route::put('students/{id}', [StudentController::class, 'update']);
-    Route::delete('students/{id}', [StudentController::class, 'destroy']);
+    Route::delete('students/{id}', [StudentController::class, 'destroy']); // Soft delete (deactivate)
+    Route::post('students/{id}/restore', [StudentController::class, 'restore']); // Restore (reactivate)
     Route::post('students/promote', [StudentController::class, 'promote']);
     Route::post('students/{id}/upload-profile-picture', [StudentController::class, 'uploadProfilePicture']);
     
@@ -422,8 +426,8 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
         Route::delete('/{id}', [ModuleController::class, 'destroy']);
     });
     
-    // Import Module - Data Import System
-    Route::prefix('imports')->group(function () {
+    // Import Module - Data Import System (Rate limited - 30 per minute)
+    Route::prefix('imports')->middleware('throttle:30,1')->group(function () {
         Route::get('/modules', [App\Http\Controllers\ImportController::class, 'getModules']);
         Route::get('/history', [App\Http\Controllers\ImportController::class, 'history']);
         Route::get('/template/{entity}', [App\Http\Controllers\ImportController::class, 'downloadTemplate']);
@@ -436,8 +440,8 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
         Route::delete('/{entity}/cancel/{batchId}', [App\Http\Controllers\ImportController::class, 'cancel']);
     });
 
-    // Global File Upload Routes
-    Route::prefix('uploads')->group(function () {
+    // Global File Upload Routes (Rate limited - 60 per minute)
+    Route::prefix('uploads')->middleware('throttle:60,1')->group(function () {
         Route::post('/', [GlobalUploadController::class, 'upload']);
         Route::post('/multiple', [GlobalUploadController::class, 'uploadMultiple']);
         Route::delete('/', [GlobalUploadController::class, 'delete']);
@@ -451,6 +455,41 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
         Route::get('/{module}/{moduleId}', [GlobalUploadController::class, 'getAttachments']);
         Route::get('/{module}/{moduleId}/{attachmentId}/download', [GlobalUploadController::class, 'downloadAttachment']);
         Route::delete('/{module}/{moduleId}/{attachmentId}', [GlobalUploadController::class, 'deleteAttachment']);
+    });
+    
+    // Admission Management Routes
+    Route::prefix('admissions')->group(function () {
+        Route::get('/', [AdmissionController::class, 'index']);
+        Route::post('/', [AdmissionController::class, 'store']);
+        Route::get('/export', [AdmissionController::class, 'export']);
+        Route::get('/{id}', [AdmissionController::class, 'show']);
+        Route::put('/{id}', [AdmissionController::class, 'update']);
+        Route::delete('/{id}', [AdmissionController::class, 'destroy']);
+        Route::post('/{id}/update-status', [AdmissionController::class, 'updateStatus']);
+        Route::post('/{id}/convert-to-student', [AdmissionController::class, 'convertToStudent']);
+    });
+    
+    // Communication System Routes
+    Route::prefix('communications')->group(function () {
+        // Notifications
+        Route::get('/notifications', [CommunicationController::class, 'getNotifications']);
+        Route::post('/notifications', [CommunicationController::class, 'createNotification']);
+        Route::post('/notifications/{id}/read', [CommunicationController::class, 'markAsRead']);
+        
+        // Announcements
+        Route::get('/announcements', [CommunicationController::class, 'getAnnouncements']);
+        Route::post('/announcements', [CommunicationController::class, 'createAnnouncement']);
+        Route::get('/announcements/{id}', [CommunicationController::class, 'getAnnouncement']);
+        Route::put('/announcements/{id}', [CommunicationController::class, 'updateAnnouncement']);
+        Route::delete('/announcements/{id}', [CommunicationController::class, 'deleteAnnouncement']);
+        
+        // Circulars
+        Route::get('/circulars', [CommunicationController::class, 'getCirculars']);
+        Route::post('/circulars', [CommunicationController::class, 'createCircular']);
+        Route::get('/circulars/{id}', [CommunicationController::class, 'getCircular']);
+        Route::put('/circulars/{id}', [CommunicationController::class, 'updateCircular']);
+        Route::delete('/circulars/{id}', [CommunicationController::class, 'deleteCircular']);
+        Route::post('/circulars/{id}/acknowledge', [CommunicationController::class, 'acknowledgeCircular']);
     });
 });
 

@@ -27,16 +27,26 @@ class TeacherController extends Controller
     public function index(Request $request)
     {
         try {
-            // 🚀 OPTIMIZED: Select only needed columns and limit eager loading
+            // 🚀 OPTIMIZED: Select all necessary columns for list view
             $query = Teacher::select([
-                'id', 'user_id', 'branch_id', 'department_id', 'employee_id',
-                'category_type', 'designation', 'gender', 'date_of_birth',
-                'joining_date', 'employee_type', 'teacher_status', 'created_at', 'updated_at'
+                'id', 'user_id', 'branch_id', 'department_id', 'reporting_manager_id',
+                'employee_id', 'category_type', 'designation', 'employee_type',
+                'gender', 'date_of_birth', 'joining_date', 'leaving_date',
+                'teacher_status', 'created_at', 'updated_at',
+                // ✅ Added essential display fields
+                'blood_group', 'religion', 'nationality', 'qualification', 'experience_years',
+                'current_address', 'permanent_address', 'city', 'state', 'pincode',
+                'emergency_contact_name', 'emergency_contact_phone', 'emergency_contact_relation',
+                'basic_salary', 'salary_grade', 'specialization', 'registration_number',
+                'bank_name', 'bank_account_number', 'bank_ifsc_code', 'pan_number', 'aadhar_number',
+                'subjects', 'classes_assigned', 'is_class_teacher',
+                'class_teacher_of_grade', 'class_teacher_of_section',
+                'extended_profile', 'documents', 'remarks'
             ])
             ->with([
                 'user:id,first_name,last_name,email,phone,is_active',
                 'branch:id,name,code',
-                'department:id,name'
+                'department:id,name'  // ✅ Removed 'code' - doesn't exist in departments table
             ]);
 
             // 🔥 APPLY BRANCH FILTERING - Restrict to accessible branches
@@ -408,6 +418,11 @@ class TeacherController extends Controller
                 // Personal Details
                 'date_of_birth',
                 'gender',
+                'blood_group',
+                'religion',
+                'nationality',
+                'qualification',
+                'experience_years',
                 
                 // Address Fields
                 'current_address',
@@ -446,15 +461,10 @@ class TeacherController extends Controller
             }
             
             // Map current_city/current_state/current_pincode to city/state/pincode
-            if ($request->has('current_city')) {
-                $teacherData['city'] = $request->current_city;
-            }
-            if ($request->has('current_state')) {
-                $teacherData['state'] = $request->current_state;
-            }
-            if ($request->has('current_pincode')) {
-                $teacherData['pincode'] = $request->current_pincode;
-            }
+            // Use empty string as default to prevent null constraint violations
+            $teacherData['city'] = $request->current_city ?? $request->city ?? '';
+            $teacherData['state'] = $request->current_state ?? $request->state ?? '';
+            $teacherData['pincode'] = $request->current_pincode ?? $request->pincode ?? '';
             
             // Handle "Same as Current Address" logic
             if ($request->has('same_as_current_address') && $request->same_as_current_address) {
@@ -472,7 +482,8 @@ class TeacherController extends Controller
                 'current_address', 'permanent_address', 'city', 'state', 'pincode',
                 // Also exclude frontend field names that map to DB columns
                 'current_city', 'current_state', 'current_pincode',
-                'permanent_city', 'permanent_state', 'permanent_pincode', 'current_country', 'permanent_country',
+                // ✅ REMOVED: permanent_city, permanent_state, permanent_pincode, current_country, permanent_country
+                // These will now be saved to extended_profile
                 'emergency_contact_name', 'emergency_contact_phone', 'emergency_contact_relation',
                 'basic_salary', 'bank_account_number', 'teacher_status',
                 'created_at', 'updated_at', 'deleted_at', 'extended_profile',
@@ -480,6 +491,7 @@ class TeacherController extends Controller
                 'salary_grade', 'specialization', 'registration_number',
                 'class_teacher_of_grade', 'class_teacher_of_section', 'leaving_date',
                 'documents', 'remarks', 'same_as_current_address',
+                'blood_group', 'religion', 'nationality', 'qualification', 'experience_years',
                 // Also exclude profile_picture since it's handled separately
                 'profile_picture'
             ]);
@@ -746,6 +758,11 @@ class TeacherController extends Controller
                 // Personal Details
                 'date_of_birth',
                 'gender',
+                'blood_group',
+                'religion',
+                'nationality',
+                'qualification',
+                'experience_years',
                 
                 // Address Fields
                 'current_address',
@@ -785,15 +802,10 @@ class TeacherController extends Controller
             }
             
             // Map current_city/current_state/current_pincode to city/state/pincode
-            if ($request->has('current_city')) {
-                $teacherData['city'] = $request->current_city;
-            }
-            if ($request->has('current_state')) {
-                $teacherData['state'] = $request->current_state;
-            }
-            if ($request->has('current_pincode')) {
-                $teacherData['pincode'] = $request->current_pincode;
-            }
+            // Use empty string as default to prevent null constraint violations
+            $teacherData['city'] = $request->current_city ?? $request->city ?? '';
+            $teacherData['state'] = $request->current_state ?? $request->state ?? '';
+            $teacherData['pincode'] = $request->current_pincode ?? $request->pincode ?? '';
             
             // Handle "Same as Current Address" logic for update
             if ($request->has('same_as_current_address') && $request->same_as_current_address) {
@@ -811,7 +823,8 @@ class TeacherController extends Controller
                 'current_address', 'permanent_address', 'city', 'state', 'pincode',
                 // Also exclude frontend field names that map to DB columns
                 'current_city', 'current_state', 'current_pincode',
-                'permanent_city', 'permanent_state', 'permanent_pincode', 'current_country', 'permanent_country',
+                // ✅ REMOVED: permanent_city, permanent_state, permanent_pincode, current_country, permanent_country
+                // These will now be saved to extended_profile
                 'emergency_contact_name', 'emergency_contact_phone', 'emergency_contact_relation',
                 'basic_salary', 'bank_account_number', 'teacher_status',
                 'created_at', 'updated_at', 'deleted_at', 'extended_profile',
@@ -819,6 +832,7 @@ class TeacherController extends Controller
                 'salary_grade', 'specialization', 'registration_number',
                 'class_teacher_of_grade', 'class_teacher_of_section', 'leaving_date',
                 'documents', 'remarks', 'same_as_current_address',
+                'blood_group', 'religion', 'nationality', 'qualification', 'experience_years',
                 // Also exclude profile_picture since it's handled separately
                 'profile_picture'
             ]);
@@ -862,12 +876,13 @@ class TeacherController extends Controller
     public function destroy($id)
     {
         try {
-            DB::beginTransaction();
+            $teacher = Teacher::findOrFail($id);
 
-            $teacher = User::where('role', 'Teacher')->findOrFail($id);
-            $teacher->update(['is_active' => false]);
-
-            DB::commit();
+            // Soft delete the teacher (sets deleted_at timestamp)
+            $teacher->delete();
+            
+            // Also deactivate the user account
+            $teacher->user()->update(['is_active' => false]);
 
             return response()->json([
                 'success' => true,
@@ -875,12 +890,58 @@ class TeacherController extends Controller
             ]);
 
         } catch (\Exception $e) {
-            DB::rollBack();
             Log::error('Delete teacher error', ['error' => $e->getMessage()]);
             
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to delete teacher'
+                'message' => 'Failed to deactivate teacher',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Restore soft-deleted teacher (reactivate)
+     */
+    public function restore($id)
+    {
+        try {
+            // Find teacher with trashed records
+            $teacher = Teacher::withTrashed()->find($id);
+
+            if (!$teacher) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Teacher not found'
+                ], 404);
+            }
+
+            if (!$teacher->trashed()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Teacher is already active'
+                ], 400);
+            }
+
+            // Restore the teacher
+            $teacher->restore();
+            
+            // Reactivate the user account
+            $teacher->user()->update(['is_active' => true]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Teacher restored successfully',
+                'data' => $teacher->load('user', 'branch', 'department')
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Restore teacher error', ['error' => $e->getMessage()]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to restore teacher',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
             ], 500);
         }
     }
