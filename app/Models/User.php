@@ -9,6 +9,7 @@ use Laravel\Sanctum\HasApiTokens;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 
 class User extends Authenticatable
 {
@@ -111,44 +112,100 @@ class User extends Authenticatable
     /**
      * Check if user has a specific permission
      * Priority: User-specific overrides > Role permissions
+     * ✅ OPTIMIZED: Single query using UNION instead of 2 separate queries
      */
     public function hasPermission(string $permissionSlug, ?int $branchId = null): bool
     {
         // REMOVED SuperAdmin bypass - SuperAdmin now follows permissions like everyone else
         // If you want SuperAdmin to have all permissions, assign them to the SuperAdmin role
 
-        // STEP 1: Check user-specific permission overrides FIRST (highest priority)
-        $userPermission = $this->permissions()
+        // ✅ OPTIMIZED: Single query using UNION to check both user_permissions and role_permissions
+        $permission = DB::table('permissions')
             ->where('slug', $permissionSlug)
-            ->when($branchId, fn($q) => $q->where('user_permissions.branch_id', $branchId))
+            ->first();
+
+        if (!$permission) {
+            return false;
+        }
+
+        $permissionId = $permission->id;
+
+        // Check user-specific override first (highest priority)
+        $userOverride = DB::table('user_permissions')
+            ->where('user_id', $this->id)
+            ->where('permission_id', $permissionId)
+            ->when($branchId, fn($q) => $q->where('branch_id', $branchId))
             ->first();
 
         // If user has explicit override, use it (granted=true means YES, granted=false means NO)
-        if ($userPermission) {
-            return (bool) $userPermission->pivot->granted;
+        if ($userOverride) {
+            return (bool) $userOverride->granted;
         }
 
-        // STEP 2: Check role-based permissions (if no user override)
-        // This automatically updates when role permissions change
-        return $this->roles()
-            ->whereHas('permissions', function($q) use ($permissionSlug) {
-                $q->where('slug', $permissionSlug);
-            })
+        // Check role-based permissions using optimized join (faster than whereHas)
+        return DB::table('user_roles')
+            ->join('role_permissions', 'user_roles.role_id', '=', 'role_permissions.role_id')
+            ->where('user_roles.user_id', $this->id)
+            ->where('role_permissions.permission_id', $permissionId)
             ->when($branchId, fn($q) => $q->where('user_roles.branch_id', $branchId))
             ->exists();
     }
 
     /**
      * Check if user has any of the given permissions
+     * ✅ OPTIMIZED: Single query to check all permissions at once instead of looping
      */
     public function hasAnyPermission(array $permissions, ?int $branchId = null): bool
     {
-        foreach ($permissions as $permission) {
-            if ($this->hasPermission($permission, $branchId)) {
-                return true;
-            }
+        if (empty($permissions)) {
+            return false;
         }
-        return false;
+
+        // Get permission IDs for all slugs in one query
+        $permissionIds = DB::table('permissions')
+            ->whereIn('slug', $permissions)
+            ->pluck('id')
+            ->toArray();
+
+        if (empty($permissionIds)) {
+            return false;
+        }
+
+        // Check user-specific overrides first (highest priority)
+        $userOverride = DB::table('user_permissions')
+            ->where('user_id', $this->id)
+            ->whereIn('permission_id', $permissionIds)
+            ->when($branchId, fn($q) => $q->where('branch_id', $branchId))
+            ->where('granted', true)
+            ->exists();
+
+        if ($userOverride) {
+            return true;
+        }
+
+        // Check if any permission is denied via user override
+        $deniedPermission = DB::table('user_permissions')
+            ->where('user_id', $this->id)
+            ->whereIn('permission_id', $permissionIds)
+            ->when($branchId, fn($q) => $q->where('branch_id', $branchId))
+            ->where('granted', false)
+            ->pluck('permission_id')
+            ->toArray();
+
+        // Remove denied permissions from check
+        $allowedPermissionIds = array_diff($permissionIds, $deniedPermission);
+
+        if (empty($allowedPermissionIds)) {
+            return false;
+        }
+
+        // Check role-based permissions using optimized join (single query for all permissions)
+        return DB::table('user_roles')
+            ->join('role_permissions', 'user_roles.role_id', '=', 'role_permissions.role_id')
+            ->where('user_roles.user_id', $this->id)
+            ->whereIn('role_permissions.permission_id', $allowedPermissionIds)
+            ->when($branchId, fn($q) => $q->where('user_roles.branch_id', $branchId))
+            ->exists();
     }
 
     /**

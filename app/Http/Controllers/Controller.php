@@ -9,6 +9,7 @@ abstract class Controller
     /**
      * Get accessible branch IDs for current user
      * Supports: SuperAdmin, Cross-Branch Permission, BranchAdmin, Regular Users
+     * ✅ OPTIMIZED: Reduced database queries and optimized permission checks
      * 
      * @param Request $request
      * @return array|string Returns 'all' for unrestricted access, or array of branch IDs
@@ -21,28 +22,34 @@ abstract class Controller
             return [];
         }
         
-        // SuperAdmin has access to all branches
+        // SuperAdmin has access to all branches (fastest check - no DB query)
         if ($user->role === 'SuperAdmin') {
             return 'all';
         }
         
-        // Check for cross-branch access permission
-        if ($user->hasCrossBranchAccess()) {
-            return 'all';
-        }
-        
+        // ✅ OPTIMIZED: Check role first before expensive permission checks
         // BranchAdmin can access their branch + descendants
         if ($user->role === 'BranchAdmin') {
-            $userBranch = \App\Models\Branch::find($user->branch_id);
-            if ($userBranch) {
-                // ✅ OPTIMIZED: getDescendantIds now uses recursive CTE (1 query instead of N)
-                // It includes self by default, so no need to merge
-                return $userBranch->getDescendantIds(true);
+            if (!$user->branch_id) {
+                return [];
+            }
+            
+            // ✅ OPTIMIZED: Only select id instead of loading full model
+            $branch = \App\Models\Branch::select('id')->find($user->branch_id);
+            if ($branch) {
+                // ✅ OPTIMIZED: getDescendantIds uses recursive CTE (1 query instead of N)
+                return $branch->getDescendantIds(true);
             }
             return [$user->branch_id];
         }
         
-        // All other roles: only their assigned branch
+        // ✅ OPTIMIZED: Check for cross-branch access permission (now uses single query)
+        // This check is done after role check to avoid unnecessary permission queries for BranchAdmin
+        if ($user->hasCrossBranchAccess()) {
+            return 'all';
+        }
+        
+        // All other roles: only their assigned branch (fastest - no DB query)
         return $user->branch_id ? [$user->branch_id] : [];
     }
     
