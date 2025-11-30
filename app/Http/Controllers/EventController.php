@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Traits\PaginatesAndSorts;
 use App\Models\Event;
 use App\Models\Holiday;
 use Illuminate\Http\Request;
@@ -12,6 +13,7 @@ use Carbon\Carbon;
 
 class EventController extends Controller
 {
+    use PaginatesAndSorts;
     // ==================== EVENTS MANAGEMENT ====================
     
     /**
@@ -42,12 +44,44 @@ class EventController extends Controller
                 $query->where('is_active', $request->boolean('is_active'));
             }
 
-            $events = $query->orderBy('event_date', 'asc')->get();
+            // OPTIMIZED Search filter - prefix search for better index usage
+            if ($request->has('search') && !empty($request->search)) {
+                $search = strip_tags($request->search);
+                $query->where(function($q) use ($search) {
+                    $q->where('title', 'like', "{$search}%")
+                      ->orWhere('event_type', 'like', "{$search}%")
+                      ->orWhere('venue', 'like', "{$search}%");
+                });
+            }
+
+            // Define sortable columns
+            $sortableColumns = [
+                'id',
+                'title',
+                'event_type',
+                'event_date',
+                'start_time',
+                'venue',
+                'is_active',
+                'created_at'
+            ];
+
+            // Apply pagination and sorting (default: 25 per page, sorted by event_date asc)
+            $events = $this->paginateAndSort($query, $request, $sortableColumns, 'event_date', 'asc');
 
             return response()->json([
                 'success' => true,
-                'data' => $events,
-                'message' => 'Events retrieved successfully'
+                'message' => 'Events retrieved successfully',
+                'data' => $events->items(),
+                'meta' => [
+                    'current_page' => $events->currentPage(),
+                    'per_page' => $events->perPage(),
+                    'total' => $events->total(),
+                    'last_page' => $events->lastPage(),
+                    'from' => $events->firstItem(),
+                    'to' => $events->lastItem(),
+                    'has_more_pages' => $events->hasMorePages()
+                ]
             ]);
 
         } catch (\Exception $e) {
@@ -270,20 +304,54 @@ class EventController extends Controller
     }
 
     /**
-     * Get events by type
+     * Get events by type - OPTIMIZED with pagination
      */
-    public function getByType(string $type)
+    public function getByType(Request $request, string $type)
     {
         try {
-            $events = Event::with(['branch', 'creator'])
+            $query = Event::select([
+                'id', 'branch_id', 'title', 'description', 'event_type', 
+                'event_date', 'start_time', 'end_time', 'venue', 'organizer',
+                'is_active', 'created_by', 'created_at', 'updated_at'
+            ])
+            ->with(['branch:id,name,code', 'creator:id,first_name,last_name'])
                 ->where('event_type', $type)
-                ->where('is_active', true)
-                ->orderBy('event_date', 'desc')
-                ->get();
+                ->where('is_active', true);
+
+            // OPTIMIZED Search filter - prefix search for better index usage
+            if ($request->has('search') && !empty($request->search)) {
+                $search = strip_tags($request->search);
+                $query->where(function($q) use ($search) {
+                    $q->where('title', 'like', "{$search}%")
+                      ->orWhere('venue', 'like', "{$search}%");
+                });
+            }
+
+            // Define sortable columns
+            $sortableColumns = [
+                'id',
+                'title',
+                'event_date',
+                'start_time',
+                'venue',
+                'created_at'
+            ];
+
+            // Apply pagination and sorting (default: 25 per page, sorted by event_date desc)
+            $events = $this->paginateAndSort($query, $request, $sortableColumns, 'event_date', 'desc');
 
             return response()->json([
                 'success' => true,
-                'data' => $events
+                'data' => $events->items(),
+                'meta' => [
+                    'current_page' => $events->currentPage(),
+                    'per_page' => $events->perPage(),
+                    'total' => $events->total(),
+                    'last_page' => $events->lastPage(),
+                    'from' => $events->firstItem(),
+                    'to' => $events->lastItem(),
+                    'has_more_pages' => $events->hasMorePages()
+                ]
             ]);
 
         } catch (\Exception $e) {

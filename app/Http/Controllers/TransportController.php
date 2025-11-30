@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Traits\PaginatesAndSorts;
 use App\Models\TransportRoute;
 use App\Models\Vehicle;
 use Illuminate\Http\Request;
@@ -11,6 +12,7 @@ use Illuminate\Support\Facades\Validator;
 
 class TransportController extends Controller
 {
+    use PaginatesAndSorts;
     // ==================== ROUTES MANAGEMENT ====================
     
     /**
@@ -29,22 +31,45 @@ class TransportController extends Controller
                 $query->where('is_active', $request->boolean('is_active'));
             }
 
-            if ($request->has('search')) {
+            // OPTIMIZED Search filter - prefix search for better index usage
+            if ($request->has('search') && !empty($request->search)) {
                 $search = strip_tags($request->search);
                 $query->where(function($q) use ($search) {
-                    $q->where('route_name', 'like', "%{$search}%")
-                      ->orWhere('route_number', 'like', "%{$search}%")
-                      ->orWhere('start_point', 'like', "%{$search}%")
-                      ->orWhere('end_point', 'like', "%{$search}%");
+                    $q->where('route_name', 'like', "{$search}%")
+                      ->orWhere('route_number', 'like', "{$search}%")
+                      ->orWhere('start_point', 'like', "{$search}%")
+                      ->orWhere('end_point', 'like', "{$search}%");
                 });
             }
 
-            $routes = $query->orderBy('route_number', 'asc')->get();
+            // Define sortable columns
+            $sortableColumns = [
+                'id',
+                'route_number',
+                'route_name',
+                'start_point',
+                'end_point',
+                'fare',
+                'is_active',
+                'created_at'
+            ];
+
+            // Apply pagination and sorting (default: 25 per page, sorted by route_number asc)
+            $routes = $this->paginateAndSort($query, $request, $sortableColumns, 'route_number', 'asc');
 
             return response()->json([
                 'success' => true,
-                'data' => $routes,
-                'message' => 'Routes retrieved successfully'
+                'message' => 'Routes retrieved successfully',
+                'data' => $routes->items(),
+                'meta' => [
+                    'current_page' => $routes->currentPage(),
+                    'per_page' => $routes->perPage(),
+                    'total' => $routes->total(),
+                    'last_page' => $routes->lastPage(),
+                    'from' => $routes->firstItem(),
+                    'to' => $routes->lastItem(),
+                    'has_more_pages' => $routes->hasMorePages()
+                ]
             ]);
 
         } catch (\Exception $e) {
@@ -310,11 +335,42 @@ class TransportController extends Controller
                 $query->where('is_active', $request->boolean('is_active'));
             }
 
-            $vehicles = $query->orderBy('vehicle_number', 'asc')->get();
+            // OPTIMIZED Search filter - prefix search for better index usage
+            if ($request->has('search') && !empty($request->search)) {
+                $search = strip_tags($request->search);
+                $query->where(function($q) use ($search) {
+                    $q->where('vehicle_number', 'like', "{$search}%")
+                      ->orWhere('vehicle_type', 'like', "{$search}%")
+                      ->orWhere('vehicle_model', 'like', "{$search}%");
+                });
+            }
+
+            // Define sortable columns
+            $sortableColumns = [
+                'id',
+                'vehicle_number',
+                'vehicle_type',
+                'vehicle_model',
+                'capacity',
+                'is_active',
+                'created_at'
+            ];
+
+            // Apply pagination and sorting (default: 25 per page, sorted by vehicle_number asc)
+            $vehicles = $this->paginateAndSort($query, $request, $sortableColumns, 'vehicle_number', 'asc');
 
             return response()->json([
                 'success' => true,
-                'data' => $vehicles
+                'data' => $vehicles->items(),
+                'meta' => [
+                    'current_page' => $vehicles->currentPage(),
+                    'per_page' => $vehicles->perPage(),
+                    'total' => $vehicles->total(),
+                    'last_page' => $vehicles->lastPage(),
+                    'from' => $vehicles->firstItem(),
+                    'to' => $vehicles->lastItem(),
+                    'has_more_pages' => $vehicles->hasMorePages()
+                ]
             ]);
 
         } catch (\Exception $e) {

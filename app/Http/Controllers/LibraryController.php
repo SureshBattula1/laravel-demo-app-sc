@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Traits\PaginatesAndSorts;
 use App\Models\Book;
 use App\Models\BookIssue;
 use Illuminate\Http\Request;
@@ -12,6 +13,7 @@ use Carbon\Carbon;
 
 class LibraryController extends Controller
 {
+    use PaginatesAndSorts;
     /**
      * Display a listing of books
      */
@@ -28,12 +30,13 @@ class LibraryController extends Controller
                 $query->where('category_id', $request->category_id);
             }
 
-            if ($request->has('search')) {
+            // OPTIMIZED Search filter - prefix search for better index usage
+            if ($request->has('search') && !empty($request->search)) {
                 $search = strip_tags($request->search);
                 $query->where(function($q) use ($search) {
-                    $q->where('title', 'like', "%{$search}%")
-                      ->orWhere('author', 'like', "%{$search}%")
-                      ->orWhere('isbn', 'like', "%{$search}%");
+                    $q->where('title', 'like', "{$search}%")
+                      ->orWhere('author', 'like', "{$search}%")
+                      ->orWhere('isbn', 'like', "{$search}%");
                 });
             }
 
@@ -41,12 +44,34 @@ class LibraryController extends Controller
                 $query->where('available_copies', '>', 0);
             }
 
-            $books = $query->orderBy('title', 'asc')->get();
+            // Define sortable columns
+            $sortableColumns = [
+                'id',
+                'title',
+                'author',
+                'isbn',
+                'category_id',
+                'total_copies',
+                'available_copies',
+                'created_at'
+            ];
+
+            // Apply pagination and sorting (default: 25 per page, sorted by title asc)
+            $books = $this->paginateAndSort($query, $request, $sortableColumns, 'title', 'asc');
 
             return response()->json([
                 'success' => true,
-                'data' => $books,
-                'message' => 'Books retrieved successfully'
+                'message' => 'Books retrieved successfully',
+                'data' => $books->items(),
+                'meta' => [
+                    'current_page' => $books->currentPage(),
+                    'per_page' => $books->perPage(),
+                    'total' => $books->total(),
+                    'last_page' => $books->lastPage(),
+                    'from' => $books->firstItem(),
+                    'to' => $books->lastItem(),
+                    'has_more_pages' => $books->hasMorePages()
+                ]
             ]);
         } catch (\Exception $e) {
             Log::error('Error fetching books: ' . $e->getMessage());

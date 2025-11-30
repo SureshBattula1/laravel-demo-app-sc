@@ -201,11 +201,12 @@ class CommunicationController extends Controller
                 }
             }
 
-            if ($request->has('search')) {
+            // OPTIMIZED Search filter - prefix search for better index usage
+            if ($request->has('search') && !empty($request->search)) {
                 $search = strip_tags($request->search);
                 $query->where(function($q) use ($search) {
-                    $q->where('title', 'like', "%{$search}%")
-                      ->orWhere('content', 'like', "%{$search}%");
+                    $q->where('title', 'like', "{$search}%")
+                      ->orWhere('content', 'like', "{$search}%");
                 });
             }
 
@@ -425,12 +426,13 @@ class CommunicationController extends Controller
                 }
             }
 
-            if ($request->has('search')) {
+            // OPTIMIZED Search filter - prefix search for better index usage
+            if ($request->has('search') && !empty($request->search)) {
                 $search = strip_tags($request->search);
                 $query->where(function($q) use ($search) {
-                    $q->where('title', 'like', "%{$search}%")
-                      ->orWhere('content', 'like', "%{$search}%")
-                      ->orWhere('circular_number', 'like', "%{$search}%");
+                    $q->where('title', 'like', "{$search}%")
+                      ->orWhere('content', 'like', "{$search}%")
+                      ->orWhere('circular_number', 'like', "{$search}%");
                 });
             }
 
