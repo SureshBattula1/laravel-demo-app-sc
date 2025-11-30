@@ -225,21 +225,28 @@ class FeeController extends Controller
     }
 
     /**
-     * Get today's payments dashboard overview
+     * Get payments dashboard overview with date range filtering
      * ✅ OPTIMIZED: Returns aggregated data for dashboard view
+     * Supports: today, week, month, custom date range
      */
     public function getTodayPayments(Request $request)
     {
         try {
-            $today = \Carbon\Carbon::today()->toDateString();
+            // Parse date range from request (similar to DashboardController)
+            $dateRange = $this->parsePaymentDateRange($request);
+            $fromDate = $dateRange['from'];
+            $toDate = $dateRange['to'];
+            $period = $request->get('period', 'today');
             
             // Log for debugging
-            Log::info('Today\'s Payments Dashboard Request', [
-                'today' => $today,
+            Log::info('Payments Dashboard Request', [
+                'period' => $period,
+                'from_date' => $fromDate,
+                'to_date' => $toDate,
                 'filters' => $request->all()
             ]);
             
-            // Base query for today's completed payments
+            // Base query for payments (including Completed and Partial payments)
             // Get branch_id from fee_structure (more reliable than student record)
             $baseQuery = DB::table('fee_payments as fp')
                 ->join('users as u', 'fp.student_id', '=', 'u.id')
@@ -247,8 +254,8 @@ class FeeController extends Controller
                 ->leftJoin('fee_structures as fs', 'fp.fee_structure_id', '=', 'fs.id')
                 ->leftJoin('branches as b', 'fs.branch_id', '=', 'b.id') // Get branch from fee_structure
                 ->leftJoin('grades as g', 's.grade', '=', 'g.value')
-                ->whereDate('fp.payment_date', $today)
-                ->where('fp.payment_status', 'Completed');
+                ->whereBetween('fp.payment_date', [$fromDate, $toDate])
+                ->whereIn('fp.payment_status', ['Completed', 'Partial']);
 
             // 🔥 APPLY BRANCH FILTERING - Restrict to accessible branches
             // Use branch_id from fee_structure (more reliable)
@@ -281,21 +288,45 @@ class FeeController extends Controller
                 $baseQuery->where('fp.payment_method', $request->payment_method);
             }
 
-            // ✅ Get Total Amount Paid
+            // ✅ Get Total Amount Paid (from both Completed and Partial payments)
             $totalAmount = (float) (clone $baseQuery)->sum('fp.amount_paid');
 
-            // ✅ Get Total Count
+            // ✅ Get Total Count (including both Completed and Partial payments)
             $totalCount = (clone $baseQuery)->count('fp.id');
             
+            // ✅ Get breakdown by payment status
+            $byStatus = (clone $baseQuery)
+                ->select(
+                    'fp.payment_status',
+                    DB::raw('COUNT(DISTINCT fp.id) as payment_count'),
+                    DB::raw('SUM(fp.amount_paid) as total_amount')
+                )
+                ->groupBy('fp.payment_status')
+                ->orderBy('fp.payment_status')
+                ->get()
+                ->map(function($item) {
+                    return [
+                        'payment_status' => $item->payment_status,
+                        'payment_count' => (int) $item->payment_count,
+                        'total_amount' => (float) $item->total_amount
+                    ];
+                });
+            
             // Log for debugging
-            Log::info('Today\'s Payments Summary', [
+            Log::info('Payments Summary', [
                 'total_amount' => $totalAmount,
                 'total_count' => $totalCount,
-                'today' => $today
+                'period' => $period,
+                'from_date' => $fromDate,
+                'to_date' => $toDate,
+                'includes_partial' => true
             ]);
 
-            // ✅ Get Class/Grade Wise Breakdown
-            $byGrade = (clone $baseQuery)
+            // ✅ Get Class/Grade Wise Breakdown (with pending payments)
+            $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+            
+            // Get paid amounts by grade from payments
+            $paidByGrade = (clone $baseQuery)
                 ->select(
                     's.grade',
                     DB::raw('COALESCE(g.label, CONCAT("Grade ", s.grade)) as grade_label'),
@@ -304,17 +335,70 @@ class FeeController extends Controller
                     DB::raw('COUNT(DISTINCT s.id) as student_count')
                 )
                 ->groupBy('s.grade', 'g.label')
-                ->orderBy('s.grade')
                 ->get()
-                ->map(function($item) {
-                    return [
-                        'grade' => $item->grade,
-                        'grade_label' => $item->grade_label,
-                        'payment_count' => (int) $item->payment_count,
-                        'total_amount' => (float) $item->total_amount,
-                        'student_count' => (int) $item->student_count
-                    ];
-                });
+                ->keyBy('grade');
+            
+            // Calculate pending amounts by grade using SQL aggregation
+            $pendingQuery = DB::table('fee_structures as fs')
+                ->join('students as s', function($join) {
+                    $join->on('fs.grade', '=', 's.grade')
+                         ->where('s.student_status', '=', 'Active');
+                })
+                ->leftJoin('fee_payments as fp', function($join) {
+                    $join->on('fs.id', '=', 'fp.fee_structure_id')
+                         ->on('s.user_id', '=', 'fp.student_id')
+                         ->whereIn('fp.payment_status', ['Completed', 'Partial']);
+                })
+                ->leftJoin('grades as g', 's.grade', '=', 'g.value')
+                ->where('fs.is_active', true)
+                ->select(
+                    's.grade',
+                    DB::raw('COALESCE(g.label, CONCAT("Grade ", s.grade)) as grade_label'),
+                    DB::raw('COUNT(DISTINCT s.id) as total_students'),
+                    DB::raw('SUM(fs.amount) as expected_amount'),
+                    DB::raw('SUM(COALESCE(fp.amount_paid, 0)) as paid_amount')
+                )
+                ->groupBy('s.grade', 'g.label');
+            
+            // Apply branch filtering
+            if ($accessibleBranchIds !== 'all') {
+                if (!empty($accessibleBranchIds)) {
+                    $pendingQuery->whereIn('fs.branch_id', $accessibleBranchIds)
+                                 ->whereIn('s.branch_id', $accessibleBranchIds);
+                } else {
+                    $pendingQuery->whereRaw('1 = 0');
+                }
+            }
+            
+            // Filter by branch if specified
+            if ($request->has('branch_id') && $request->branch_id) {
+                $pendingQuery->where('fs.branch_id', $request->branch_id)
+                             ->where('s.branch_id', $request->branch_id);
+            }
+            
+            $pendingByGrade = $pendingQuery->get()->keyBy('grade');
+            
+            // Merge paid and pending data
+            $allGrades = $paidByGrade->keys()->merge($pendingByGrade->keys())->unique();
+            
+            $byGrade = $allGrades->map(function($grade) use ($paidByGrade, $pendingByGrade) {
+                $paid = $paidByGrade->get($grade);
+                $pending = $pendingByGrade->get($grade);
+                
+                $expectedAmount = $pending ? (float) $pending->expected_amount : 0;
+                $paidAmount = $pending ? (float) $pending->paid_amount : 0;
+                $pendingAmount = max(0, $expectedAmount - $paidAmount);
+                
+                return [
+                    'grade' => $grade,
+                    'grade_label' => $paid ? $paid->grade_label : ($pending ? $pending->grade_label : "Grade $grade"),
+                    'payment_count' => $paid ? (int) $paid->payment_count : 0,
+                    'total_amount' => $paid ? (float) $paid->total_amount : 0,
+                    'student_count' => $paid ? (int) $paid->student_count : ($pending ? (int) $pending->total_students : 0),
+                    'pending_amount' => round($pendingAmount, 2),
+                    'pending_count' => $pendingAmount > 0 ? 1 : 0
+                ];
+            })->sortBy('grade')->values();
 
             // ✅ Get Section Wise Breakdown
             $bySection = (clone $baseQuery)
@@ -389,13 +473,18 @@ class FeeController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Today\'s payments dashboard retrieved successfully',
+                'message' => 'Payments dashboard retrieved successfully (includes Completed and Partial payments)',
                 'data' => [
                     'summary' => [
-                        'total_amount' => $totalAmount,
+                        'total_amount' => round($totalAmount, 2),
                         'total_count' => $totalCount,
-                        'date' => $today
+                        'period' => $period,
+                        'from_date' => $fromDate,
+                        'to_date' => $toDate,
+                        'date' => $fromDate === $toDate ? $fromDate : $fromDate . ' to ' . $toDate,
+                        'includes_partial_payments' => true
                     ],
+                    'by_status' => $byStatus,
                     'by_grade' => $byGrade,
                     'by_section' => $bySection,
                     'by_branch' => $byBranch,
@@ -620,11 +709,22 @@ class FeeController extends Controller
                     return $q->whereNotIn('id', $paidStructureIds);
                 })
                 ->get()
-                ->map(function($fee) {
+                ->map(function($fee) use ($studentId) {
                     // Ensure fee_type is never null
                     if (empty($fee->fee_type)) {
                         $fee->fee_type = 'General Fee';
                     }
+                    
+                    // Calculate total amount already paid for this fee structure by this student
+                    $amountPaid = FeePayment::where('student_id', $studentId)
+                        ->where('fee_structure_id', $fee->id)
+                        ->whereIn('payment_status', ['Completed', 'Partial'])
+                        ->sum('total_amount');
+                    
+                    // Add amount_paid and remaining_amount to fee structure
+                    $fee->amount_paid = (float) $amountPaid;
+                    $fee->remaining_amount = max(0, (float) $fee->amount - (float) $amountPaid);
+                    
                     return $fee;
                 });
 
@@ -717,6 +817,46 @@ class FeeController extends Controller
                 'message' => 'Fee payment not found',
                 'error' => $e->getMessage()
             ], 404);
+        }
+    }
+
+    /**
+     * Parse date range from request parameters (similar to DashboardController)
+     */
+    private function parsePaymentDateRange(Request $request): array
+    {
+        $period = $request->get('period', 'today');
+        
+        switch ($period) {
+            case 'today':
+                return [
+                    'from' => \Carbon\Carbon::today()->toDateString(),
+                    'to' => \Carbon\Carbon::today()->toDateString()
+                ];
+            
+            case 'week':
+                return [
+                    'from' => \Carbon\Carbon::now()->startOfWeek()->toDateString(),
+                    'to' => \Carbon\Carbon::now()->endOfWeek()->toDateString()
+                ];
+            
+            case 'month':
+                return [
+                    'from' => \Carbon\Carbon::now()->startOfMonth()->toDateString(),
+                    'to' => \Carbon\Carbon::now()->endOfMonth()->toDateString()
+                ];
+            
+            case 'custom':
+                return [
+                    'from' => $request->get('from_date', \Carbon\Carbon::today()->toDateString()),
+                    'to' => $request->get('to_date', \Carbon\Carbon::today()->toDateString())
+                ];
+            
+            default:
+                return [
+                    'from' => \Carbon\Carbon::today()->toDateString(),
+                    'to' => \Carbon\Carbon::today()->toDateString()
+                ];
         }
     }
 
