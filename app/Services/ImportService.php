@@ -51,19 +51,67 @@ class ImportService
         $inserted = 0;
 
         foreach ($data as $row) {
-            StudentImport::create([
+            // Prepare the data to insert
+            $importData = [
                 'batch_id' => $batchId,
                 'row_number' => $rowNumber++,
                 'branch_id' => $context['branch_id'] ?? null,
-                'grade' => $context['grade'] ?? null,
-                'section' => $context['section'] ?? null,
-                'academic_year' => $context['academic_year'] ?? null,
-                // Map Excel columns to database columns
-                ...$row,
                 'validation_status' => 'pending',
-            ]);
-            $inserted++;
+            ];
+
+            // Use context values for grade, section, academic_year (these are set at upload time)
+            // But allow Excel to override via grade_override, section_override, etc.
+            $importData['grade'] = $context['grade'] ?? null;
+            $importData['section'] = $context['section'] ?? null;
+            $importData['academic_year'] = $context['academic_year'] ?? null;
+
+            // If Excel has override fields, use them to override context values
+            if (isset($row['grade_override']) && !empty($row['grade_override'])) {
+                $importData['grade_override'] = $row['grade_override'];
+                $importData['grade'] = $row['grade_override'];
+            }
+            if (isset($row['section_override']) && !empty($row['section_override'])) {
+                $importData['section_override'] = $row['section_override'];
+                $importData['section'] = $row['section_override'];
+            }
+            if (isset($row['academic_year_override']) && !empty($row['academic_year_override'])) {
+                $importData['academic_year_override'] = $row['academic_year_override'];
+                $importData['academic_year'] = $row['academic_year_override'];
+            }
+
+            // Remove override fields from row data to avoid duplication
+            unset($row['grade_override'], $row['section_override'], $row['academic_year_override']);
+            
+            // Also remove grade/section/academic_year from Excel row if present
+            // (we use context values, not Excel values for these)
+            unset($row['grade'], $row['section'], $row['academic_year']);
+
+            // Merge Excel row data (all other fields)
+            $importData = array_merge($importData, $row);
+
+            // Filter out null values for better performance (optional, but cleaner)
+            // Actually, we should keep null values as they might be needed for validation
+            // $importData = array_filter($importData, fn($value) => $value !== null);
+
+            try {
+                StudentImport::create($importData);
+                $inserted++;
+            } catch (\Exception $e) {
+                Log::error('Failed to insert student import row', [
+                    'batch_id' => $batchId,
+                    'row_number' => $rowNumber - 1,
+                    'error' => $e->getMessage(),
+                    'data' => $importData
+                ]);
+                // Continue with next row instead of failing completely
+            }
         }
+
+        Log::info('Student staging data inserted', [
+            'batch_id' => $batchId,
+            'inserted_count' => $inserted,
+            'total_rows' => count($data)
+        ]);
 
         return $inserted;
     }
@@ -77,18 +125,61 @@ class ImportService
         $inserted = 0;
 
         foreach ($data as $row) {
-            TeacherImport::create([
+            // Prepare the data to insert
+            $importData = [
                 'batch_id' => $batchId,
                 'row_number' => $rowNumber++,
                 'branch_id' => $context['branch_id'] ?? null,
-                // Map Excel columns to database columns
-                ...$row,
                 'validation_status' => 'pending',
-            ]);
-            $inserted++;
+            ];
+
+            // Handle boolean fields
+            if (isset($row['is_class_teacher'])) {
+                $importData['is_class_teacher'] = $this->convertToBoolean($row['is_class_teacher']);
+                unset($row['is_class_teacher']);
+            }
+
+            // Merge Excel row data (all other fields)
+            $importData = array_merge($importData, $row);
+
+            try {
+                TeacherImport::create($importData);
+                $inserted++;
+            } catch (\Exception $e) {
+                Log::error('Failed to insert teacher import row', [
+                    'batch_id' => $batchId,
+                    'row_number' => $rowNumber - 1,
+                    'error' => $e->getMessage(),
+                    'data' => $importData
+                ]);
+                // Continue with next row instead of failing completely
+            }
         }
 
+        Log::info('Teacher staging data inserted', [
+            'batch_id' => $batchId,
+            'inserted_count' => $inserted,
+            'total_rows' => count($data)
+        ]);
+
         return $inserted;
+    }
+
+    /**
+     * Convert various boolean representations to actual boolean
+     */
+    protected function convertToBoolean($value): bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+        
+        if (is_numeric($value)) {
+            return (bool)$value;
+        }
+        
+        $stringValue = strtolower(trim((string)$value));
+        return in_array($stringValue, ['yes', 'true', '1', 'y', 'on']);
     }
 
     /**

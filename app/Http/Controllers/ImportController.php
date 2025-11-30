@@ -10,6 +10,12 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
+use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
+use PhpOffice\PhpSpreadsheet\Style\Fill;
+use PhpOffice\PhpSpreadsheet\Style\Alignment;
+use PhpOffice\PhpSpreadsheet\Style\Font;
 
 class ImportController extends Controller
 {
@@ -543,142 +549,594 @@ class ImportController extends Controller
     }
 
     /**
-     * Parse Excel file (simplified version)
+     * Parse Excel file using PhpSpreadsheet
      */
     protected function parseExcelFile(string $filePath, string $entity): array
     {
-        // For now, return sample data to test the flow
-        // In production, you would use PhpSpreadsheet or Laravel Excel
+        try {
+            Log::info('Starting Excel file parsing', [
+                'file_path' => $filePath,
+                'entity' => $entity,
+                'file_exists' => file_exists($filePath)
+            ]);
+
+            // Determine file type and create appropriate reader
+            $extension = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
+            
+            if ($extension === 'csv') {
+                $reader = IOFactory::createReader('Csv');
+                $reader->setInputEncoding('UTF-8');
+                $reader->setDelimiter(',');
+                $reader->setEnclosure('"');
+            } elseif ($extension === 'xls') {
+                $reader = IOFactory::createReader('Xls');
+            } else {
+                $reader = IOFactory::createReader('Xlsx');
+            }
+
+            // Load the spreadsheet
+            $spreadsheet = $reader->load($filePath);
+            $worksheet = $spreadsheet->getActiveSheet();
+            
+            // Get the highest row and column
+            $highestRow = $worksheet->getHighestRow();
+            $highestColumn = $worksheet->getHighestColumn();
+            
+            Log::info('Excel file loaded', [
+                'highest_row' => $highestRow,
+                'highest_column' => $highestColumn
+            ]);
+
+            // Read header row (first row)
+            $headers = [];
+            $headerRow = 1;
+            
+            for ($col = 'A'; $col <= $highestColumn; $col++) {
+                $headerValue = trim($worksheet->getCell($col . $headerRow)->getValue());
+                if (!empty($headerValue)) {
+                    $headers[$col] = $this->normalizeHeader($headerValue);
+                }
+            }
+
+            Log::info('Headers extracted', ['headers' => array_values($headers)]);
+
+            if (empty($headers)) {
+                throw new \Exception('No headers found in the Excel file. Please ensure the first row contains column names.');
+            }
+
+            // Map headers to database field names
+            $fieldMapping = $this->getFieldMapping($entity);
+            
+            // Read data rows
+            $data = [];
+            $rowNumber = 0;
+
+            for ($row = 2; $row <= $highestRow; $row++) {
+                $rowData = [];
+                $isEmptyRow = true;
+
+                // Read each column
+                foreach ($headers as $col => $headerName) {
+                    $cellValue = $worksheet->getCell($col . $row)->getValue();
+                    
+                    // Handle formula cells
+                    if ($cellValue instanceof \PhpOffice\PhpSpreadsheet\Cell\Cell && $cellValue->getDataType() === 'f') {
+                        $cellValue = $worksheet->getCell($col . $row)->getCalculatedValue();
+                    }
+                    
+                    // Trim whitespace
+                    $cellValue = is_null($cellValue) ? null : trim($cellValue);
+                    
+                    // Check if row is empty
+                    if (!empty($cellValue)) {
+                        $isEmptyRow = false;
+                    }
+
+                    // Map header to database field
+                    $dbField = $this->mapHeaderToField($headerName, $fieldMapping);
+                    
+                    if ($dbField) {
+                        // Handle date fields
+                        if (in_array($dbField, ['admission_date', 'date_of_birth', 'joining_date', 'leaving_date'])) {
+                            $rowData[$dbField] = $this->convertDate($cellValue);
+                        } else {
+                            $rowData[$dbField] = $cellValue ?: null;
+                        }
+                    }
+                }
+
+                // Skip empty rows
+                if ($isEmptyRow) {
+                    continue;
+                }
+
+                $data[] = $rowData;
+                $rowNumber++;
+            }
+
+            Log::info('Excel parsing completed', [
+                'total_rows_parsed' => count($data),
+                'total_rows_in_file' => $highestRow - 1
+            ]);
+
+            return $data;
+        } catch (\Exception $e) {
+            Log::error('Excel parsing failed', [
+                'file_path' => $filePath,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            throw new \Exception('Failed to parse Excel file: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Normalize header name (remove special chars, lowercase, etc.)
+     */
+    protected function normalizeHeader(string $header): string
+    {
+        // Convert to lowercase and replace spaces/underscores with underscores
+        $normalized = strtolower(trim($header));
+        $normalized = preg_replace('/[\s\-]+/', '_', $normalized);
+        $normalized = preg_replace('/[^a-z0-9_]/', '', $normalized);
+        return $normalized;
+    }
+
+    /**
+     * Get field mapping for entity type
+     */
+    protected function getFieldMapping(string $entity): array
+    {
         if ($entity === 'student') {
             return [
-                [
-                    'first_name' => 'John',
-                    'last_name' => 'Doe',
-                    'email' => 'john.doe@example.com',
-                    'phone' => '9876543210',
-                    'admission_number' => 'STU-2024-001',
-                    'admission_date' => '2024-04-15',
-                    'grade' => '5',
-                    'section' => 'A',
-                    'academic_year' => '2024-2025',
-                    'date_of_birth' => '2014-05-20',
-                    'gender' => 'Male',
-                    'current_address' => '123 Main Street',
-                    'city' => 'Mumbai',
-                    'state' => 'Maharashtra',
-                    'pincode' => '400001',
-                    'father_name' => 'Rajesh Doe',
-                    'father_phone' => '9876543210',
-                    'mother_name' => 'Priya Doe',
-                    'emergency_contact_name' => 'Rajesh Doe',
-                    'emergency_contact_phone' => '9876543210',
-                ],
-                [
-                    'first_name' => 'Jane',
-                    'last_name' => 'Smith',
-                    'email' => 'jane.smith@example.com',
-                    'phone' => '9876543211',
-                    'admission_number' => 'STU-2024-002',
-                    'admission_date' => '2024-04-16',
-                    'grade' => '5',
-                    'section' => 'A',
-                    'academic_year' => '2024-2025',
-                    'date_of_birth' => '2014-08-15',
-                    'gender' => 'Female',
-                    'current_address' => '456 Park Avenue',
-                    'city' => 'Delhi',
-                    'state' => 'Delhi',
-                    'pincode' => '110001',
-                    'father_name' => 'Michael Smith',
-                    'father_phone' => '9876543212',
-                    'mother_name' => 'Jennifer Smith',
-                    'emergency_contact_name' => 'Michael Smith',
-                    'emergency_contact_phone' => '9876543212',
-                ]
+                // Basic info
+                'first_name' => ['first_name', 'firstname', 'fname'],
+                'last_name' => ['last_name', 'lastname', 'lname', 'surname'],
+                'email' => ['email', 'email_address'],
+                'phone' => ['phone', 'phone_number', 'mobile', 'mobile_number'],
+                
+                // Student details
+                'admission_number' => ['admission_number', 'admission_no', 'adm_no', 'admission_number'],
+                'admission_date' => ['admission_date', 'adm_date', 'admissiondate'],
+                'roll_number' => ['roll_number', 'roll_no', 'roll', 'rollnumber'],
+                'registration_number' => ['registration_number', 'reg_no', 'reg_number', 'registration'],
+                'grade' => ['grade', 'class', 'standard'],
+                'section' => ['section', 'sec'],
+                'academic_year' => ['academic_year', 'academic_year', 'acadyear', 'year'],
+                'stream' => ['stream'],
+                
+                // Personal info
+                'date_of_birth' => ['date_of_birth', 'dob', 'birthdate', 'birth_date'],
+                'gender' => ['gender', 'sex'],
+                'blood_group' => ['blood_group', 'bloodgroup', 'blood', 'bg'],
+                'religion' => ['religion'],
+                'category' => ['category', 'caste'],
+                'nationality' => ['nationality'],
+                'mother_tongue' => ['mother_tongue', 'mothertongue', 'mother_tongue'],
+                
+                // Address
+                'current_address' => ['current_address', 'address', 'currentaddress'],
+                'permanent_address' => ['permanent_address', 'permanentaddress', 'permanent_addr'],
+                'city' => ['city'],
+                'state' => ['state'],
+                'country' => ['country'],
+                'pincode' => ['pincode', 'pin_code', 'pin', 'zip', 'postal_code'],
+                
+                // Father details
+                'father_name' => ['father_name', 'fathername', 'father'],
+                'father_phone' => ['father_phone', 'father_phone_number', 'father_mobile'],
+                'father_email' => ['father_email', 'father_email_address'],
+                'father_occupation' => ['father_occupation', 'father_occ', 'father_occup'],
+                'father_annual_income' => ['father_annual_income', 'father_income', 'father_salary'],
+                
+                // Mother details
+                'mother_name' => ['mother_name', 'mothername', 'mother'],
+                'mother_phone' => ['mother_phone', 'mother_phone_number', 'mother_mobile'],
+                'mother_email' => ['mother_email', 'mother_email_address'],
+                'mother_occupation' => ['mother_occupation', 'mother_occ', 'mother_occup'],
+                'mother_annual_income' => ['mother_annual_income', 'mother_income', 'mother_salary'],
+                
+                // Guardian details
+                'guardian_name' => ['guardian_name', 'guardianname', 'guardian'],
+                'guardian_relation' => ['guardian_relation', 'guardian_relationship'],
+                'guardian_phone' => ['guardian_phone', 'guardian_phone_number', 'guardian_mobile'],
+                
+                // Emergency contact
+                'emergency_contact_name' => ['emergency_contact_name', 'emergency_contact', 'emergency_name'],
+                'emergency_contact_phone' => ['emergency_contact_phone', 'emergency_phone', 'emergency_mobile'],
+                'emergency_contact_relation' => ['emergency_contact_relation', 'emergency_relation'],
+                
+                // Previous school
+                'previous_school' => ['previous_school', 'prev_school', 'old_school'],
+                'previous_grade' => ['previous_grade', 'prev_grade', 'old_grade'],
+                'previous_percentage' => ['previous_percentage', 'prev_percentage', 'old_percentage'],
+                'transfer_certificate_number' => ['transfer_certificate_number', 'tc_number', 'tc_no'],
+                
+                // Medical info
+                'medical_history' => ['medical_history', 'medicalhistory', 'medical_info'],
+                'allergies' => ['allergies', 'allergy'],
+                'medications' => ['medications', 'medication'],
+                'height_cm' => ['height_cm', 'height', 'height_in_cm'],
+                'weight_kg' => ['weight_kg', 'weight', 'weight_in_kg'],
+                
+                // Other
+                'password' => ['password', 'pass'],
+                'remarks' => ['remarks', 'remark', 'notes', 'note'],
             ];
         } else {
+            // Teacher mapping - All fields
             return [
-                [
-                    'first_name' => 'Alice',
-                    'last_name' => 'Johnson',
-                    'email' => 'alice.johnson@example.com',
-                    'phone' => '9876543213',
-                    'employee_id' => 'TCH-2024-001',
-                    'joining_date' => '2024-01-01',
-                    'designation' => 'Senior Teacher',
-                    'employee_type' => 'Permanent',
-                    'date_of_birth' => '1985-03-15',
-                    'gender' => 'Female',
-                    'current_address' => '789 Lake Road',
-                    'city' => 'Bangalore',
-                    'state' => 'Karnataka',
-                    'pincode' => '560001',
-                    'basic_salary' => '50000',
-                    'emergency_contact_name' => 'Bob Johnson',
-                    'emergency_contact_phone' => '9876543214',
-                ]
+                // Basic info
+                'first_name' => ['first_name', 'firstname', 'fname'],
+                'last_name' => ['last_name', 'lastname', 'lname', 'surname'],
+                'email' => ['email', 'email_address'],
+                'phone' => ['phone', 'phone_number', 'mobile', 'mobile_number'],
+                
+                // Employment details
+                'employee_id' => ['employee_id', 'emp_id', 'employee_number', 'emp_no'],
+                'joining_date' => ['joining_date', 'join_date', 'joined_date'],
+                'leaving_date' => ['leaving_date', 'leave_date', 'left_date'],
+                'designation' => ['designation', 'position', 'job_title'],
+                'employee_type' => ['employee_type', 'emp_type', 'type', 'employment_type'],
+                
+                // Professional details
+                'qualification' => ['qualification', 'qualifications', 'education'],
+                'experience_years' => ['experience_years', 'experience', 'exp_years', 'years_of_experience'],
+                'specialization' => ['specialization', 'speciality', 'subject_specialization'],
+                'registration_number' => ['registration_number', 'reg_no', 'reg_number', 'registration'],
+                'subjects' => ['subjects', 'subject', 'teaching_subjects'],
+                'classes_assigned' => ['classes_assigned', 'classes', 'assigned_classes'],
+                
+                // Class teacher info
+                'is_class_teacher' => ['is_class_teacher', 'class_teacher', 'is_ct'],
+                'class_teacher_of_grade' => ['class_teacher_of_grade', 'ct_grade', 'grade_assigned'],
+                'class_teacher_of_section' => ['class_teacher_of_section', 'ct_section', 'section_assigned'],
+                
+                // Personal info
+                'date_of_birth' => ['date_of_birth', 'dob', 'birthdate', 'birth_date'],
+                'gender' => ['gender', 'sex'],
+                'blood_group' => ['blood_group', 'bloodgroup', 'blood', 'bg'],
+                'religion' => ['religion'],
+                'nationality' => ['nationality'],
+                
+                // Address
+                'current_address' => ['current_address', 'address', 'currentaddress'],
+                'permanent_address' => ['permanent_address', 'permanentaddress', 'permanent_addr'],
+                'city' => ['city'],
+                'state' => ['state'],
+                'pincode' => ['pincode', 'pin_code', 'pin', 'zip', 'postal_code'],
+                
+                // Emergency contact
+                'emergency_contact_name' => ['emergency_contact_name', 'emergency_contact', 'emergency_name'],
+                'emergency_contact_phone' => ['emergency_contact_phone', 'emergency_phone', 'emergency_mobile'],
+                'emergency_contact_relation' => ['emergency_contact_relation', 'emergency_relation'],
+                
+                // Salary details
+                'salary_grade' => ['salary_grade', 'grade', 'pay_grade'],
+                'basic_salary' => ['basic_salary', 'salary', 'basic_pay', 'gross_salary'],
+                
+                // Bank details
+                'bank_name' => ['bank_name', 'bank'],
+                'bank_account_number' => ['bank_account_number', 'account_number', 'bank_account', 'acc_no'],
+                'bank_ifsc_code' => ['bank_ifsc_code', 'ifsc_code', 'ifsc', 'bank_ifsc'],
+                
+                // Document details
+                'pan_number' => ['pan_number', 'pan', 'pan_no', 'pan_card'],
+                'aadhar_number' => ['aadhar_number', 'aadhar', 'aadhaar_number', 'aadhaar', 'aadhar_no'],
+                
+                // Other
+                'password' => ['password', 'pass'],
+                'remarks' => ['remarks', 'remark', 'notes', 'note'],
             ];
         }
     }
 
     /**
-     * Generate student template
+     * Map header name to database field
      */
-    protected function generateStudentTemplate()
+    protected function mapHeaderToField(string $headerName, array $fieldMapping): ?string
     {
-        // For now, return a simple CSV template
-        // In production, you would use PhpSpreadsheet to create Excel
-        $headers = [
-            'first_name', 'last_name', 'email', 'phone', 'admission_number', 'admission_date',
-            'grade', 'section', 'roll_number', 'academic_year', 'date_of_birth', 'gender',
-            'blood_group', 'current_address', 'city', 'state', 'country', 'pincode',
-            'father_name', 'father_phone', 'father_email', 'mother_name', 'mother_phone',
-            'emergency_contact_name', 'emergency_contact_phone', 'remarks'
-        ];
-
-        $sampleData = [
-            'John', 'Doe', 'john.doe@example.com', '9876543210', 'STU-2024-001', '2024-04-15',
-            '5', 'A', '101', '2024-2025', '2014-05-20', 'Male',
-            'A+', '123 Main Street', 'Mumbai', 'Maharashtra', 'India', '400001',
-            'Rajesh Doe', '9876543210', 'rajesh@example.com', 'Priya Doe', '9876543211',
-            'Rajesh Doe', '9876543210', 'Good student'
-        ];
-
-        $csvContent = implode(',', $headers) . "\n" . implode(',', $sampleData);
+        foreach ($fieldMapping as $dbField => $possibleHeaders) {
+            if (in_array($headerName, $possibleHeaders)) {
+                return $dbField;
+            }
+        }
         
-        $fileName = 'student_import_template_' . date('Y-m-d') . '.csv';
+        // If exact match not found, try partial match
+        foreach ($fieldMapping as $dbField => $possibleHeaders) {
+            foreach ($possibleHeaders as $possibleHeader) {
+                if (strpos($headerName, $possibleHeader) !== false || strpos($possibleHeader, $headerName) !== false) {
+                    return $dbField;
+                }
+            }
+        }
         
-        return response($csvContent)
-            ->header('Content-Type', 'text/csv')
-            ->header('Content-Disposition', 'attachment; filename="' . $fileName . '"');
+        // Return null if no match found (unknown column)
+        return null;
     }
 
     /**
-     * Generate teacher template
+     * Convert various date formats to Y-m-d format
+     */
+    protected function convertDate($dateValue): ?string
+    {
+        if (empty($dateValue)) {
+            return null;
+        }
+
+        // If it's already a formatted date string
+        if (is_string($dateValue)) {
+            // Try to parse common date formats
+            $formats = ['Y-m-d', 'd/m/Y', 'm/d/Y', 'd-m-Y', 'Y/m/d', 'Ymd'];
+            foreach ($formats as $format) {
+                $parsed = \DateTime::createFromFormat($format, $dateValue);
+                if ($parsed !== false) {
+                    return $parsed->format('Y-m-d');
+                }
+            }
+            
+            // Try Carbon for flexible parsing
+            try {
+                return \Carbon\Carbon::parse($dateValue)->format('Y-m-d');
+            } catch (\Exception $e) {
+                Log::warning('Date conversion failed', ['date_value' => $dateValue, 'error' => $e->getMessage()]);
+                return null;
+            }
+        }
+
+        // If it's a numeric value (Excel date serial number)
+        if (is_numeric($dateValue)) {
+            try {
+                // PhpSpreadsheet date serial starts from 1900-01-01
+                $days = (int)$dateValue;
+                $timestamp = \PhpOffice\PhpSpreadsheet\Shared\Date::excelToTimestamp($dateValue);
+                return date('Y-m-d', $timestamp);
+            } catch (\Exception $e) {
+                return null;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Generate student template with all fields
+     */
+    protected function generateStudentTemplate()
+    {
+        try {
+            $spreadsheet = new Spreadsheet();
+            $sheet = $spreadsheet->getActiveSheet();
+            $sheet->setTitle('Student Import Template');
+
+            // Define all student import fields with display names
+            $headers = [
+                'First Name', 'Last Name', 'Email', 'Phone', 
+                'Admission Number', 'Admission Date', 'Roll Number', 'Registration Number',
+                'Date of Birth', 'Gender', 'Blood Group', 'Religion', 'Category', 
+                'Nationality', 'Mother Tongue',
+                'Current Address', 'Permanent Address', 'City', 'State', 'Country', 'Pincode',
+                'Father Name', 'Father Phone', 'Father Email', 'Father Occupation', 'Father Annual Income',
+                'Mother Name', 'Mother Phone', 'Mother Email', 'Mother Occupation', 'Mother Annual Income',
+                'Guardian Name', 'Guardian Relation', 'Guardian Phone',
+                'Emergency Contact Name', 'Emergency Contact Phone', 'Emergency Contact Relation',
+                'Previous School', 'Previous Grade', 'Previous Percentage', 'Transfer Certificate Number',
+                'Medical History', 'Allergies', 'Medications', 'Height (cm)', 'Weight (kg)',
+                'Password', 'Remarks'
+            ];
+
+            // Write headers to first row
+            $column = 'A';
+            foreach ($headers as $header) {
+                $sheet->setCellValue($column . '1', $header);
+                $column++;
+            }
+
+            // Style header row
+            $headerRange = 'A1:' . $column . '1';
+            $sheet->getStyle($headerRange)->applyFromArray([
+                'font' => [
+                    'bold' => true,
+                    'size' => 12,
+                    'color' => ['rgb' => 'FFFFFF'],
+                ],
+                'fill' => [
+                    'fillType' => Fill::FILL_SOLID,
+                    'startColor' => ['rgb' => '4472C4'],
+                ],
+                'alignment' => [
+                    'horizontal' => Alignment::HORIZONTAL_CENTER,
+                    'vertical' => Alignment::VERTICAL_CENTER,
+                ],
+            ]);
+
+            // Add sample data row
+            $sampleData = [
+                'John', 'Doe', 'john.doe@example.com', '9876543210',
+                'STU-2024-001', '2024-04-15', '101', 'REG-2024-001',
+                '2014-05-20', 'Male', 'A+', 'Hindu', 'General', 'Indian', 'English',
+                '123 Main Street', '123 Main Street', 'Mumbai', 'Maharashtra', 'India', '400001',
+                'Rajesh Doe', '9876543210', 'rajesh@example.com', 'Engineer', '500000',
+                'Priya Doe', '9876543211', 'priya@example.com', 'Teacher', '300000',
+                '', '', '',
+                'Rajesh Doe', '9876543210', 'Father',
+                'ABC School', '4', '85.5', 'TC-001',
+                'No major issues', 'None', 'None', '150', '45',
+                'Welcome@123', 'Good student'
+            ];
+
+            $column = 'A';
+            foreach ($sampleData as $value) {
+                $sheet->setCellValue($column . '2', $value);
+                $column++;
+            }
+
+            // Set column widths
+            foreach (range('A', $column) as $col) {
+                $sheet->getColumnDimension($col)->setAutoSize(true);
+            }
+
+            // Freeze header row
+            $sheet->freezePane('A2');
+
+            // Create writer and save to temporary file
+            $writer = new Xlsx($spreadsheet);
+            $tempFile = tempnam(sys_get_temp_dir(), 'student_template_');
+            $writer->save($tempFile);
+
+            // Return file download
+            $fileName = 'student_import_template_' . date('Y-m-d') . '.xlsx';
+            
+            return response()->download($tempFile, $fileName, [
+                'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            ])->deleteFileAfterSend(true);
+
+        } catch (\Exception $e) {
+            Log::error('Template generation failed', ['error' => $e->getMessage()]);
+            
+            // Fallback to CSV if Excel generation fails
+            $headers = [
+                'first_name', 'last_name', 'email', 'phone', 'admission_number', 'admission_date',
+                'roll_number', 'registration_number', 'date_of_birth', 'gender', 'blood_group',
+                'religion', 'category', 'nationality', 'mother_tongue',
+                'current_address', 'permanent_address', 'city', 'state', 'country', 'pincode',
+                'father_name', 'father_phone', 'father_email', 'father_occupation', 'father_annual_income',
+                'mother_name', 'mother_phone', 'mother_email', 'mother_occupation', 'mother_annual_income',
+                'guardian_name', 'guardian_relation', 'guardian_phone',
+                'emergency_contact_name', 'emergency_contact_phone', 'emergency_contact_relation',
+                'previous_school', 'previous_grade', 'previous_percentage', 'transfer_certificate_number',
+                'medical_history', 'allergies', 'medications', 'height_cm', 'weight_kg',
+                'password', 'remarks'
+            ];
+
+            $csvContent = implode(',', $headers);
+            $fileName = 'student_import_template_' . date('Y-m-d') . '.csv';
+            
+            return response($csvContent)
+                ->header('Content-Type', 'text/csv')
+                ->header('Content-Disposition', 'attachment; filename="' . $fileName . '"');
+        }
+    }
+
+    /**
+     * Generate teacher template with all fields
      */
     protected function generateTeacherTemplate()
     {
-        // For now, return a simple CSV template
-        $headers = [
-            'first_name', 'last_name', 'email', 'phone', 'employee_id', 'joining_date',
-            'designation', 'employee_type', 'date_of_birth', 'gender', 'current_address',
-            'city', 'state', 'pincode', 'basic_salary', 'emergency_contact_name',
-            'emergency_contact_phone', 'remarks'
-        ];
+        try {
+            $spreadsheet = new Spreadsheet();
+            $sheet = $spreadsheet->getActiveSheet();
+            $sheet->setTitle('Teacher Import Template');
 
-        $sampleData = [
-            'Jane', 'Smith', 'jane.smith@example.com', '9876543212', 'TCH-2024-001', '2024-01-01',
-            'Senior Teacher', 'Permanent', '1985-03-15', 'Female', '456 Park Avenue',
-            'Delhi', 'Delhi', '110001', '50000', 'John Smith', '9876543213', 'Excellent teacher'
-        ];
+            // Define all teacher import fields
+            $headers = [
+                'First Name', 'Last Name', 'Email', 'Phone',
+                'Employee ID', 'Joining Date', 'Leaving Date', 'Designation', 'Employee Type',
+                'Qualification', 'Experience Years', 'Specialization', 'Registration Number',
+                'Subjects', 'Classes Assigned',
+                'Is Class Teacher', 'Class Teacher of Grade', 'Class Teacher of Section',
+                'Date of Birth', 'Gender', 'Blood Group', 'Religion', 'Nationality',
+                'Current Address', 'Permanent Address', 'City', 'State', 'Pincode',
+                'Emergency Contact Name', 'Emergency Contact Phone', 'Emergency Contact Relation',
+                'Salary Grade', 'Basic Salary',
+                'Bank Name', 'Bank Account Number', 'Bank IFSC Code',
+                'PAN Number', 'Aadhar Number',
+                'Password', 'Remarks'
+            ];
 
-        $csvContent = implode(',', $headers) . "\n" . implode(',', $sampleData);
-        
-        $fileName = 'teacher_import_template_' . date('Y-m-d') . '.csv';
-        
-        return response($csvContent)
-            ->header('Content-Type', 'text/csv')
-            ->header('Content-Disposition', 'attachment; filename="' . $fileName . '"');
+            // Write headers to first row
+            $column = 'A';
+            foreach ($headers as $header) {
+                $sheet->setCellValue($column . '1', $header);
+                $column++;
+            }
+
+            // Style header row
+            $headerRange = 'A1:' . $column . '1';
+            $sheet->getStyle($headerRange)->applyFromArray([
+                'font' => [
+                    'bold' => true,
+                    'size' => 12,
+                    'color' => ['rgb' => 'FFFFFF'],
+                ],
+                'fill' => [
+                    'fillType' => Fill::FILL_SOLID,
+                    'startColor' => ['rgb' => '4472C4'],
+                ],
+                'alignment' => [
+                    'horizontal' => Alignment::HORIZONTAL_CENTER,
+                    'vertical' => Alignment::VERTICAL_CENTER,
+                ],
+            ]);
+
+            // Add sample data row
+            $sampleData = [
+                'Jane', 'Smith', 'jane.smith@example.com', '9876543212',
+                'TCH-2024-001', '2024-01-01', '', 'Senior Teacher', 'Permanent',
+                'M.Sc Mathematics', '5', 'Mathematics', 'REG-2024-001',
+                'Mathematics, Physics', 'Class 9, Class 10',
+                'Yes', '9', 'A',
+                '1985-03-15', 'Female', 'A+', 'Hindu', 'Indian',
+                '456 Park Avenue', '456 Park Avenue', 'Delhi', 'Delhi', '110001',
+                'John Smith', '9876543213', 'Husband',
+                'Grade A', '50000',
+                'State Bank of India', '1234567890123456', 'SBIN0001234',
+                'ABCDE1234F', '1234 5678 9012',
+                'Welcome@123', 'Excellent teacher'
+            ];
+
+            $column = 'A';
+            foreach ($sampleData as $value) {
+                $sheet->setCellValue($column . '2', $value);
+                $column++;
+            }
+
+            // Set column widths
+            foreach (range('A', $column) as $col) {
+                $sheet->getColumnDimension($col)->setAutoSize(true);
+            }
+
+            // Freeze header row
+            $sheet->freezePane('A2');
+
+            // Create writer and save to temporary file
+            $writer = new Xlsx($spreadsheet);
+            $tempFile = tempnam(sys_get_temp_dir(), 'teacher_template_');
+            $writer->save($tempFile);
+
+            // Return file download
+            $fileName = 'teacher_import_template_' . date('Y-m-d') . '.xlsx';
+            
+            return response()->download($tempFile, $fileName, [
+                'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            ])->deleteFileAfterSend(true);
+
+        } catch (\Exception $e) {
+            Log::error('Teacher template generation failed', ['error' => $e->getMessage()]);
+            
+            // Fallback to CSV
+            $headers = [
+                'first_name', 'last_name', 'email', 'phone',
+                'employee_id', 'joining_date', 'leaving_date', 'designation', 'employee_type',
+                'qualification', 'experience_years', 'specialization', 'registration_number',
+                'subjects', 'classes_assigned',
+                'is_class_teacher', 'class_teacher_of_grade', 'class_teacher_of_section',
+                'date_of_birth', 'gender', 'blood_group', 'religion', 'nationality',
+                'current_address', 'permanent_address', 'city', 'state', 'pincode',
+                'emergency_contact_name', 'emergency_contact_phone', 'emergency_contact_relation',
+                'salary_grade', 'basic_salary',
+                'bank_name', 'bank_account_number', 'bank_ifsc_code',
+                'pan_number', 'aadhar_number',
+                'password', 'remarks'
+            ];
+
+            $csvContent = implode(',', $headers);
+            $fileName = 'teacher_import_template_' . date('Y-m-d') . '.csv';
+            
+            return response($csvContent)
+                ->header('Content-Type', 'text/csv')
+                ->header('Content-Disposition', 'attachment; filename="' . $fileName . '"');
+        }
     }
 
     /**
