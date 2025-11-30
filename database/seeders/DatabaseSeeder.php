@@ -16,7 +16,7 @@ class DatabaseSeeder extends Seeder
      * Seed the application's database.
      * This seeder creates:
      * - 6 Roles (Super Admin, Branch Admin, Teacher, Staff, Accountant, Student)
-     * - 22 Modules (for sidebar menus)
+     * - 24 Modules (for sidebar menus)
      * - Permissions for each module
      * - 2 Super Admin users with ALL permissions
      * - NO other users (teachers/students will be created by application)
@@ -46,7 +46,7 @@ class DatabaseSeeder extends Seeder
             $this->command->info('');
             $this->command->info('📋 Summary:');
             $this->command->info('   - 6 Roles created');
-            $this->command->info('   - 22 Modules created');
+            $this->command->info('   - 24 Modules created');
             $this->command->info('   - ' . Permission::count() . ' Permissions created');
             $this->command->info('   - Permissions assigned to all roles');
             $this->command->info('   - 2 Super Admin users created');
@@ -124,8 +124,15 @@ class DatabaseSeeder extends Seeder
         ];
         
         foreach ($roles as $roleData) {
-            Role::create($roleData);
-            $this->command->info("   ✓ Created role: {$roleData['name']}");
+            $role = Role::firstOrCreate(
+                ['slug' => $roleData['slug']],
+                $roleData
+            );
+            if ($role->wasRecentlyCreated) {
+                $this->command->info("   ✓ Created role: {$roleData['name']}");
+            } else {
+                $this->command->info("   ⊙ Role already exists: {$roleData['name']}");
+            }
         }
     }
     
@@ -167,18 +174,30 @@ class DatabaseSeeder extends Seeder
         ];
         
         foreach ($superAdmins as $adminData) {
-            // Create user
-            $user = User::create($adminData);
+            // Create or get existing user
+            $user = User::firstOrCreate(
+                ['email' => $adminData['email']],
+                $adminData
+            );
             
-            // Assign Super Admin role
-            $user->roles()->attach($superAdminRole->id, [
-                'is_primary' => true,
-                'branch_id' => null, // Super Admin has access to all branches
-                'created_at' => now(),
-                'updated_at' => now()
-            ]);
+            // Check if user already has the Super Admin role
+            $hasRole = $user->roles()->where('roles.id', $superAdminRole->id)->exists();
             
-            $this->command->info("   ✓ Created Super Admin: {$adminData['email']}");
+            if (!$hasRole) {
+                // Assign Super Admin role
+                $user->roles()->attach($superAdminRole->id, [
+                    'is_primary' => true,
+                    'branch_id' => null, // Super Admin has access to all branches
+                    'created_at' => now(),
+                    'updated_at' => now()
+                ]);
+            }
+            
+            if ($user->wasRecentlyCreated) {
+                $this->command->info("   ✓ Created Super Admin: {$adminData['email']}");
+            } else {
+                $this->command->info("   ⊙ Super Admin already exists: {$adminData['email']}");
+            }
         }
     }
     
@@ -311,11 +330,27 @@ class DatabaseSeeder extends Seeder
                 'permissions' => ['view', 'create', 'edit', 'delete']
             ],
             [
+                'name' => 'Leaves',
+                'slug' => 'leaves',
+                'icon' => 'event_busy',
+                'route' => '/leaves',
+                'order' => 16,
+                'permissions' => ['view', 'create', 'edit', 'delete', 'approve', 'reject']
+            ],
+            [
+                'name' => 'Import',
+                'slug' => 'import',
+                'icon' => 'upload_file',
+                'route' => '/imports',
+                'order' => 17,
+                'permissions' => ['view', 'upload', 'validate', 'commit', 'cancel', 'template']
+            ],
+            [
                 'name' => 'Invoices',
                 'slug' => 'invoices',
                 'icon' => 'description',
                 'route' => '/invoices',
-                'order' => 16,
+                'order' => 18,
                 'permissions' => ['view', 'create', 'edit', 'delete', 'send', 'payment']
             ],
             [
@@ -323,7 +358,7 @@ class DatabaseSeeder extends Seeder
                 'slug' => 'groups',
                 'icon' => 'group',
                 'route' => '/groups',
-                'order' => 17,
+                'order' => 19,
                 'permissions' => ['view', 'create', 'edit', 'delete']
             ],
             [
@@ -331,7 +366,7 @@ class DatabaseSeeder extends Seeder
                 'slug' => 'reports',
                 'icon' => 'assessment',
                 'route' => '/reports',
-                'order' => 18,
+                'order' => 20,
                 'permissions' => ['view', 'generate', 'export']
             ],
             [
@@ -339,7 +374,7 @@ class DatabaseSeeder extends Seeder
                 'slug' => 'roles',
                 'icon' => 'admin_panel_settings',
                 'route' => '/settings/roles',
-                'order' => 19,
+                'order' => 21,
                 'permissions' => ['view', 'create', 'edit', 'delete', 'update']
             ],
             [
@@ -347,7 +382,7 @@ class DatabaseSeeder extends Seeder
                 'slug' => 'permissions',
                 'icon' => 'shield',
                 'route' => '/settings/permissions',
-                'order' => 20,
+                'order' => 22,
                 'permissions' => ['view', 'create', 'edit', 'delete', 'update']
             ],
             [
@@ -355,7 +390,7 @@ class DatabaseSeeder extends Seeder
                 'slug' => 'users',
                 'icon' => 'people',
                 'route' => '/settings/users',
-                'order' => 21,
+                'order' => 23,
                 'permissions' => ['view', 'create', 'edit', 'delete', 'update']
             ],
             [
@@ -363,7 +398,7 @@ class DatabaseSeeder extends Seeder
                 'slug' => 'settings',
                 'icon' => 'settings',
                 'route' => '/settings',
-                'order' => 22,
+                'order' => 24,
                 'permissions' => ['view', 'edit']
             ]
         ];
@@ -372,19 +407,36 @@ class DatabaseSeeder extends Seeder
             $permissions = $moduleData['permissions'];
             unset($moduleData['permissions']);
 
-            $module = Module::create($moduleData);
+            $module = Module::firstOrCreate(
+                ['slug' => $moduleData['slug']],
+                $moduleData
+            );
 
+            $createdCount = 0;
             foreach ($permissions as $action) {
-                Permission::create([
-                    'module_id' => $module->id,
-                    'name' => ucfirst($action) . ' ' . $module->name,
-                    'slug' => $module->slug . '.' . $action,
-                    'action' => $action,
-                    'is_system_permission' => true
-                ]);
+                $permission = Permission::firstOrCreate(
+                    [
+                        'module_id' => $module->id,
+                        'action' => $action
+                    ],
+                    [
+                        'module_id' => $module->id,
+                        'name' => ucfirst($action) . ' ' . $module->name,
+                        'slug' => $module->slug . '.' . $action,
+                        'action' => $action,
+                        'is_system_permission' => true
+                    ]
+                );
+                if ($permission->wasRecentlyCreated) {
+                    $createdCount++;
+                }
             }
             
-            $this->command->info("   ✓ Created module: {$module->name} with " . count($permissions) . " permissions");
+            if ($module->wasRecentlyCreated) {
+                $this->command->info("   ✓ Created module: {$module->name} with " . count($permissions) . " permissions");
+            } else {
+                $this->command->info("   ⊙ Module exists: {$module->name} (created {$createdCount} new permissions)");
+            }
         }
     }
     
@@ -421,6 +473,8 @@ class DatabaseSeeder extends Seeder
             'departments.view', 'departments.create', 'departments.edit', 'departments.delete',
             'groups.view', 'groups.create', 'groups.edit', 'groups.delete',
             'holidays.view', 'holidays.create', 'holidays.edit', 'holidays.delete',
+            'leaves.view', 'leaves.create', 'leaves.edit', 'leaves.delete', 'leaves.approve', 'leaves.reject',
+            'import.view', 'import.upload', 'import.validate', 'import.commit', 'import.cancel', 'import.template',
             'reports.view', 'reports.generate', 'reports.export',
             'settings.view',
             'users.view',
@@ -440,6 +494,8 @@ class DatabaseSeeder extends Seeder
             'subjects.view',
             'holidays.view',
             'groups.view',
+            'leaves.view', 'leaves.create', // Teachers can view and create their own leaves
+            'import.view', 'import.template', // Teachers can view imports and download templates
         ])->pluck('id')->toArray();
         $teacher->permissions()->sync($teacherPerms);
         $this->command->info("   ✓ Teacher: " . count($teacherPerms) . " permissions");
@@ -455,6 +511,8 @@ class DatabaseSeeder extends Seeder
             'fees.view', 'fees.collect',
             'holidays.view',
             'groups.view',
+            'leaves.view', 'leaves.create', 'leaves.edit', 'leaves.approve', 'leaves.reject', // Staff can manage leaves
+            'import.view', 'import.upload', 'import.validate', 'import.commit', 'import.cancel', 'import.template', // Staff can manage imports
         ])->pluck('id')->toArray();
         $staff->permissions()->sync($staffPerms);
         $this->command->info("   ✓ Staff: " . count($staffPerms) . " permissions");
@@ -481,6 +539,7 @@ class DatabaseSeeder extends Seeder
             'exams.view',
             'fees.view',
             'holidays.view',
+            'leaves.view', 'leaves.create', // Students can view and create their own leaves
         ])->pluck('id')->toArray();
         $student->permissions()->sync($studentPerms);
         $this->command->info("   ✓ Student: " . count($studentPerms) . " permissions");
