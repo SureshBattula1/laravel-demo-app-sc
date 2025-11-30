@@ -311,9 +311,11 @@ class DashboardController extends Controller
             ->orderBy('section_value', 'asc')
             ->get();
             
-            // Get attendance data for the date range
+            // ✅ OPTIMIZED: Get attendance data with grade labels in single query
             $attendanceQuery = DB::table('student_attendance as sa')
-                ->join('students as s', 'sa.student_id', '=', 's.id')
+                ->join('students as s', 'sa.student_id', '=', 's.user_id')
+                ->leftJoin('grades as g', 's.grade', '=', 'g.value')
+                ->where('s.student_status', 'Active')
                 ->whereBetween('sa.date', [$fromDate, $toDate]);
             
             if ($branchIds !== 'all' && !empty($branchIds)) {
@@ -322,12 +324,17 @@ class DashboardController extends Controller
             
             $attendanceData = $attendanceQuery->select(
                 's.grade as grade_value',
+                DB::raw('COALESCE(g.label, CONCAT("Grade ", s.grade), "Unassigned") as grade_label'),
                 DB::raw('COALESCE(s.section, "N/A") as section_value'),
+                DB::raw('CASE 
+                    WHEN s.section IS NOT NULL AND s.section != "" THEN CONCAT("Section ", s.section)
+                    ELSE "N/A"
+                END as section_label'),
                 DB::raw('SUM(CASE WHEN sa.status = "Present" THEN 1 ELSE 0 END) as present'),
                 DB::raw('SUM(CASE WHEN sa.status = "Absent" THEN 1 ELSE 0 END) as absent'),
                 DB::raw('SUM(CASE WHEN sa.status IN ("Sick Leave", "Leave") THEN 1 ELSE 0 END) as leaves')
             )
-            ->groupBy('s.grade', 's.section')
+            ->groupBy('s.grade', 's.section', 'g.label')
             ->get()
             ->keyBy(function($item) {
                 return $item->grade_value . '|' . $item->section_value;
@@ -360,6 +367,7 @@ class DashboardController extends Controller
     
     /**
      * Get fee collection by grade and section - FOR STACKED BAR CHART
+     * ✅ OPTIMIZED: Pre-aggregate fee payments to avoid subquery overhead
      */
     private function getFeesByGradeSection($branchIds): array
     {
@@ -368,37 +376,77 @@ class DashboardController extends Controller
                 return [];
             }
             
-            // Get fee collection stats grouped by grade and section
+            // ✅ OPTIMIZED: Pre-aggregate fee payments in a single query
+            $feeAggregates = DB::table('fee_payments')
+                ->select(
+                    'student_id',
+                    DB::raw('SUM(CASE WHEN payment_status = "Completed" THEN amount_paid ELSE 0 END) as paid_amount'),
+                    DB::raw('SUM(total_amount) as total_amount')
+                )
+                ->groupBy('student_id')
+                ->get()
+                ->keyBy('student_id');
+            
+            // ✅ OPTIMIZED: Simplified query without subquery
             $query = DB::table('students as s')
                 ->leftJoin('grades as g', 's.grade', '=', 'g.value')
-                ->leftJoin(DB::raw('(
-                    SELECT 
-                        fp.student_id,
-                        SUM(CASE WHEN fp.payment_status = "Completed" THEN fp.amount_paid ELSE 0 END) as paid_amount,
-                        SUM(fp.total_amount) as total_amount
-                    FROM fee_payments fp
-                    GROUP BY fp.student_id
-                ) as fp'), 's.user_id', '=', 'fp.student_id')
                 ->where('s.student_status', 'Active');
             
             if ($branchIds !== 'all' && !empty($branchIds)) {
                 $query->whereIn('s.branch_id', $branchIds);
             }
             
-            $feeData = $query->select(
+            $students = $query->select(
+                's.id',
+                's.user_id',
                 's.grade',
+                's.section',
                 DB::raw('COALESCE(g.label, CONCAT("Grade ", s.grade)) as grade_label'),
-                DB::raw('COALESCE(s.section, "N/A") as section'),
-                DB::raw('COUNT(s.id) as total_students'),
-                DB::raw('SUM(COALESCE(fp.paid_amount, 0)) as total_paid'),
-                DB::raw('SUM(COALESCE(fp.total_amount, 0)) as total_expected'),
-                DB::raw('COUNT(CASE WHEN COALESCE(fp.paid_amount, 0) > 0 THEN 1 END) as students_paid'),
-                DB::raw('COUNT(CASE WHEN COALESCE(fp.paid_amount, 0) = 0 AND COALESCE(fp.total_amount, 0) > 0 THEN 1 END) as students_unpaid')
+                DB::raw('COALESCE(g.order, 999) as grade_order')
             )
-            ->groupBy('s.grade', 's.section', 'g.label', 'g.order')
-            ->orderBy(DB::raw('COALESCE(g.order, 999)'), 'asc')
-            ->orderBy('s.section', 'asc')
-            ->get();
+            ->get()
+            ->groupBy(function($item) {
+                return $item->grade . '|' . ($item->section ?? 'N/A');
+            });
+            
+            // Process grouped data
+            $feeData = $students->map(function($group, $key) use ($feeAggregates) {
+                $first = $group->first();
+                $totalStudents = $group->count();
+                $totalPaid = 0;
+                $totalExpected = 0;
+                $studentsPaid = 0;
+                $studentsUnpaid = 0;
+                
+                foreach ($group as $student) {
+                    $fee = $feeAggregates->get($student->user_id);
+                    if ($fee) {
+                        $paid = (float) $fee->paid_amount;
+                        $expected = (float) $fee->total_amount;
+                        $totalPaid += $paid;
+                        $totalExpected += $expected;
+                        if ($paid > 0) {
+                            $studentsPaid++;
+                        } elseif ($expected > 0) {
+                            $studentsUnpaid++;
+                        }
+                    }
+                }
+                
+                return (object) [
+                    'grade' => $first->grade,
+                    'grade_label' => $first->grade_label,
+                    'section' => $first->section ?? 'N/A',
+                    'grade_order' => $first->grade_order,
+                    'total_students' => $totalStudents,
+                    'total_paid' => $totalPaid,
+                    'total_expected' => $totalExpected,
+                    'students_paid' => $studentsPaid,
+                    'students_unpaid' => $studentsUnpaid
+                ];
+            })
+            ->sortBy(['grade_order', 'section'])
+            ->values();
             
             // Format data for stacked bar chart
             return $feeData->map(function($item) {

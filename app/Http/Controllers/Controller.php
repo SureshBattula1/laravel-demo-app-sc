@@ -34,18 +34,45 @@ abstract class Controller
                 return [];
             }
             
-            // ✅ OPTIMIZED: Only select id instead of loading full model
-            $branch = \App\Models\Branch::select('id')->find($user->branch_id);
-            if ($branch) {
-                // ✅ OPTIMIZED: getDescendantIds uses recursive CTE (1 query instead of N)
-                return $branch->getDescendantIds(true);
-            }
-            return [$user->branch_id];
+            // ✅ OPTIMIZED: Use raw query to get descendant IDs without loading model
+            // This avoids loading the Branch model and directly executes the CTE
+            $descendants = \Illuminate\Support\Facades\DB::select("
+                WITH RECURSIVE branch_tree AS (
+                    SELECT id, parent_branch_id
+                    FROM branches
+                    WHERE parent_branch_id = ?
+                    AND deleted_at IS NULL
+                    
+                    UNION ALL
+                    
+                    SELECT b.id, b.parent_branch_id
+                    FROM branches b
+                    INNER JOIN branch_tree bt ON b.parent_branch_id = bt.id
+                    WHERE b.deleted_at IS NULL
+                )
+                SELECT id FROM branch_tree
+            ", [$user->branch_id]);
+            
+            $ids = collect($descendants)->pluck('id')->toArray();
+            array_unshift($ids, $user->branch_id); // Include self
+            
+            return $ids;
         }
         
-        // ✅ OPTIMIZED: Check for cross-branch access permission (now uses single query)
-        // This check is done after role check to avoid unnecessary permission queries for BranchAdmin
-        if ($user->hasCrossBranchAccess()) {
+        // ✅ OPTIMIZED: Check for cross-branch access permission with single optimized query
+        // Check permissions directly without method call overhead
+        $hasCrossBranch = \Illuminate\Support\Facades\DB::table('user_roles')
+            ->join('role_permissions', 'user_roles.role_id', '=', 'role_permissions.role_id')
+            ->join('permissions', 'role_permissions.permission_id', '=', 'permissions.id')
+            ->where('user_roles.user_id', $user->id)
+            ->whereIn('permissions.slug', [
+                'system.cross_branch_access',
+                'system.manage_all_branches',
+                'system.view_all_branches'
+            ])
+            ->exists();
+        
+        if ($hasCrossBranch) {
             return 'all';
         }
         
