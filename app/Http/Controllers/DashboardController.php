@@ -61,7 +61,8 @@ class DashboardController extends Controller
                 'fees' => $this->getFeesStats($accessibleBranchIds, $fromDate, $toDate),
                 'fees_by_class' => $this->getFeesByGradeSection($accessibleBranchIds),
                 'trends' => $this->getTrendData($accessibleBranchIds, $fromDate, $toDate),
-                'quick_stats' => $this->getQuickStats($accessibleBranchIds, $fromDate, $toDate)
+                'quick_stats' => $this->getQuickStats($accessibleBranchIds, $fromDate, $toDate),
+                'financial' => $this->getFinancialStats($accessibleBranchIds, $fromDate, $toDate)
             ];
 
             return response()->json([
@@ -279,6 +280,120 @@ class DashboardController extends Controller
             Log::error('Fee stats error', ['error' => $e->getMessage()]);
             return ['total_collected' => 0, 'total_pending' => 0, 'total_overdue' => 0, 'collection_rate' => 0];
         }
+    }
+    
+    /**
+     * Get financial statistics from transactions table
+     * Includes income, expenses, net balance, and payment mode breakdown
+     */
+    private function getFinancialStats($branchIds, $fromDate, $toDate): array
+    {
+        try {
+            if (!Schema::hasTable('transactions')) {
+                return $this->getEmptyFinancialStats();
+            }
+            
+            $transactionQuery = DB::table('transactions')
+                ->where('status', 'Approved')
+                ->whereBetween('transaction_date', [$fromDate, $toDate]);
+            
+            if ($branchIds !== 'all' && !empty($branchIds)) {
+                $transactionQuery->whereIn('branch_id', $branchIds);
+            }
+            
+            // Get total income and expenses
+            $totals = $transactionQuery->select(
+                DB::raw('SUM(CASE WHEN type = "Income" THEN amount ELSE 0 END) as total_income'),
+                DB::raw('SUM(CASE WHEN type = "Expense" THEN amount ELSE 0 END) as total_expenses'),
+                DB::raw('COUNT(CASE WHEN type = "Income" THEN 1 END) as income_transactions'),
+                DB::raw('COUNT(CASE WHEN type = "Expense" THEN 1 END) as expense_transactions')
+            )->first();
+            
+            $totalIncome = (float) ($totals->total_income ?? 0);
+            $totalExpenses = (float) ($totals->total_expenses ?? 0);
+            $netBalance = $totalIncome - $totalExpenses;
+            
+            // Get income by payment method
+            $incomeByModeQuery = DB::table('transactions')
+                ->where('status', 'Approved')
+                ->where('type', 'Income')
+                ->whereBetween('transaction_date', [$fromDate, $toDate]);
+            
+            if ($branchIds !== 'all' && !empty($branchIds)) {
+                $incomeByModeQuery->whereIn('branch_id', $branchIds);
+            }
+            
+            $incomeByMode = $incomeByModeQuery->select(
+                    'payment_method',
+                    DB::raw('SUM(amount) as total'),
+                    DB::raw('COUNT(*) as count')
+                )
+                ->groupBy('payment_method')
+                ->get()
+                ->pluck('total', 'payment_method')
+                ->toArray();
+            
+            // Get expenses by payment method
+            $expensesByModeQuery = DB::table('transactions')
+                ->where('status', 'Approved')
+                ->where('type', 'Expense')
+                ->whereBetween('transaction_date', [$fromDate, $toDate]);
+            
+            if ($branchIds !== 'all' && !empty($branchIds)) {
+                $expensesByModeQuery->whereIn('branch_id', $branchIds);
+            }
+            
+            $expensesByMode = $expensesByModeQuery->select(
+                    'payment_method',
+                    DB::raw('SUM(amount) as total'),
+                    DB::raw('COUNT(*) as count')
+                )
+                ->groupBy('payment_method')
+                ->get()
+                ->pluck('total', 'payment_method')
+                ->toArray();
+            
+            // Ensure all payment methods are included (even if 0)
+            $paymentMethods = ['Cash', 'Check', 'Card', 'Bank Transfer', 'UPI', 'Other'];
+            $incomeByModeFormatted = [];
+            $expensesByModeFormatted = [];
+            
+            foreach ($paymentMethods as $method) {
+                $incomeByModeFormatted[$method] = (float) ($incomeByMode[$method] ?? 0);
+                $expensesByModeFormatted[$method] = (float) ($expensesByMode[$method] ?? 0);
+            }
+            
+            return [
+                'total_income' => round($totalIncome, 2),
+                'total_expenses' => round($totalExpenses, 2),
+                'net_balance' => round($netBalance, 2),
+                'income_transactions' => (int) ($totals->income_transactions ?? 0),
+                'expense_transactions' => (int) ($totals->expense_transactions ?? 0),
+                'income_by_mode' => $incomeByModeFormatted,
+                'expenses_by_mode' => $expensesByModeFormatted
+            ];
+            
+        } catch (\Exception $e) {
+            Log::error('Financial stats error', ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
+            return $this->getEmptyFinancialStats();
+        }
+    }
+    
+    /**
+     * Get empty financial stats structure
+     */
+    private function getEmptyFinancialStats(): array
+    {
+        $paymentMethods = ['Cash', 'Check', 'Card', 'Bank Transfer', 'UPI', 'Other'];
+        return [
+            'total_income' => 0,
+            'total_expenses' => 0,
+            'net_balance' => 0,
+            'income_transactions' => 0,
+            'expense_transactions' => 0,
+            'income_by_mode' => array_fill_keys($paymentMethods, 0),
+            'expenses_by_mode' => array_fill_keys($paymentMethods, 0)
+        ];
     }
     
     /**
