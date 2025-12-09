@@ -613,16 +613,14 @@ class ImportController extends Controller
     protected function parseExcelFile(string $filePath, string $entity): array
     {
         try {
-            Log::info('Starting Excel file parsing', [
-                'file_path' => $filePath,
-                'entity' => $entity,
-                'file_exists' => file_exists($filePath)
-            ]);
-
             // Determine file type and create appropriate reader
             $extension = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
             
-            if ($extension === 'csv') {
+            // Detect actual file type using MIME type or file signature
+            $actualFileType = $this->detectFileType($filePath, $extension);
+            
+            // Use actual file type, not just extension
+            if ($actualFileType === 'csv') {
                 $reader = IOFactory::createReader('Csv');
                 $reader->setInputEncoding('UTF-8');
                 $reader->setDelimiter(',');
@@ -630,11 +628,15 @@ class ImportController extends Controller
                 $reader->setSheetIndex(0);
                 // 🔥 Important: Set these to ensure all rows are read
                 $reader->setReadDataOnly(false);
-            } elseif ($extension === 'xls') {
+            } elseif ($actualFileType === 'xls') {
                 $reader = IOFactory::createReader('Xls');
             } else {
+                // Default to Xlsx (handles .xlsx files)
                 $reader = IOFactory::createReader('Xlsx');
             }
+            
+            // Update extension variable to match actual file type
+            $extension = $actualFileType;
 
             // Load the spreadsheet
             $spreadsheet = $reader->load($filePath);
@@ -691,17 +693,7 @@ class ImportController extends Controller
                     $highestColumn = $actualHighestColumn;
                 }
                 
-                Log::info('CSV row detection', [
-                    'detected_rows' => $highestRow,
-                    'detected_columns' => $highestColumn
-                ]);
             }
-            
-            Log::info('Excel file loaded', [
-                'highest_row' => $highestRow,
-                'highest_column' => $highestColumn,
-                'extension' => $extension
-            ]);
 
             // Read header row (first row)
             $headers = []; // Will store: ['col_index' => 'normalized_header_name']
@@ -710,6 +702,20 @@ class ImportController extends Controller
             
             // 🔥 For CSV, use native PHP CSV reading to preserve empty columns exactly
             if ($extension === 'csv') {
+                // 🔥 Validate that this is actually a CSV file, not an Excel file
+                $fileHandle = fopen($filePath, 'rb');
+                if ($fileHandle === false) {
+                    throw new \Exception('Failed to open CSV file');
+                }
+                
+                $firstBytes = fread($fileHandle, 8);
+                fclose($fileHandle);
+                
+                // If file starts with PK (ZIP signature), it's actually an Excel file
+                if ($firstBytes && substr($firstBytes, 0, 2) === 'PK') {
+                    throw new \Exception('The uploaded file appears to be an Excel file (.xlsx) but was detected as CSV. Please save your file as .xlsx format or ensure the file extension matches the file type.');
+                }
+                
                 // Read CSV file directly using PHP's native functions to preserve empty columns
                 $csvFile = fopen($filePath, 'r');
                 if ($csvFile === false) {
@@ -724,6 +730,17 @@ class ImportController extends Controller
                     throw new \Exception('Failed to read CSV header row');
                 }
                 
+                // Validate header row doesn't contain binary data
+                foreach ($headerRowData as $idx => $header) {
+                    if (is_string($header) && (preg_match('/[\x00-\x08\x0B-\x0C\x0E-\x1F]/', $header) || 
+                        stripos($header, 'PK') === 0 || 
+                        stripos($header, '<?xml') !== false ||
+                        stripos($header, 'workbook.xml') !== false ||
+                        stripos($header, '[Content_Types]') !== false)) {
+                        throw new \Exception('The file appears to be an Excel file (.xlsx) but is being read as CSV. Please save your file as .xlsx format or ensure the file extension matches the file type.');
+                    }
+                }
+                
                 // Process each header by index - preserve ALL positions including empty ones
                 foreach ($headerRowData as $colIndex => $headerValue) {
                     $headerValue = trim($headerValue ?? '');
@@ -734,35 +751,12 @@ class ImportController extends Controller
                         $normalized = $this->normalizeHeader($headerValue);
                         $headers[$colIndex] = $normalized; // Store by index
                         
-                        // 🔥 Debug specific headers
-                        if (stripos($headerValue, 'last') !== false || stripos($headerValue, 'name') !== false || stripos($headerValue, 'percentage') !== false || stripos($headerValue, 'transfer') !== false) {
-                            Log::info('CSV Header normalization', [
-                                'column_index' => $colIndex,
-                                'original' => $headerValue,
-                                'normalized' => $normalized
-                            ]);
-                        }
                     } else {
                         // Store null for empty headers to preserve column position
                         $headers[$colIndex] = null;
                     }
                 }
                 
-                // 🔥 Debug: Show exact header positions for critical columns
-                $criticalHeaders = [];
-                foreach ($headers as $idx => $hdr) {
-                    if ($hdr && (stripos($hdr, 'previous') !== false || stripos($hdr, 'transfer') !== false || stripos($hdr, 'emergency') !== false || stripos($hdr, 'guardian') !== false)) {
-                        $criticalHeaders[$idx] = $hdr;
-                    }
-                }
-                
-                Log::info('CSV Headers with positions', [
-                    'total_columns' => count($headerRowData),
-                    'non_empty_headers' => count(array_filter($headers, fn($h) => $h !== null)),
-                    'sample_headers' => array_slice($originalHeaders, 30, 10), // Show Guardian/Emergency area
-                    'critical_headers' => $criticalHeaders,
-                    'header_row_sample' => array_slice($headerRowData, 30, 10) // Show actual header values
-                ]);
             } else {
                 // For Excel files, read all columns (including empty ones) to preserve positions
                 $maxColIndex = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::columnIndexFromString($highestColumn);
@@ -786,11 +780,13 @@ class ImportController extends Controller
                 }
             }
             
-            Log::info('Headers extracted', [
-                'original_headers' => array_values($originalHeaders),
-                'normalized_headers' => array_values($headers),
-                'header_mapping' => array_combine(array_values($originalHeaders), array_values($headers))
-            ]);
+            // Build header mapping only for non-null headers
+            $headerMapping = [];
+            foreach ($headers as $colIndex => $normalizedHeader) {
+                if ($normalizedHeader !== null && isset($originalHeaders[$colIndex])) {
+                    $headerMapping[$originalHeaders[$colIndex]] = $normalizedHeader;
+                }
+            }
 
             if (empty($headers)) {
                 throw new \Exception('No headers found in the Excel file. Please ensure the first row contains column names.');
@@ -817,38 +813,11 @@ class ImportController extends Controller
                 }
                 fclose($csvHandle);
                 
-                // 🔥 Debug: Show exact data positions for first row
-                $firstRowSample = $allCsvRows[0] ?? [];
-                $criticalData = [];
-                foreach ($firstRowSample as $idx => $val) {
-                    if (isset($headers[$idx]) && $headers[$idx] && (stripos($headers[$idx], 'previous') !== false || stripos($headers[$idx], 'transfer') !== false)) {
-                        $criticalData[$idx] = [
-                            'header' => $headers[$idx],
-                            'value' => $val
-                        ];
-                    }
-                }
-                
-                Log::info('CSV rows read', [
-                    'total_rows_read' => count($allCsvRows),
-                    'first_row_sample' => array_slice($firstRowSample, 30, 15), // Show Guardian/Emergency area
-                    'critical_data_mapping' => $criticalData,
-                    'first_row_total_columns' => count($firstRowSample)
-                ]);
             }
             
             // Read data rows
             $data = [];
             $rowNumber = 0;
-
-            Log::info('Starting to read data rows', [
-                'extension' => $extension,
-                'highest_row' => $highestRow,
-                'header_count' => count($headers),
-                'will_read_from_row' => 2,
-                'will_read_to_row' => $highestRow,
-                'csv_rows_loaded' => count($allCsvRows)
-            ]);
 
             for ($row = 2; $row <= $highestRow; $row++) {
                 $rowData = [];
@@ -864,15 +833,6 @@ class ImportController extends Controller
                     }
                     $rowArray = $allCsvRows[$rowArrayIndex];
                     
-                    // 🔥 CRITICAL: Validate column count matches
-                    if (count($rowArray) !== count($headerRowData)) {
-                        Log::warning('CSV column count mismatch', [
-                            'row' => $row,
-                            'header_columns' => count($headerRowData),
-                            'data_columns' => count($rowArray),
-                            'difference' => count($headerRowData) - count($rowArray)
-                        ]);
-                    }
                     
                     // 🔥 CRITICAL: Process ALL headers by index, including empty ones
                     // This ensures column positions match between headers and data
@@ -902,17 +862,6 @@ class ImportController extends Controller
                         // Map header to database field
                         $dbField = $this->mapHeaderToField($headerName, $fieldMapping);
                         
-                        // 🔥 Debug first row for critical fields
-                        if ($rowNumber < 1 && in_array($headerName, ['previous_percentage', 'transfer_certificate_number', 'emergency_contact_name', 'previous_grade', 'previous_school'])) {
-                            Log::info('CSV Data mapping debug', [
-                                'row' => $row,
-                                'col_index' => $colIndex,
-                                'header_name' => $headerName,
-                                'db_field' => $dbField,
-                                'cell_value' => $cellValue,
-                                'row_array_length' => count($rowArray)
-                            ]);
-                        }
                         
                         if ($dbField) {
                             // Handle date fields
@@ -924,16 +873,19 @@ class ImportController extends Controller
                             }
                         }
                     }
-                    
-                    // Close file after last row
-                    if ($row >= $highestRow && $csvHandle) {
-                        fclose($csvHandle);
-                        $csvHandle = null;
-                    }
                 } else {
                     // For Excel files, also use array-based reading to preserve column positions
-                    $rowArray = $worksheet->rangeToArray('A' . $row . ':' . $highestColumn . $row, null, false, false, false);
+                    // But limit to the actual number of headers we found
+                    $maxHeaderIndex = max(array_keys($headers));
+                    $lastColumn = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($maxHeaderIndex + 1);
+                    $rowArray = $worksheet->rangeToArray('A' . $row . ':' . $lastColumn . $row, null, false, false, false);
                     $rowArray = !empty($rowArray) ? $rowArray[0] : [];
+                    
+                    // Validate column count matches headers
+                    if (count($rowArray) > count($headers)) {
+                        // Truncate to match header count
+                        $rowArray = array_slice($rowArray, 0, count($headers));
+                    }
                     
                     // Process each header by index
                     foreach ($headers as $colIndex => $headerName) {
@@ -942,17 +894,38 @@ class ImportController extends Controller
                             continue;
                         }
                         
-                        // Get value from array by index
+                        // Get value from array by index (ensure we don't go beyond array bounds)
                         $cellValue = isset($rowArray[$colIndex]) ? $rowArray[$colIndex] : null;
+                        
+                        // 🔥 Validate cell value - skip if it looks like binary/corrupted data
+                        // Only check if the value is suspiciously long or contains Excel internal structure
+                        if (!is_null($cellValue) && is_string($cellValue)) {
+                            $trimmedValue = trim($cellValue);
+                            // Only flag as binary if it's very long AND contains Excel internal markers
+                            // Short strings with PK might be valid (like "PK-123" employee ID)
+                            if (strlen($trimmedValue) > 100 && (
+                                preg_match('/[\x00-\x08\x0B-\x0C\x0E-\x1F]/', $trimmedValue) || 
+                                (stripos($trimmedValue, 'PK') === 0 && stripos($trimmedValue, 'workbook.xml') !== false) ||
+                                stripos($trimmedValue, '<?xml') !== false ||
+                                stripos($trimmedValue, 'workbook.xml') !== false ||
+                                stripos($trimmedValue, '[Content_Types]') !== false
+                            )) {
+                                $cellValue = null;
+                            }
+                        }
                         
                         // Handle formula cells if it's a formula object
                         if ($cellValue instanceof \PhpOffice\PhpSpreadsheet\Cell\Cell && $cellValue->getDataType() === 'f') {
                             $col = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($colIndex + 1);
-                            $cellValue = $worksheet->getCell($col . $row)->getCalculatedValue();
+                            try {
+                                $cellValue = $worksheet->getCell($col . $row)->getCalculatedValue();
+                            } catch (\Exception $e) {
+                                $cellValue = null;
+                            }
                         }
                         
                         // Trim whitespace
-                        $cellValue = is_null($cellValue) ? null : trim($cellValue);
+                        $cellValue = is_null($cellValue) ? null : (is_string($cellValue) ? trim($cellValue) : $cellValue);
                         
                         // Convert empty strings to null
                         if ($cellValue === '') {
@@ -995,45 +968,12 @@ class ImportController extends Controller
                     }
                 }
 
-                // 🔥 Debug first few rows data to see what was mapped
-                if ($rowNumber < 3) {
-                    Log::info('Row data after mapping', [
-                        'row_number' => $rowNumber + 1,
-                        'row_data' => $rowData,
-                        'has_last_name' => isset($rowData['last_name']),
-                        'last_name_value' => $rowData['last_name'] ?? 'NOT SET',
-                        'has_first_name' => isset($rowData['first_name']),
-                        'first_name_value' => $rowData['first_name'] ?? 'NOT SET',
-                        'row_data_keys' => array_keys($rowData),
-                        'row_data_count' => count($rowData)
-                    ]);
-                }
-
                 $data[] = $rowData;
                 $rowNumber++;
-                
-                // 🔥 Log progress for large files
-                if ($rowNumber % 10 === 0) {
-                    Log::debug('Parsing progress', [
-                        'rows_parsed' => $rowNumber,
-                        'extension' => $extension
-                    ]);
-                }
             }
 
-            Log::info('Excel parsing completed', [
-                'extension' => $extension,
-                'total_rows_parsed' => count($data),
-                'total_rows_in_file' => $highestRow - 1,
-                'expected_data_rows' => max(0, $highestRow - 1)
-            ]);
 
             if (empty($data) && $extension === 'csv') {
-                Log::warning('No data rows parsed from CSV', [
-                    'highest_row' => $highestRow,
-                    'header_count' => count($headers),
-                    'file_path' => $filePath
-                ]);
             }
 
             return $data;
@@ -1216,10 +1156,6 @@ class ImportController extends Controller
         // First try exact match
         foreach ($fieldMapping as $dbField => $possibleHeaders) {
             if (in_array($headerName, $possibleHeaders)) {
-                Log::debug('Header mapped (exact match)', [
-                    'normalized_header' => $headerName,
-                    'db_field' => $dbField
-                ]);
                 return $dbField;
             }
         }
@@ -1228,18 +1164,12 @@ class ImportController extends Controller
         foreach ($fieldMapping as $dbField => $possibleHeaders) {
             foreach ($possibleHeaders as $possibleHeader) {
                 if (strpos($headerName, $possibleHeader) !== false || strpos($possibleHeader, $headerName) !== false) {
-                    Log::debug('Header mapped (partial match)', [
-                        'normalized_header' => $headerName,
-                        'matched_against' => $possibleHeader,
-                        'db_field' => $dbField
-                    ]);
                     return $dbField;
                 }
             }
         }
         
         // Return null if no match found (unknown column)
-        Log::warning('Header not mapped', ['normalized_header' => $headerName]);
         return null;
     }
 
@@ -1276,11 +1206,6 @@ class ImportController extends Controller
                 $date->modify("+{$days} days");
                 return $date->format('Y-m-d');
             } catch (\Exception $e) {
-                Log::warning('Excel date serial conversion failed', [
-                    'date_value' => $dateValue,
-                    'numeric_value' => $numericValue,
-                    'error' => $e->getMessage()
-                ]);
                 // Fall through to try as date string
             }
         }
@@ -1320,12 +1245,61 @@ class ImportController extends Controller
             try {
                 return \Carbon\Carbon::parse($trimmed)->format('Y-m-d');
             } catch (\Exception $e) {
-                Log::warning('Date conversion failed', ['date_value' => $dateValue, 'error' => $e->getMessage()]);
                 return null;
             }
         }
 
         return null;
+    }
+
+    /**
+     * Detect actual file type by checking file signature/MIME type
+     */
+    protected function detectFileType(string $filePath, string $extension): string
+    {
+        // Check file signature (magic bytes)
+        if (!file_exists($filePath) || !is_readable($filePath)) {
+            return $extension; // Fallback to extension
+        }
+        
+        $handle = fopen($filePath, 'rb');
+        if (!$handle) {
+            return $extension;
+        }
+        
+        $firstBytes = fread($handle, 8);
+        fclose($handle);
+        
+        if ($firstBytes === false) {
+            return $extension;
+        }
+        
+        // Check for Excel file signatures
+        // XLSX files start with PK (ZIP signature) - Excel files are ZIP archives
+        if (substr($firstBytes, 0, 2) === 'PK') {
+            // Check if it's actually an Excel file by looking for Excel-specific files
+            // XLSX: PK\x03\x04 (ZIP) + contains xl/ folder
+            // XLS: D0 CF 11 E0 A1 B1 1A E1 (OLE2 format)
+            if (strpos($firstBytes, "\x50\x4B\x03\x04") === 0) {
+                // Check if file contains Excel structure (quick check)
+                $content = file_get_contents($filePath, false, null, 0, 1024);
+                if (strpos($content, 'xl/') !== false || strpos($content, '[Content_Types].xml') !== false) {
+                    return 'xlsx';
+                }
+            }
+            // XLS (old format) signature
+            if (substr($firstBytes, 0, 8) === "\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1") {
+                return 'xls';
+            }
+        }
+        
+        // If extension says CSV but file looks like Excel, return xlsx
+        if ($extension === 'csv' && substr($firstBytes, 0, 2) === 'PK') {
+            return 'xlsx';
+        }
+        
+        // Default to extension
+        return $extension;
     }
 
     /**
