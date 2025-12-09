@@ -89,6 +89,19 @@ class ImportService
             // Merge Excel row data (all other fields)
             $importData = array_merge($importData, $row);
 
+            // 🔥 Debug first row to see what data we have
+            if ($rowNumber === 2) {
+                Log::info('Inserting first student row', [
+                    'row_number' => $rowNumber - 1,
+                    'has_last_name' => isset($importData['last_name']),
+                    'last_name_value' => $importData['last_name'] ?? 'NOT SET',
+                    'has_first_name' => isset($importData['first_name']),
+                    'first_name_value' => $importData['first_name'] ?? 'NOT SET',
+                    'all_keys' => array_keys($importData),
+                    'row_data_keys' => array_keys($row)
+                ]);
+            }
+
             // Filter out null values for better performance (optional, but cleaner)
             // Actually, we should keep null values as they might be needed for validation
             // $importData = array_filter($importData, fn($value) => $value !== null);
@@ -221,7 +234,14 @@ class ImportService
 
             if ($validator->fails()) {
                 foreach ($validator->errors()->messages() as $field => $messages) {
-                    $errors = array_merge($errors, $messages);
+                    foreach ($messages as $message) {
+                        // 🔥 Make error messages more descriptive
+                        if (strpos($message, 'required') !== false) {
+                            $errors[] = "Missing required field: {$field}";
+                        } else {
+                            $errors[] = "{$field}: {$message}";
+                        }
+                    }
                 }
             }
 

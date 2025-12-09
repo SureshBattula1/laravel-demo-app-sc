@@ -267,13 +267,62 @@ class ImportController extends Controller
             // Parse Excel and insert to staging
             $data = $this->parseExcelFile($filePath, $entity);
 
+            // 🔥 Critical: Log parsed data count
+            Log::info('Data parsed from file', [
+                'batch_id' => $batchId,
+                'entity' => $entity,
+                'data_count' => count($data),
+                'file_path' => $filePath,
+                'first_row_sample' => !empty($data) ? array_slice($data, 0, 1) : 'NO DATA'
+            ]);
+
+            if (empty($data)) {
+                Log::error('No data parsed from file', [
+                    'batch_id' => $batchId,
+                    'entity' => $entity,
+                    'file_path' => $filePath,
+                    'file_exists' => file_exists($filePath),
+                    'file_size' => file_exists($filePath) ? filesize($filePath) : 0
+                ]);
+                
+                ImportHistory::where('batch_id', $batchId)->update([
+                    'status' => 'failed',
+                    'error_message' => 'No data found in the uploaded file. Please check the file format and ensure it contains data rows.',
+                ]);
+
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No data found in the uploaded file',
+                    'error' => 'The file appears to be empty or could not be parsed. Please check the file format.',
+                ], 400);
+            }
+
             $context = $importHistory->import_context ?? [];
 
             if ($entity === 'student') {
                 $inserted = $this->importService->insertStudentsStagingData($batchId, $data, $context);
+                Log::info('Student staging data inserted', [
+                    'batch_id' => $batchId,
+                    'inserted_count' => $inserted,
+                    'expected_count' => count($data)
+                ]);
+                
+                // 🔥 Verify records were actually inserted
+                $actualCount = \App\Models\StudentImport::where('batch_id', $batchId)->count();
+                Log::info('Actual records in database', [
+                    'batch_id' => $batchId,
+                    'actual_count' => $actualCount,
+                    'inserted_count' => $inserted
+                ]);
+                
                 $validationResult = $this->importService->validateStudents($batchId);
             } else if ($entity === 'teacher') {
                 $inserted = $this->importService->insertTeachersStagingData($batchId, $data, $context);
+                Log::info('Teacher staging data inserted', [
+                    'batch_id' => $batchId,
+                    'inserted_count' => $inserted,
+                    'expected_count' => count($data)
+                ]);
                 $validationResult = $this->importService->validateTeachers($batchId);
             }
 
@@ -347,18 +396,28 @@ class ImportController extends Controller
 
             $records = $query->orderBy('row_number')->paginate($perPage);
             
-            // 🔥 Debug the results
+            // 🔥 Debug the results - check database directly
+            $totalInDb = $model::where('batch_id', $batchId)->count();
+            $validInDb = $model::where('batch_id', $batchId)->valid()->count();
+            $invalidInDb = $model::where('batch_id', $batchId)->invalid()->count();
+            $pendingInDb = $model::where('batch_id', $batchId)->pending()->count();
+            
             Log::info('Preview results', [
+                'batch_id' => $batchId,
                 'status_filter_applied' => $status,
                 'records_returned' => $records->count(),
-                'total_in_page' => $records->total()
+                'total_in_page' => $records->total(),
+                'total_in_db' => $totalInDb,
+                'valid_in_db' => $validInDb,
+                'invalid_in_db' => $invalidInDb,
+                'pending_in_db' => $pendingInDb
             ]);
 
             // Get summary
             $summary = [
-                'total' => $model::where('batch_id', $batchId)->count(),
-                'valid' => $model::where('batch_id', $batchId)->valid()->count(),
-                'invalid' => $model::where('batch_id', $batchId)->invalid()->count(),
+                'total' => $totalInDb,
+                'valid' => $validInDb,
+                'invalid' => $invalidInDb,
                 'imported' => $model::where('batch_id', $batchId)->where('imported_to_production', true)->count(),
             ];
 
@@ -568,6 +627,9 @@ class ImportController extends Controller
                 $reader->setInputEncoding('UTF-8');
                 $reader->setDelimiter(',');
                 $reader->setEnclosure('"');
+                $reader->setSheetIndex(0);
+                // 🔥 Important: Set these to ensure all rows are read
+                $reader->setReadDataOnly(false);
             } elseif ($extension === 'xls') {
                 $reader = IOFactory::createReader('Xls');
             } else {
@@ -582,23 +644,153 @@ class ImportController extends Controller
             $highestRow = $worksheet->getHighestRow();
             $highestColumn = $worksheet->getHighestColumn();
             
+            // 🔥 For CSV files, getHighestRow() and getHighestColumn() might not detect correctly
+            // So we need to manually count rows and columns
+            if ($extension === 'csv') {
+                // Use getHighestDataRow() which is more reliable for CSV
+                $actualHighestRow = $worksheet->getHighestDataRow();
+                
+                // If that doesn't work, manually count rows
+                if ($actualHighestRow <= 1) {
+                    $actualHighestRow = 1;
+                    $maxRowsToCheck = 10000; // Reasonable max
+                    for ($r = 1; $r <= $maxRowsToCheck; $r++) {
+                        $hasData = false;
+                        // Check first few columns to see if row has data
+                        for ($c = 1; $c <= 5; $c++) {
+                            $col = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($c);
+                            try {
+                                $cellValue = $worksheet->getCell($col . $r)->getValue();
+                                if (!empty(trim($cellValue))) {
+                                    $hasData = true;
+                                    break;
+                                }
+                            } catch (\Exception $e) {
+                                // Cell doesn't exist, continue
+                                break;
+                            }
+                        }
+                        if ($hasData) {
+                            $actualHighestRow = $r;
+                        } elseif ($r > $actualHighestRow + 10) {
+                            // If we've gone 10 rows without data, stop
+                            break;
+                        }
+                    }
+                }
+                $highestRow = $actualHighestRow;
+                
+                // For columns, use getHighestDataColumn() or read header row more thoroughly
+                $actualHighestColumn = $worksheet->getHighestDataColumn();
+                if (empty($actualHighestColumn) || $actualHighestColumn === 'A') {
+                    $maxColumns = 100;
+                    $highestColumnIndex = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::columnIndexFromString($highestColumn);
+                    $highestColumnIndex = max($highestColumnIndex, min($maxColumns, 50));
+                    $highestColumn = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($highestColumnIndex);
+                } else {
+                    $highestColumn = $actualHighestColumn;
+                }
+                
+                Log::info('CSV row detection', [
+                    'detected_rows' => $highestRow,
+                    'detected_columns' => $highestColumn
+                ]);
+            }
+            
             Log::info('Excel file loaded', [
                 'highest_row' => $highestRow,
-                'highest_column' => $highestColumn
+                'highest_column' => $highestColumn,
+                'extension' => $extension
             ]);
 
             // Read header row (first row)
-            $headers = [];
+            $headers = []; // Will store: ['col_index' => 'normalized_header_name']
             $headerRow = 1;
+            $originalHeaders = [];
             
-            for ($col = 'A'; $col <= $highestColumn; $col++) {
-                $headerValue = trim($worksheet->getCell($col . $headerRow)->getValue());
-                if (!empty($headerValue)) {
-                    $headers[$col] = $this->normalizeHeader($headerValue);
+            // 🔥 For CSV, use native PHP CSV reading to preserve empty columns exactly
+            if ($extension === 'csv') {
+                // Read CSV file directly using PHP's native functions to preserve empty columns
+                $csvFile = fopen($filePath, 'r');
+                if ($csvFile === false) {
+                    throw new \Exception('Failed to open CSV file');
+                }
+                
+                // Read header row using fgetcsv (preserves empty columns)
+                $headerRowData = fgetcsv($csvFile, 0, ',', '"');
+                fclose($csvFile);
+                
+                if ($headerRowData === false || empty($headerRowData)) {
+                    throw new \Exception('Failed to read CSV header row');
+                }
+                
+                // Process each header by index - preserve ALL positions including empty ones
+                foreach ($headerRowData as $colIndex => $headerValue) {
+                    $headerValue = trim($headerValue ?? '');
+                    
+                    // Store header even if empty (to preserve column position)
+                    if (!empty($headerValue)) {
+                        $originalHeaders[$colIndex] = $headerValue;
+                        $normalized = $this->normalizeHeader($headerValue);
+                        $headers[$colIndex] = $normalized; // Store by index
+                        
+                        // 🔥 Debug specific headers
+                        if (stripos($headerValue, 'last') !== false || stripos($headerValue, 'name') !== false || stripos($headerValue, 'percentage') !== false || stripos($headerValue, 'transfer') !== false) {
+                            Log::info('CSV Header normalization', [
+                                'column_index' => $colIndex,
+                                'original' => $headerValue,
+                                'normalized' => $normalized
+                            ]);
+                        }
+                    } else {
+                        // Store null for empty headers to preserve column position
+                        $headers[$colIndex] = null;
+                    }
+                }
+                
+                // 🔥 Debug: Show exact header positions for critical columns
+                $criticalHeaders = [];
+                foreach ($headers as $idx => $hdr) {
+                    if ($hdr && (stripos($hdr, 'previous') !== false || stripos($hdr, 'transfer') !== false || stripos($hdr, 'emergency') !== false || stripos($hdr, 'guardian') !== false)) {
+                        $criticalHeaders[$idx] = $hdr;
+                    }
+                }
+                
+                Log::info('CSV Headers with positions', [
+                    'total_columns' => count($headerRowData),
+                    'non_empty_headers' => count(array_filter($headers, fn($h) => $h !== null)),
+                    'sample_headers' => array_slice($originalHeaders, 30, 10), // Show Guardian/Emergency area
+                    'critical_headers' => $criticalHeaders,
+                    'header_row_sample' => array_slice($headerRowData, 30, 10) // Show actual header values
+                ]);
+            } else {
+                // For Excel files, read all columns (including empty ones) to preserve positions
+                $maxColIndex = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::columnIndexFromString($highestColumn);
+                
+                // 🔥 Read header row as array for Excel too, to handle empty columns correctly
+                $headerArray = $worksheet->rangeToArray('A' . $headerRow . ':' . $highestColumn . $headerRow, null, false, false, false);
+                $headerArray = !empty($headerArray) ? $headerArray[0] : [];
+                
+                foreach ($headerArray as $colIndex => $headerValue) {
+                    $headerValue = trim($headerValue ?? '');
+                    $col = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($colIndex + 1);
+                    
+                    if (!empty($headerValue)) {
+                        $originalHeaders[$col] = $headerValue;
+                        $normalized = $this->normalizeHeader($headerValue);
+                        $headers[$colIndex] = $normalized; // Store by index for consistency
+                    } else {
+                        // Store null for empty headers to preserve column position
+                        $headers[$colIndex] = null;
+                    }
                 }
             }
-
-            Log::info('Headers extracted', ['headers' => array_values($headers)]);
+            
+            Log::info('Headers extracted', [
+                'original_headers' => array_values($originalHeaders),
+                'normalized_headers' => array_values($headers),
+                'header_mapping' => array_combine(array_values($originalHeaders), array_values($headers))
+            ]);
 
             if (empty($headers)) {
                 throw new \Exception('No headers found in the Excel file. Please ensure the first row contains column names.');
@@ -607,57 +799,242 @@ class ImportController extends Controller
             // Map headers to database field names
             $fieldMapping = $this->getFieldMapping($entity);
             
+            // 🔥 For CSV files, read all data rows once using native PHP CSV functions
+            // This preserves empty columns correctly
+            $allCsvRows = [];
+            if ($extension === 'csv') {
+                $csvHandle = fopen($filePath, 'r');
+                if ($csvHandle === false) {
+                    throw new \Exception('Failed to open CSV file for data reading');
+                }
+                
+                // Skip header row (already read)
+                fgetcsv($csvHandle, 0, ',', '"');
+                
+                // Read all data rows
+                while (($csvRow = fgetcsv($csvHandle, 0, ',', '"')) !== false) {
+                    $allCsvRows[] = $csvRow;
+                }
+                fclose($csvHandle);
+                
+                // 🔥 Debug: Show exact data positions for first row
+                $firstRowSample = $allCsvRows[0] ?? [];
+                $criticalData = [];
+                foreach ($firstRowSample as $idx => $val) {
+                    if (isset($headers[$idx]) && $headers[$idx] && (stripos($headers[$idx], 'previous') !== false || stripos($headers[$idx], 'transfer') !== false)) {
+                        $criticalData[$idx] = [
+                            'header' => $headers[$idx],
+                            'value' => $val
+                        ];
+                    }
+                }
+                
+                Log::info('CSV rows read', [
+                    'total_rows_read' => count($allCsvRows),
+                    'first_row_sample' => array_slice($firstRowSample, 30, 15), // Show Guardian/Emergency area
+                    'critical_data_mapping' => $criticalData,
+                    'first_row_total_columns' => count($firstRowSample)
+                ]);
+            }
+            
             // Read data rows
             $data = [];
             $rowNumber = 0;
 
+            Log::info('Starting to read data rows', [
+                'extension' => $extension,
+                'highest_row' => $highestRow,
+                'header_count' => count($headers),
+                'will_read_from_row' => 2,
+                'will_read_to_row' => $highestRow,
+                'csv_rows_loaded' => count($allCsvRows)
+            ]);
+
             for ($row = 2; $row <= $highestRow; $row++) {
                 $rowData = [];
                 $isEmptyRow = true;
+                $hasAnyData = false;
 
-                // Read each column
-                foreach ($headers as $col => $headerName) {
-                    $cellValue = $worksheet->getCell($col . $row)->getValue();
+                // 🔥 For CSV files, use pre-loaded CSV rows
+                if ($extension === 'csv') {
+                    // Get the row data for current row (row 2 = index 0, row 3 = index 1, etc.)
+                    $rowArrayIndex = $row - 2;
+                    if (!isset($allCsvRows[$rowArrayIndex])) {
+                        continue; // Skip if row doesn't exist
+                    }
+                    $rowArray = $allCsvRows[$rowArrayIndex];
                     
-                    // Handle formula cells
-                    if ($cellValue instanceof \PhpOffice\PhpSpreadsheet\Cell\Cell && $cellValue->getDataType() === 'f') {
-                        $cellValue = $worksheet->getCell($col . $row)->getCalculatedValue();
+                    // 🔥 CRITICAL: Validate column count matches
+                    if (count($rowArray) !== count($headerRowData)) {
+                        Log::warning('CSV column count mismatch', [
+                            'row' => $row,
+                            'header_columns' => count($headerRowData),
+                            'data_columns' => count($rowArray),
+                            'difference' => count($headerRowData) - count($rowArray)
+                        ]);
                     }
                     
-                    // Trim whitespace
-                    $cellValue = is_null($cellValue) ? null : trim($cellValue);
-                    
-                    // Check if row is empty
-                    if (!empty($cellValue)) {
-                        $isEmptyRow = false;
-                    }
+                    // 🔥 CRITICAL: Process ALL headers by index, including empty ones
+                    // This ensures column positions match between headers and data
+                    foreach ($headers as $colIndex => $headerName) {
+                        // Skip if header is null (empty header column)
+                        if ($headerName === null) {
+                            continue;
+                        }
+                        
+                        // Get value from array by index (0-based)
+                        $cellValue = isset($rowArray[$colIndex]) ? $rowArray[$colIndex] : null;
+                        
+                        // Trim whitespace
+                        $cellValue = is_null($cellValue) ? null : trim($cellValue);
+                        
+                        // Convert empty strings to null
+                        if ($cellValue === '') {
+                            $cellValue = null;
+                        }
+                        
+                        // Check if row has any data
+                        if (!empty($cellValue)) {
+                            $isEmptyRow = false;
+                            $hasAnyData = true;
+                        }
 
-                    // Map header to database field
-                    $dbField = $this->mapHeaderToField($headerName, $fieldMapping);
+                        // Map header to database field
+                        $dbField = $this->mapHeaderToField($headerName, $fieldMapping);
+                        
+                        // 🔥 Debug first row for critical fields
+                        if ($rowNumber < 1 && in_array($headerName, ['previous_percentage', 'transfer_certificate_number', 'emergency_contact_name', 'previous_grade', 'previous_school'])) {
+                            Log::info('CSV Data mapping debug', [
+                                'row' => $row,
+                                'col_index' => $colIndex,
+                                'header_name' => $headerName,
+                                'db_field' => $dbField,
+                                'cell_value' => $cellValue,
+                                'row_array_length' => count($rowArray)
+                            ]);
+                        }
+                        
+                        if ($dbField) {
+                            // Handle date fields
+                            if (in_array($dbField, ['admission_date', 'date_of_birth', 'joining_date', 'leaving_date'])) {
+                                $rowData[$dbField] = $this->convertDate($cellValue);
+                            } else {
+                                // Store null for empty values instead of empty string
+                                $rowData[$dbField] = $cellValue ?: null;
+                            }
+                        }
+                    }
                     
-                    if ($dbField) {
-                        // Handle date fields
-                        if (in_array($dbField, ['admission_date', 'date_of_birth', 'joining_date', 'leaving_date'])) {
-                            $rowData[$dbField] = $this->convertDate($cellValue);
-                        } else {
-                            $rowData[$dbField] = $cellValue ?: null;
+                    // Close file after last row
+                    if ($row >= $highestRow && $csvHandle) {
+                        fclose($csvHandle);
+                        $csvHandle = null;
+                    }
+                } else {
+                    // For Excel files, also use array-based reading to preserve column positions
+                    $rowArray = $worksheet->rangeToArray('A' . $row . ':' . $highestColumn . $row, null, false, false, false);
+                    $rowArray = !empty($rowArray) ? $rowArray[0] : [];
+                    
+                    // Process each header by index
+                    foreach ($headers as $colIndex => $headerName) {
+                        // Skip if header is null (empty header column)
+                        if ($headerName === null) {
+                            continue;
+                        }
+                        
+                        // Get value from array by index
+                        $cellValue = isset($rowArray[$colIndex]) ? $rowArray[$colIndex] : null;
+                        
+                        // Handle formula cells if it's a formula object
+                        if ($cellValue instanceof \PhpOffice\PhpSpreadsheet\Cell\Cell && $cellValue->getDataType() === 'f') {
+                            $col = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($colIndex + 1);
+                            $cellValue = $worksheet->getCell($col . $row)->getCalculatedValue();
+                        }
+                        
+                        // Trim whitespace
+                        $cellValue = is_null($cellValue) ? null : trim($cellValue);
+                        
+                        // Convert empty strings to null
+                        if ($cellValue === '') {
+                            $cellValue = null;
+                        }
+                        
+                        // Check if row has any data
+                        if (!empty($cellValue)) {
+                            $isEmptyRow = false;
+                            $hasAnyData = true;
+                        }
+
+                        // Map header to database field
+                        $dbField = $this->mapHeaderToField($headerName, $fieldMapping);
+                        
+                        if ($dbField) {
+                            // Handle date fields
+                            if (in_array($dbField, ['admission_date', 'date_of_birth', 'joining_date', 'leaving_date'])) {
+                                $rowData[$dbField] = $this->convertDate($cellValue);
+                            } else {
+                                // Store null for empty values instead of empty string
+                                $rowData[$dbField] = $cellValue ?: null;
+                            }
                         }
                     }
                 }
 
-                // Skip empty rows
-                if ($isEmptyRow) {
-                    continue;
+                // For CSV, only skip if truly empty (no data in any mapped field)
+                // For Excel, use the original logic
+                if ($extension === 'csv') {
+                    if (!$hasAnyData || empty($rowData)) {
+                        if ($row <= 5) {
+                            Log::debug('Skipping empty CSV row', ['row' => $row, 'has_any_data' => $hasAnyData, 'row_data_count' => count($rowData)]);
+                        }
+                        continue;
+                    }
+                } else {
+                    if ($isEmptyRow) {
+                        continue;
+                    }
+                }
+
+                // 🔥 Debug first few rows data to see what was mapped
+                if ($rowNumber < 3) {
+                    Log::info('Row data after mapping', [
+                        'row_number' => $rowNumber + 1,
+                        'row_data' => $rowData,
+                        'has_last_name' => isset($rowData['last_name']),
+                        'last_name_value' => $rowData['last_name'] ?? 'NOT SET',
+                        'has_first_name' => isset($rowData['first_name']),
+                        'first_name_value' => $rowData['first_name'] ?? 'NOT SET',
+                        'row_data_keys' => array_keys($rowData),
+                        'row_data_count' => count($rowData)
+                    ]);
                 }
 
                 $data[] = $rowData;
                 $rowNumber++;
+                
+                // 🔥 Log progress for large files
+                if ($rowNumber % 10 === 0) {
+                    Log::debug('Parsing progress', [
+                        'rows_parsed' => $rowNumber,
+                        'extension' => $extension
+                    ]);
+                }
             }
 
             Log::info('Excel parsing completed', [
+                'extension' => $extension,
                 'total_rows_parsed' => count($data),
-                'total_rows_in_file' => $highestRow - 1
+                'total_rows_in_file' => $highestRow - 1,
+                'expected_data_rows' => max(0, $highestRow - 1)
             ]);
+
+            if (empty($data) && $extension === 'csv') {
+                Log::warning('No data rows parsed from CSV', [
+                    'highest_row' => $highestRow,
+                    'header_count' => count($headers),
+                    'file_path' => $filePath
+                ]);
+            }
 
             return $data;
         } catch (\Exception $e) {
@@ -756,8 +1133,8 @@ class ImportController extends Controller
                 'medical_history' => ['medical_history', 'medicalhistory', 'medical_info'],
                 'allergies' => ['allergies', 'allergy'],
                 'medications' => ['medications', 'medication'],
-                'height_cm' => ['height_cm', 'height', 'height_in_cm'],
-                'weight_kg' => ['weight_kg', 'weight', 'weight_in_kg'],
+                'height_cm' => ['height_cm', 'height', 'height_in_cm', 'heightcm'],
+                'weight_kg' => ['weight_kg', 'weight', 'weight_in_kg', 'weightkg'],
                 
                 // Other
                 'password' => ['password', 'pass'],
@@ -836,8 +1213,13 @@ class ImportController extends Controller
      */
     protected function mapHeaderToField(string $headerName, array $fieldMapping): ?string
     {
+        // First try exact match
         foreach ($fieldMapping as $dbField => $possibleHeaders) {
             if (in_array($headerName, $possibleHeaders)) {
+                Log::debug('Header mapped (exact match)', [
+                    'normalized_header' => $headerName,
+                    'db_field' => $dbField
+                ]);
                 return $dbField;
             }
         }
@@ -846,12 +1228,18 @@ class ImportController extends Controller
         foreach ($fieldMapping as $dbField => $possibleHeaders) {
             foreach ($possibleHeaders as $possibleHeader) {
                 if (strpos($headerName, $possibleHeader) !== false || strpos($possibleHeader, $headerName) !== false) {
+                    Log::debug('Header mapped (partial match)', [
+                        'normalized_header' => $headerName,
+                        'matched_against' => $possibleHeader,
+                        'db_field' => $dbField
+                    ]);
                     return $dbField;
                 }
             }
         }
         
         // Return null if no match found (unknown column)
+        Log::warning('Header not mapped', ['normalized_header' => $headerName]);
         return null;
     }
 
@@ -864,34 +1252,75 @@ class ImportController extends Controller
             return null;
         }
 
-        // If it's already a formatted date string
+        // 🔥 Check if it's a numeric value (Excel date serial number) FIRST
+        // Excel dates are often stored as numbers or numeric strings
+        // Check both numeric and string representations
+        $numericValue = is_numeric($dateValue) ? (float)$dateValue : null;
+        if ($numericValue !== null && $numericValue > 0 && $numericValue < 1000000) {
+            // Likely an Excel date serial number (dates are typically < 1000000)
+            try {
+                // Use PhpSpreadsheet's built-in Excel date conversion
+                if (class_exists('\PhpOffice\PhpSpreadsheet\Shared\Date')) {
+                    $timestamp = \PhpOffice\PhpSpreadsheet\Shared\Date::excelToTimestamp($numericValue);
+                    if ($timestamp !== false) {
+                        return date('Y-m-d', $timestamp);
+                    }
+                }
+                
+                // Fallback: Manual Excel date calculation
+                // Excel date serial: days since 1900-01-01 (Excel incorrectly treats 1900 as leap year)
+                // Use 1899-12-30 as base to match Excel's behavior
+                $excelEpoch = new \DateTime('1899-12-30');
+                $days = (int)$numericValue;
+                $date = clone $excelEpoch;
+                $date->modify("+{$days} days");
+                return $date->format('Y-m-d');
+            } catch (\Exception $e) {
+                Log::warning('Excel date serial conversion failed', [
+                    'date_value' => $dateValue,
+                    'numeric_value' => $numericValue,
+                    'error' => $e->getMessage()
+                ]);
+                // Fall through to try as date string
+            }
+        }
+
+        // If it's a string, try to parse as date
         if (is_string($dateValue)) {
+            $trimmed = trim($dateValue);
+            
+            // Skip if it looks like a serial number (pure digits)
+            if (preg_match('/^\d+$/', $trimmed) && strlen($trimmed) > 3) {
+                // Might be a serial number as string, try Excel conversion
+                $numericValue = (float)$trimmed;
+                if ($numericValue > 0 && $numericValue < 1000000) {
+                    try {
+                        if (class_exists('\PhpOffice\PhpSpreadsheet\Shared\Date')) {
+                            $timestamp = \PhpOffice\PhpSpreadsheet\Shared\Date::excelToTimestamp($numericValue);
+                            if ($timestamp !== false) {
+                                return date('Y-m-d', $timestamp);
+                            }
+                        }
+                    } catch (\Exception $e) {
+                        // Continue to try as date string
+                    }
+                }
+            }
+            
             // Try to parse common date formats
-            $formats = ['Y-m-d', 'd/m/Y', 'm/d/Y', 'd-m-Y', 'Y/m/d', 'Ymd'];
+            $formats = ['Y-m-d', 'd/m/Y', 'm/d/Y', 'd-m-Y', 'Y/m/d', 'Ymd', 'Y-m-d H:i:s'];
             foreach ($formats as $format) {
-                $parsed = \DateTime::createFromFormat($format, $dateValue);
+                $parsed = \DateTime::createFromFormat($format, $trimmed);
                 if ($parsed !== false) {
                     return $parsed->format('Y-m-d');
                 }
             }
             
-            // Try Carbon for flexible parsing
+            // Try Carbon for flexible parsing (last resort)
             try {
-                return \Carbon\Carbon::parse($dateValue)->format('Y-m-d');
+                return \Carbon\Carbon::parse($trimmed)->format('Y-m-d');
             } catch (\Exception $e) {
                 Log::warning('Date conversion failed', ['date_value' => $dateValue, 'error' => $e->getMessage()]);
-                return null;
-            }
-        }
-
-        // If it's a numeric value (Excel date serial number)
-        if (is_numeric($dateValue)) {
-            try {
-                // PhpSpreadsheet date serial starts from 1900-01-01
-                $days = (int)$dateValue;
-                $timestamp = \PhpOffice\PhpSpreadsheet\Shared\Date::excelToTimestamp($dateValue);
-                return date('Y-m-d', $timestamp);
-            } catch (\Exception $e) {
                 return null;
             }
         }
