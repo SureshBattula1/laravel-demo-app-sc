@@ -9,6 +9,9 @@ use App\Http\Controllers\DepartmentController;
 use App\Http\Controllers\SubjectController;
 use App\Http\Controllers\ExamController;
 use App\Http\Controllers\FeeController;
+use App\Http\Controllers\FeeDuesController;
+use App\Http\Controllers\FeeReportController;
+use App\Http\Controllers\RealTimeNotificationController;
 use App\Http\Controllers\FeeTypeController;
 use App\Http\Controllers\AttendanceController;
 use App\Http\Controllers\LeaveController;
@@ -151,11 +154,19 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
     Route::post('students', [StudentController::class, 'store']);
     Route::get('students/export', [StudentController::class, 'export']);
     Route::get('students/by-user/{userId}', [StudentController::class, 'getByUserId']);
+    
+    // Promotion routes - MUST come before students/{id} to avoid route conflicts
+    Route::post('students/promote', [StudentController::class, 'promote']);
+    Route::post('students/promote-with-fee-handling', [StudentController::class, 'promoteWithFeeHandling']);
+    Route::post('students/preview-promotion', [StudentController::class, 'previewPromotion']);
+    Route::get('students/{id}/promotion-history', [StudentController::class, 'getPromotionHistory']);
+    Route::get('students/{id}/dues', [StudentController::class, 'getStudentDues']);
+    
+    // Student CRUD routes with parameters
     Route::get('students/{id}', [StudentController::class, 'show']);
     Route::put('students/{id}', [StudentController::class, 'update']);
     Route::delete('students/{id}', [StudentController::class, 'destroy']); // Soft delete (deactivate)
     Route::post('students/{id}/restore', [StudentController::class, 'restore']); // Restore (reactivate)
-    Route::post('students/promote', [StudentController::class, 'promote']);
     Route::post('students/{id}/upload-profile-picture', [StudentController::class, 'uploadProfilePicture']);
     
     // Class & Section Routes - Full CRUD
@@ -259,6 +270,28 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
         Route::get('{id}', [FeeController::class, 'showPayment']);
     });
     Route::get('students/{studentId}/fees', [FeeController::class, 'getStudentFees']);
+    
+    // Fee Dues routes
+    Route::apiResource('fee-dues', FeeDuesController::class);
+    Route::get('fee-dues/student/{studentId}', [FeeDuesController::class, 'getStudentDues']);
+    Route::post('fee-dues/{id}/apply-payment', [FeeDuesController::class, 'applyPayment']);
+    Route::post('fee-dues/{id}/waive', [FeeDuesController::class, 'waiveDue']);
+    Route::get('fee-dues/aging-analysis', [FeeDuesController::class, 'getAgingAnalysis']);
+    Route::get('fee-dues/overdue', [FeeDuesController::class, 'getOverdueFees']);
+    Route::get('fee-dues/by-type/{studentId}', [FeeDuesController::class, 'getDuesByFeeType']);
+    
+    // Fee Reports routes
+    Route::prefix('fee-reports')->group(function () {
+        Route::get('dues', [FeeReportController::class, 'duesReport']);
+        Route::get('promotion-dues', [FeeReportController::class, 'promotionDuesReport']);
+        Route::get('collection', [FeeReportController::class, 'collectionReport']);
+        Route::get('overdue', [FeeReportController::class, 'overdueReport']);
+        Route::get('student-statement/{studentId}', [FeeReportController::class, 'studentStatement']);
+        Route::get('aging-analysis', [FeeReportController::class, 'agingAnalysis']);
+    });
+    
+    // Real-time notifications
+    Route::get('notifications/stream', [RealTimeNotificationController::class, 'streamNotifications']);
     
     // Attendance Routes (specific routes MUST come before apiResource)
     Route::get('attendance/export', [AttendanceController::class, 'export']);

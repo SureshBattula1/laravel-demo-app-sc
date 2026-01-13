@@ -45,9 +45,18 @@ class SectionController extends Controller
                 }
             }
 
-            // Filters (only allow if SuperAdmin/cross-branch user)
-            if ($request->has('branch_id') && $accessibleBranchIds === 'all') {
-                $query->where('branch_id', $request->branch_id);
+            // Filters
+            // Allow branch_id filter if user has access to all branches OR if the requested branch is in accessible branches
+            if ($request->has('branch_id')) {
+                $requestedBranchId = $request->branch_id;
+                if ($accessibleBranchIds === 'all') {
+                    // SuperAdmin: can filter by any branch
+                    $query->where('branch_id', $requestedBranchId);
+                } else if (is_array($accessibleBranchIds) && in_array($requestedBranchId, $accessibleBranchIds)) {
+                    // Regular user: can filter by branch if they have access to it
+                    $query->where('branch_id', $requestedBranchId);
+                }
+                // If branch_id is not accessible, the query will already be filtered by accessibleBranchIds above
             }
 
             if ($request->has('grade_level')) {
@@ -490,8 +499,17 @@ class SectionController extends Controller
         }
 
         // Filter by branch
-        if ($request->has('branch_id') && $request->branch_id !== '' && $accessibleBranchIds === 'all') {
-            $query->where('branch_id', $request->branch_id);
+        // Allow branch_id filter if user has access to all branches OR if the requested branch is in accessible branches
+        if ($request->has('branch_id') && $request->branch_id !== '') {
+            $requestedBranchId = $request->branch_id;
+            if ($accessibleBranchIds === 'all') {
+                // SuperAdmin: can filter by any branch
+                $query->where('branch_id', $requestedBranchId);
+            } else if (is_array($accessibleBranchIds) && in_array($requestedBranchId, $accessibleBranchIds)) {
+                // Regular user: can filter by branch if they have access to it
+                $query->where('branch_id', $requestedBranchId);
+            }
+            // If branch_id is not accessible, the query will already be filtered by accessibleBranchIds above
         }
 
         // Filter by grade level

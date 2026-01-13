@@ -18,9 +18,26 @@ class ClassController extends Controller
         try {
             $query = ClassModel::with(['branch', 'classTeacher']);
 
+            // 🔥 APPLY BRANCH FILTERING - Restrict to accessible branches
+            $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+            if ($accessibleBranchIds !== 'all') {
+                if (!empty($accessibleBranchIds)) {
+                    $query->whereIn('branch_id', $accessibleBranchIds);
+                } else {
+                    $query->whereRaw('1 = 0');
+                }
+            }
+
             // Filters
+            // Allow branch_id filter if user has access to all branches OR if the requested branch is in accessible branches
             if ($request->has('branch_id')) {
-                $query->where('branch_id', $request->branch_id);
+                $requestedBranchId = (int) $request->branch_id;
+                if ($accessibleBranchIds === 'all' || in_array($requestedBranchId, $accessibleBranchIds)) {
+                    $query->where('branch_id', $requestedBranchId);
+                } else {
+                    // If a specific branch_id is requested but not accessible, return no results
+                    $query->whereRaw('1 = 0');
+                }
             }
 
             if ($request->has('grade')) {

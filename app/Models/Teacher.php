@@ -149,11 +149,15 @@ class Teacher extends Model
     }
     
     // Add accessor for qualification (database column)
+    // Note: qualification is stored as TEXT in database (changed from JSON via migration 2025_11_10_115217)
+    // This accessor provides backward compatibility with extended_profile
     public function getQualificationAttribute($value)
     {
-        // First check actual database column, then extended_profile for backward compatibility
-        if (isset($this->attributes['qualification'])) {
-            return $this->attributes['qualification'];
+        // First check actual database column (TEXT type), then extended_profile for backward compatibility
+        if (isset($this->attributes['qualification']) && !empty($this->attributes['qualification'])) {
+            // If it's a JSON string, decode it; otherwise return as string
+            $decoded = json_decode($this->attributes['qualification'], true);
+            return $decoded !== null ? $decoded : $this->attributes['qualification'];
         }
         return $value ?? $this->extended_profile['qualification'] ?? null;
     }

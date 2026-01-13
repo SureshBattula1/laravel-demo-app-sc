@@ -332,6 +332,24 @@ class StudentController extends Controller
     /**
      * Create new student
      */
+    /**
+     * Store a newly created student
+     * 
+     * NOTE: This method uses a two-phase validation approach:
+     * - Phase 1 (store): Only core/required fields are validated here
+     * - Phase 2 (prepareStudentData): Additional 100+ optional fields are handled without validation
+     * 
+     * This design allows flexible student creation where:
+     * - Core fields (name, email, admission details, basic contact) are required during creation
+     * - Extended fields (identity documents, detailed addresses, medical info, etc.) can be:
+     *   a) Provided during creation (will be saved but not validated)
+     *   b) Added later via the update() method (which uses 'sometimes' validation)
+     * 
+     * This pattern is intentional to support:
+     * - Quick student registration with minimal data
+     * - Gradual profile completion over time
+     * - Bulk imports where some fields may be missing
+     */
     public function store(Request $request)
     {
         try {
@@ -648,6 +666,183 @@ class StudentController extends Controller
     }
 
     /**
+     * Promote students with fee handling and carry-forward
+     */
+    public function promoteWithFeeHandling(Request $request)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'student_ids' => 'required|array',
+                'student_ids.*' => 'exists:students,id',
+                'from_grade' => 'required|string',
+                'to_grade' => 'required|string',
+                'academic_year' => 'required|string',
+                'check_eligibility' => 'boolean'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            $feeCarryForwardService = new \App\Services\FeeCarryForwardService();
+            $notificationService = new \App\Services\FeeNotificationService();
+            $promotionService = new \App\Services\StudentPromotionService(
+                $feeCarryForwardService,
+                $notificationService
+            );
+
+            $result = $promotionService->promoteStudentsWithFeeHandling(
+                $request->student_ids,
+                $request->from_grade,
+                $request->to_grade,
+                $request->academic_year,
+                $request->user()->id,
+                $request->boolean('check_eligibility', false)
+            );
+
+            return response()->json([
+                'success' => true,
+                'message' => "Successfully promoted {$result['promoted_count']} students with fee carry-forward",
+                'data' => $result
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Promote with fee handling error', ['error' => $e->getMessage()]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to promote students',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Preview promotion impact before executing
+     */
+    public function previewPromotion(Request $request)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'student_ids' => 'required|array',
+                'student_ids.*' => 'exists:students,id',
+                'from_grade' => 'required|string',
+                'to_grade' => 'required|string',
+                'academic_year' => 'required|string'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            $carryForwardService = new \App\Services\FeeCarryForwardService();
+            $previews = [];
+
+            foreach ($request->student_ids as $studentId) {
+                $student = \App\Models\Student::with('user')->find($studentId);
+                
+                if (!$student || $student->grade !== $request->from_grade) {
+                    continue;
+                }
+
+                $preview = $carryForwardService->getCarryForwardSummary(
+                    $student->id, // Pass student id, service will handle both
+                    $request->from_grade,
+                    $request->to_grade,
+                    $student->academic_year ?? $request->academic_year
+                );
+
+                $preview['student_id'] = $studentId;
+                $student->load('user');
+                $preview['student_name'] = ($student->user ? $student->user->first_name . ' ' . $student->user->last_name : 'N/A');
+                $previews[] = $preview;
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'previews' => $previews,
+                    'summary' => [
+                        'total_students' => count($previews),
+                        'total_pending_amount' => array_sum(array_column($previews, 'total_pending_amount'))
+                    ]
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Preview promotion error', ['error' => $e->getMessage()]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to preview promotion',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Get promotion history for a student
+     */
+    public function getPromotionHistory($id)
+    {
+        try {
+            $student = \App\Models\Student::findOrFail($id);
+            
+            $history = \App\Models\ClassUpgrade::where('student_id', $student->id)
+                ->with('approvedBy')
+                ->orderBy('created_at', 'desc')
+                ->get();
+
+            return response()->json([
+                'success' => true,
+                'data' => $history
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Get promotion history error', ['error' => $e->getMessage()]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to get promotion history',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Get student dues with fee_type breakdown
+     */
+    public function getStudentDues($id)
+    {
+        try {
+            $student = \App\Models\Student::findOrFail($id);
+            
+            $duesService = new \App\Services\FeeDuesService();
+            $result = $duesService->getStudentDues($student->user_id);
+
+            return response()->json([
+                'success' => true,
+                'data' => $result
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Get student dues error', ['error' => $e->getMessage()]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to get student dues',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+            ], 500);
+        }
+    }
+
+    /**
      * Export students data
      * Supports Excel, PDF, and CSV formats with filtering
      */
@@ -929,6 +1124,23 @@ class StudentController extends Controller
      * Prepare student data for creation
      * Structured approach with explicit field mapping
      */
+    /**
+     * Prepare student data array from request
+     * 
+     * NOTE: This method handles 100+ optional fields without validation.
+     * Fields provided here will be saved to the database if they exist in the request.
+     * For proper validation of optional fields, use the update() method which validates
+     * fields when they are provided using 'sometimes' rules.
+     * 
+     * This approach allows:
+     * - Flexible student creation with partial data
+     * - Bulk imports with varying field completeness
+     * - Gradual profile completion
+     * 
+     * @param Request $request
+     * @param int $userId
+     * @return array
+     */
     private function prepareStudentData(Request $request, int $userId): array
     {
         $data = [
@@ -1115,8 +1327,8 @@ class StudentController extends Controller
         $data['remarks'] = $request->remarks ?? null;
         $data['profile_picture'] = $request->profile_picture ?? null;
         $data['parent_id'] = $request->parent_id ?? null;
-        $data['admission_status'] = $request->admission_status ?? null;
-        $data['documents'] = $request->documents ?? null;
+        $data['admission_status'] = $request->admission_status ?? 'Admitted'; // Default to 'Admitted' for new students
+        $data['documents'] = $this->encodeJsonField($request->documents); // Ensure documents is properly encoded as JSON
 
         return $data;
     }

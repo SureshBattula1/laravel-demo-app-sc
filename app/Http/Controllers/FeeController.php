@@ -95,6 +95,13 @@ class FeeController extends Controller
         }
     }
 
+    /**
+     * Store a newly created fee structure
+     * 
+     * NOTE: This method accepts optional breakdown fields (tuition_fee, admission_fee, etc.)
+     * These fields are stored in the database but are optional. The main 'amount' field
+     * is the primary fee amount. Breakdown fields can be used for detailed fee reporting.
+     */
     public function storeStructure(Request $request)
     {
         DB::beginTransaction();
@@ -109,7 +116,17 @@ class FeeController extends Controller
                 'description' => 'nullable|string',
                 'is_recurring' => 'boolean',
                 'recurrence_period' => 'nullable|string|in:Monthly,Quarterly,Annually',
-                'is_active' => 'boolean'
+                'is_active' => 'boolean',
+                // Optional breakdown fields
+                'tuition_fee' => 'nullable|numeric|min:0',
+                'admission_fee' => 'nullable|numeric|min:0',
+                'exam_fee' => 'nullable|numeric|min:0',
+                'library_fee' => 'nullable|numeric|min:0',
+                'transport_fee' => 'nullable|numeric|min:0',
+                'sports_fee' => 'nullable|numeric|min:0',
+                'lab_fee' => 'nullable|numeric|min:0',
+                'other_fees' => 'nullable|array',
+                'total_amount' => 'nullable|numeric|min:0'
             ]);
 
             if ($validator->fails()) {
@@ -159,7 +176,17 @@ class FeeController extends Controller
                 'description' => 'nullable|string',
                 'is_recurring' => 'boolean',
                 'recurrence_period' => 'nullable|string|in:Monthly,Quarterly,Annually',
-                'is_active' => 'boolean'
+                'is_active' => 'boolean',
+                // Optional breakdown fields
+                'tuition_fee' => 'nullable|numeric|min:0',
+                'admission_fee' => 'nullable|numeric|min:0',
+                'exam_fee' => 'nullable|numeric|min:0',
+                'library_fee' => 'nullable|numeric|min:0',
+                'transport_fee' => 'nullable|numeric|min:0',
+                'sports_fee' => 'nullable|numeric|min:0',
+                'lab_fee' => 'nullable|numeric|min:0',
+                'other_fees' => 'nullable|array',
+                'total_amount' => 'nullable|numeric|min:0'
             ]);
 
             if ($validator->fails()) {

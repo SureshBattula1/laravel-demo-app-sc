@@ -560,12 +560,18 @@ class AdmissionController extends Controller
             'mother_email' => $application->mother_email,
             'mother_occupation' => $application->mother_occupation,
             'mother_qualification' => $application->mother_qualification,
+            'guardian_name' => $application->guardian_name,
+            'guardian_relation' => $application->guardian_relation,
+            'guardian_phone' => $application->guardian_phone,
+            'emergency_contact_name' => $application->guardian_name ?? $application->father_name ?? $application->mother_name,
+            'emergency_contact_phone' => $application->guardian_phone ?? $application->father_phone ?? $application->mother_phone,
+            'emergency_contact_relation' => $application->guardian_relation ?? 'Father',
             'previous_school' => $application->previous_school,
-                'previous_grade' => $application->previous_grade,
-                'student_status' => 'Active',
-                'admission_status' => 'Admitted',
-                'created_at' => now(),
-                'updated_at' => now()
+            'previous_grade' => $application->previous_grade,
+            'student_status' => 'Active',
+            'admission_status' => 'Admitted',
+            'created_at' => now(),
+            'updated_at' => now()
             ];
             
             $studentId = DB::table('students')->insertGetId($studentData);
