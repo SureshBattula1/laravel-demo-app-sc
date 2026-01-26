@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\ExamMark;
+use App\Models\Student;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -92,9 +93,23 @@ class ExamMarkController extends Controller
         try {
             Log::info('Fetching marks for student ID: ' . $studentId);
             
-            $marks = ExamMark::where('student_id', $studentId)->get();
+            // Get student's academic year for filtering
+            $student = \App\Models\Student::where('user_id', $studentId)->first();
+            $academicYear = $student->academic_year ?? request('academic_year');
             
-            Log::info('Found ' . $marks->count() . ' marks for student');
+            // Join with exam_schedules and exams to filter by academic_year
+            $marksQuery = ExamMark::where('exam_marks.student_id', $studentId)
+                ->join('exam_schedules', 'exam_marks.exam_schedule_id', '=', 'exam_schedules.id')
+                ->join('exams', 'exam_schedules.exam_id', '=', 'exams.id');
+            
+            // Filter by academic year if available
+            if ($academicYear) {
+                $marksQuery->where('exams.academic_year', $academicYear);
+            }
+            
+            $marks = $marksQuery->select('exam_marks.*')->get();
+            
+            Log::info('Found ' . $marks->count() . ' marks for student (academic year: ' . ($academicYear ?? 'all') . ')');
             
             if ($marks->isEmpty()) {
                 return response()->json(['success' => true, 'data' => []]);

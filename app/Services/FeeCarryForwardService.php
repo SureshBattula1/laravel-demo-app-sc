@@ -42,10 +42,13 @@ class FeeCarryForwardService
             ->where('academic_year', $academicYear)
             ->get();
 
-        // Get paid structure IDs (fully paid) - use user_id
-        $paidStructureIds = FeePayment::where('student_id', $actualUserId)
-            ->where('payment_status', 'Completed')
-            ->pluck('fee_structure_id')
+        // Get paid structure IDs (fully paid) - use user_id AND academic_year
+        // Join with fee_structures to filter by academic_year (handles cases where FeePayment.academic_year might be null)
+        $paidStructureIds = FeePayment::where('fee_payments.student_id', $actualUserId)
+            ->where('fee_payments.payment_status', 'Completed')
+            ->join('fee_structures', 'fee_payments.fee_structure_id', '=', 'fee_structures.id')
+            ->where('fee_structures.academic_year', $academicYear)
+            ->pluck('fee_payments.fee_structure_id')
             ->unique()
             ->toArray();
 
@@ -71,11 +74,14 @@ class FeeCarryForwardService
                 continue;
             }
 
-            // Calculate amount paid - use user_id
-            $amountPaid = FeePayment::where('student_id', $actualUserId)
-                ->where('fee_structure_id', $feeStructure->id)
-                ->whereIn('payment_status', ['Completed', 'Partial'])
-                ->sum('total_amount');
+            // Calculate amount paid - use user_id AND academic_year
+            // Join with fee_structures to ensure academic year match (handles cases where FeePayment.academic_year might be null)
+            $amountPaid = FeePayment::where('fee_payments.student_id', $actualUserId)
+                ->where('fee_payments.fee_structure_id', $feeStructure->id)
+                ->join('fee_structures', 'fee_payments.fee_structure_id', '=', 'fee_structures.id')
+                ->where('fee_structures.academic_year', $academicYear)
+                ->whereIn('fee_payments.payment_status', ['Completed', 'Partial'])
+                ->sum('fee_payments.total_amount');
 
             $balanceAmount = max(0, $feeStructure->amount - $amountPaid);
 

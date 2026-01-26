@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Traits\PaginatesAndSorts;
+use App\Models\Student;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -465,7 +466,7 @@ class AttendanceController extends Controller
     public function getStudentAttendance($studentId)
     {
         try {
-            // Get student info first
+            // Get student info first (including academic_year)
             $student = DB::table('students')
                 ->join('users', 'students.user_id', '=', 'users.id')
                 ->leftJoin('grades', 'students.grade', '=', 'grades.value')
@@ -476,6 +477,7 @@ class AttendanceController extends Controller
                     'students.user_id',
                     'students.admission_number',
                     'students.grade',
+                    'students.academic_year',
                     'grades.label as grade_label',
                     'students.section',
                     'users.first_name',
@@ -492,9 +494,18 @@ class AttendanceController extends Controller
                 ], 404);
             }
             
+            // Get student's current academic year for filtering
+            // Use student's academic_year from database, fallback to request parameter
+            $academicYear = $student->academic_year ?? request('academic_year');
+            
             // OPTIMIZED: Build base query with filters
             $baseQuery = DB::table('student_attendance')
                 ->where('student_id', $studentId);
+            
+            // Filter by academic year (if student has academic_year set)
+            if ($academicYear) {
+                $baseQuery->where('academic_year', $academicYear);
+            }
             
             if (request()->has('from_date')) {
                 $baseQuery->whereDate('date', '>=', request('from_date'));

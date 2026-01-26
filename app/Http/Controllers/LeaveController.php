@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Traits\PaginatesAndSorts;
+use App\Models\Student;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -418,8 +419,29 @@ class LeaveController extends Controller
     public function getStudentLeaves($studentId)
     {
         try {
+            // Get student's academic year for filtering
+            $student = \App\Models\Student::where('user_id', $studentId)->first();
+            $academicYear = $student->academic_year ?? request('academic_year');
+            
             $baseQuery = DB::table('student_leaves')
                 ->where('student_id', $studentId);
+            
+            // Filter by academic year date range if academic year is available
+            if ($academicYear) {
+                $dateRange = $this->getAcademicYearDateRange($academicYear);
+                if ($dateRange) {
+                    $baseQuery->where(function($q) use ($dateRange) {
+                        // Include leaves that overlap with academic year
+                        $q->whereBetween('from_date', [$dateRange['start'], $dateRange['end']])
+                          ->orWhereBetween('to_date', [$dateRange['start'], $dateRange['end']])
+                          ->orWhere(function($q2) use ($dateRange) {
+                              // Leaves that span the entire academic year
+                              $q2->where('from_date', '<=', $dateRange['start'])
+                                 ->where('to_date', '>=', $dateRange['end']);
+                          });
+                    });
+                }
+            }
             
             if (request()->has('from_date')) {
                 $baseQuery->whereDate('from_date', '>=', request('from_date'));
@@ -516,6 +538,31 @@ class LeaveController extends Controller
                 'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
             ], 500);
         }
+    }
+
+    /**
+     * Get academic year date range
+     * Academic year format: "2024-2025" means from July 2024 to June 2025
+     */
+    protected function getAcademicYearDateRange($academicYear)
+    {
+        if (!$academicYear || !preg_match('/^(\d{4})-(\d{4})$/', $academicYear, $matches)) {
+            return null;
+        }
+        
+        $startYear = (int)$matches[1];
+        $endYear = (int)$matches[2];
+        
+        // Academic year typically runs from July to June
+        // Start: July 1 of start year
+        // End: June 30 of end year
+        $startDate = Carbon::create($startYear, 7, 1)->startOfDay();
+        $endDate = Carbon::create($endYear, 6, 30)->endOfDay();
+        
+        return [
+            'start' => $startDate->format('Y-m-d'),
+            'end' => $endDate->format('Y-m-d')
+        ];
     }
 }
 

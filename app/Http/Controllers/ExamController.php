@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Exam;
+use App\Models\Student;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -457,9 +458,21 @@ class ExamController extends Controller
     public function getStudentResults(string $studentId)
     {
         try {
-            $results = \App\Models\ExamResult::where('student_id', $studentId)
+            // Get student's academic year for filtering
+            $student = \App\Models\Student::where('user_id', $studentId)->first();
+            $academicYear = $student->academic_year ?? request('academic_year');
+            
+            $resultsQuery = \App\Models\ExamResult::where('exam_results.student_id', $studentId)
+                ->join('exams', 'exam_results.exam_id', '=', 'exams.id');
+            
+            // Filter by academic year if available
+            if ($academicYear) {
+                $resultsQuery->where('exams.academic_year', $academicYear);
+            }
+            
+            $results = $resultsQuery->select('exam_results.*')
                 ->with(['exam', 'subject'])
-                ->orderBy('created_at', 'desc')
+                ->orderBy('exam_results.created_at', 'desc')
                 ->get();
 
             // Group by exam

@@ -947,3 +947,4 @@ This backend architecture provides a robust, scalable, and maintainable foundati
 The separation of concerns (Controllers → Services → Models) ensures code maintainability, while the service layer allows for complex business logic to be tested and reused independently.
 
 
+
