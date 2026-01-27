@@ -42,6 +42,7 @@ use App\Http\Controllers\ExamMarkController;
 use App\Http\Controllers\UserPreferenceController;
 use App\Http\Controllers\AdmissionController;
 use App\Http\Controllers\CommunicationController;
+use App\Http\Controllers\MessageController;
 
 /*
 |--------------------------------------------------------------------------
@@ -522,5 +523,10 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
         Route::delete('/circulars/{id}', [CommunicationController::class, 'deleteCircular']);
         Route::post('/circulars/{id}/acknowledge', [CommunicationController::class, 'acknowledgeCircular']);
     });
+    
+    // Message Sending Routes (WhatsApp & SMS)
+    Route::post('/send-whatsapp', [MessageController::class, 'sendWhatsApp']);
+    Route::post('/send-sms', [MessageController::class, 'sendSms']);
+    Route::post('/send-both', [MessageController::class, 'sendBoth']);
 });
 

@@ -460,45 +460,6 @@ class TeacherController extends Controller
                 $teacherData['aadhar_number'] = $request->aadhaar_number;
             }
             
-            // Map current_address - now nullable in database, use default only if needed
-            $teacherData['current_address'] = $request->current_address ?? $request->address ?? null;
-            
-            // Map current_city/current_state/current_pincode to city/state/pincode
-            // Now nullable in database - no default needed
-            $teacherData['city'] = $request->current_city ?? $request->city ?? null;
-            $teacherData['state'] = $request->current_state ?? $request->state ?? null;
-            $teacherData['pincode'] = $request->current_pincode ?? $request->pincode ?? null;
-            
-            // Handle "Same as Current Address" logic
-            if ($request->has('same_as_current_address') && $request->same_as_current_address) {
-                $teacherData['permanent_address'] = $teacherData['current_address'];
-            }
-            
-            // Store ALL other fields in extended_profile JSON
-            $extendedData = $request->except([
-                // Exclude user fields
-                'first_name', 'last_name', 'email', 'phone', 'password', 'is_active',
-                // Exclude ONLY the actual DB columns that exist in teachers table
-                'id', 'user_id', 'branch_id', 'department_id', 'reporting_manager_id',
-                'employee_id', 'category_type', 'joining_date', 'designation', 'employee_type',
-                'subjects', 'classes_assigned', 'is_class_teacher', 'date_of_birth', 'gender',
-                'current_address', 'permanent_address', 'city', 'state', 'pincode',
-                // Also exclude frontend field names that map to DB columns
-                'current_city', 'current_state', 'current_pincode',
-                // ✅ REMOVED: permanent_city, permanent_state, permanent_pincode, current_country, permanent_country
-                // These will now be saved to extended_profile
-                'emergency_contact_name', 'emergency_contact_phone', 'emergency_contact_relation',
-                'basic_salary', 'bank_account_number', 'teacher_status',
-                'created_at', 'updated_at', 'deleted_at', 'extended_profile',
-                'bank_name', 'bank_ifsc_code', 'pan_number', 'aadhar_number', 'aadhaar_number',
-                'salary_grade', 'specialization', 'registration_number',
-                'class_teacher_of_grade', 'class_teacher_of_section', 'leaving_date',
-                'documents', 'remarks', 'same_as_current_address',
-                'blood_group', 'religion', 'nationality', 'qualification', 'experience_years',
-                // Also exclude profile_picture since it's handled separately
-                'profile_picture'
-            ]);
-            
             // Handle profile_picture separately (store in extended_profile)
             if ($request->has('profile_picture')) {
                 $extendedData['profile_picture'] = $request->profile_picture;
@@ -811,13 +772,6 @@ class TeacherController extends Controller
                 $teacherData['current_address'] = $request->current_address ?? $request->address ?? 'N/A';
             }
             
-            // Map current_city/current_state/current_pincode to city/state/pincode
-            // Now nullable in database - no default needed
-            $teacherData['city'] = $request->current_city ?? $request->city ?? null;
-            $teacherData['state'] = $request->current_state ?? $request->state ?? null;
-            $teacherData['pincode'] = $request->current_pincode ?? $request->pincode ?? null;
-            
-            // Handle "Same as Current Address" logic for update
             if ($request->has('same_as_current_address') && $request->same_as_current_address) {
                 $teacherData['permanent_address'] = $teacherData['current_address'] ?? $request->current_address ?? null;
             }
@@ -828,15 +782,6 @@ class TeacherController extends Controller
                 'first_name', 'last_name', 'email', 'phone', 'password', 'is_active',
                 // Exclude ONLY the actual DB columns that exist in teachers table
                 'id', 'user_id', 'branch_id', 'department_id', 'reporting_manager_id',
-                'employee_id', 'category_type', 'joining_date', 'designation', 'employee_type',
-                'subjects', 'classes_assigned', 'is_class_teacher', 'date_of_birth', 'gender',
-                'current_address', 'permanent_address', 'city', 'state', 'pincode',
-                // Also exclude frontend field names that map to DB columns
-                'current_city', 'current_state', 'current_pincode',
-                // ✅ REMOVED: permanent_city, permanent_state, permanent_pincode, current_country, permanent_country
-                // These will now be saved to extended_profile
-                'emergency_contact_name', 'emergency_contact_phone', 'emergency_contact_relation',
-                'basic_salary', 'bank_account_number', 'teacher_status',
                 'created_at', 'updated_at', 'deleted_at', 'extended_profile',
                 'bank_name', 'bank_ifsc_code', 'pan_number', 'aadhar_number', 'aadhaar_number',
                 'salary_grade', 'specialization', 'registration_number',
@@ -847,23 +792,12 @@ class TeacherController extends Controller
                 'profile_picture'
             ]);
             
-            // Handle profile_picture separately (store in extended_profile)
-            if ($request->has('profile_picture')) {
-                $extendedData['profile_picture'] = $request->profile_picture;
-            }
-            
-            // Merge with existing extended_profile data
             if (!empty(array_filter($extendedData))) {
                 $existingExtended = $teacher->extended_profile ?? [];
                 $teacherData['extended_profile'] = array_merge($existingExtended, $extendedData);
             }
 
             $teacher->update($teacherData);
-
-            // Update profile completion percentage
-            $teacher->updateProfileCompletion();
-
-            DB::commit();
 
             return response()->json([
                 'success' => true,
