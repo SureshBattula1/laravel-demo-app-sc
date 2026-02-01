@@ -44,6 +44,12 @@ class StudentController extends Controller
                     'grades.label as grade_label'
                 );
 
+            // 🔥 APPLY SCHOOL FILTERING - School-level isolation
+            $schoolId = $this->getCurrentSchoolId($request);
+            if ($schoolId) {
+                $query->where('students.school_id', $schoolId);
+            }
+
             // 🔥 APPLY BRANCH FILTERING - This restricts data based on user's branch access
             $user = $request->user();
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);

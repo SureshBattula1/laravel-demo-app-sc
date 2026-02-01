@@ -7,8 +7,32 @@ use Illuminate\Http\Request;
 abstract class Controller
 {
     /**
+     * Get current school ID from request
+     * 
+     * @param Request $request
+     * @return int|null
+     */
+    protected function getCurrentSchoolId(Request $request): ?int
+    {
+        $user = $request->user();
+        
+        if (!$user) {
+            return null;
+        }
+
+        // Get school_id from user's branch
+        if ($user->branch_id) {
+            $branch = \App\Models\Branch::find($user->branch_id);
+            return $branch ? $branch->school_id : null;
+        }
+
+        return null;
+    }
+
+    /**
      * Get accessible branch IDs for current user
      * Supports: SuperAdmin, Cross-Branch Permission, BranchAdmin, Regular Users
+     * Now includes school-level filtering
      * ✅ OPTIMIZED: Reduced database queries and optimized permission checks
      * 
      * @param Request $request
@@ -26,9 +50,12 @@ abstract class Controller
         if ($user->role === 'SuperAdmin') {
             return 'all';
         }
+
+        // Get school context
+        $schoolId = $this->getCurrentSchoolId($request);
         
         // ✅ OPTIMIZED: Check role first before expensive permission checks
-        // BranchAdmin can access their branch + descendants
+        // BranchAdmin can access their branch + descendants within same school
         if ($user->role === 'BranchAdmin') {
             if (!$user->branch_id) {
                 return [];
@@ -36,22 +63,38 @@ abstract class Controller
             
             // ✅ OPTIMIZED: Use raw query to get descendant IDs without loading model
             // This avoids loading the Branch model and directly executes the CTE
-            $descendants = \Illuminate\Support\Facades\DB::select("
+            $params = [$user->branch_id];
+            $sql = "
                 WITH RECURSIVE branch_tree AS (
-                    SELECT id, parent_branch_id
+                    SELECT id, parent_branch_id, school_id
                     FROM branches
                     WHERE parent_branch_id = ?
-                    AND deleted_at IS NULL
-                    
+                    AND deleted_at IS NULL";
+            
+            if ($schoolId) {
+                $sql .= " AND school_id = ?";
+                $params[] = $schoolId;
+            }
+            
+            $sql .= "
                     UNION ALL
                     
-                    SELECT b.id, b.parent_branch_id
+                    SELECT b.id, b.parent_branch_id, b.school_id
                     FROM branches b
                     INNER JOIN branch_tree bt ON b.parent_branch_id = bt.id
-                    WHERE b.deleted_at IS NULL
+                    WHERE b.deleted_at IS NULL";
+            
+            if ($schoolId) {
+                $sql .= " AND b.school_id = ?";
+                $params[] = $schoolId;
+            }
+            
+            $sql .= "
                 )
                 SELECT id FROM branch_tree
-            ", [$user->branch_id]);
+            ";
+            
+            $descendants = \Illuminate\Support\Facades\DB::select($sql, $params);
             
             $ids = collect($descendants)->pluck('id')->toArray();
             array_unshift($ids, $user->branch_id); // Include self
@@ -73,6 +116,15 @@ abstract class Controller
             ->exists();
         
         if ($hasCrossBranch) {
+            // If user has cross-branch access but is in a school context, limit to school branches
+            if ($schoolId) {
+                $branchIds = \Illuminate\Support\Facades\DB::table('branches')
+                    ->where('school_id', $schoolId)
+                    ->where('is_active', true)
+                    ->pluck('id')
+                    ->toArray();
+                return $branchIds;
+            }
             return 'all';
         }
         
@@ -81,7 +133,26 @@ abstract class Controller
     }
     
     /**
-     * Apply branch filter to query
+     * Apply school filter to query
+     * 
+     * @param \Illuminate\Database\Eloquent\Builder $query
+     * @param Request $request
+     * @param string $schoolColumn Default column name is 'school_id'
+     * @return \Illuminate\Database\Eloquent\Builder
+     */
+    protected function applySchoolFilter($query, Request $request, $schoolColumn = 'school_id')
+    {
+        $schoolId = $this->getCurrentSchoolId($request);
+        
+        if ($schoolId) {
+            $query->where($schoolColumn, $schoolId);
+        }
+        
+        return $query;
+    }
+
+    /**
+     * Apply branch filter to query (now includes school context)
      * 
      * @param \Illuminate\Database\Eloquent\Builder $query
      * @param Request $request
@@ -94,7 +165,8 @@ abstract class Controller
         
         // SuperAdmin or users with cross-branch permission: no filter needed
         if ($accessibleBranches === 'all') {
-            return $query;
+            // But still apply school filter if in school context
+            return $this->applySchoolFilter($query, $request);
         }
         
         // Apply branch filter
@@ -171,5 +243,16 @@ abstract class Controller
         }
         
         return null;
+    }
+
+    /**
+     * Get user's default school ID for new records
+     * 
+     * @param Request $request
+     * @return int|null
+     */
+    protected function getDefaultSchoolId(Request $request): ?int
+    {
+        return $this->getCurrentSchoolId($request);
     }
 }

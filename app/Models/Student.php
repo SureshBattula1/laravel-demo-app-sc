@@ -13,6 +13,7 @@ class Student extends Model
     protected $fillable = [
         'user_id',
         'branch_id',
+        'school_id',
         'admission_number',
         'admission_date',
         'admission_type',
@@ -283,5 +284,19 @@ class Student extends Model
     public function branch(): BelongsTo
     {
         return $this->belongsTo(Branch::class);
+    }
+
+    /**
+     * Get the school that owns the student
+     */
+    public function school(): BelongsTo
+    {
+        return $this->belongsTo(School::class);
+    }
+
+    // Scopes
+    public function scopeForSchool($query, int $schoolId)
+    {
+        return $query->where('school_id', $schoolId);
     }
 }

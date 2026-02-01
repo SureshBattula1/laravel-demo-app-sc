@@ -67,6 +67,15 @@ class BranchController extends Controller
                 }
             }
 
+            // Filter by school (school-level isolation)
+            $schoolId = $this->getCurrentSchoolId($request);
+            if ($schoolId) {
+                $query->where('school_id', $schoolId);
+            }
+
+            // Apply branch access filtering
+            $this->applyBranchFilter($query, $request);
+
             // Search functionality
             if ($request->has('search')) {
                 $search = strip_tags($request->search);
@@ -101,6 +110,12 @@ class BranchController extends Controller
 
             // Hierarchical view (nested structure) - returns all without pagination
             if ($request->boolean('hierarchical')) {
+                // Apply school filter for hierarchical view
+                $schoolId = $this->getCurrentSchoolId($request);
+                if ($schoolId) {
+                    $query->where('school_id', $schoolId);
+                }
+                
                 $branches = $query->whereNull('parent_branch_id')
                     ->with('allDescendants')
                     ->orderBy('name')
@@ -995,20 +1010,29 @@ class BranchController extends Controller
             // ✅ OPTIMIZED: Select necessary columns for dropdowns
             $selectColumns = ['id', 'name', 'code', 'branch_type', 'city', 'state', 'parent_branch_id', 'is_active', 'status'];
             
-            // SuperAdmin or users with cross-branch permission see all branches
+            // Apply school filter
+            $schoolId = $this->getCurrentSchoolId($request);
+            
+            // SuperAdmin or users with cross-branch permission see all branches (within school)
             if ($accessibleBranchIds === 'all') {
-                $branches = Branch::select($selectColumns)
-                    ->where('is_active', true)
-                    ->orderBy('name')
-                    ->get();
+                $query = Branch::select($selectColumns)
+                    ->where('is_active', true);
+                
+                if ($schoolId) {
+                    $query->where('school_id', $schoolId);
+                }
+                
+                $branches = $query->orderBy('name')->get();
             } else {
-                $branches = Branch::select($selectColumns)
+                $query = Branch::select($selectColumns)
                     ->where('is_active', true)
-                    ->where(function($query) use ($accessibleBranchIds) {
-                        $query->whereIn('id', $accessibleBranchIds);
-                    })
-                    ->orderBy('name')
-                    ->get();
+                    ->whereIn('id', $accessibleBranchIds);
+                
+                if ($schoolId) {
+                    $query->where('school_id', $schoolId);
+                }
+                
+                $branches = $query->orderBy('name')->get();
             }
             
             // ✅ OPTIMIZED: Calculate permissions once instead of multiple method calls

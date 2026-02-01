@@ -14,6 +14,7 @@ class FeeStructure extends Model
     protected $fillable = [
         'id',
         'branch_id',
+        'school_id',
         'grade',
         'fee_type',
         'amount',
@@ -73,6 +74,11 @@ class FeeStructure extends Model
         return $this->belongsTo(Branch::class);
     }
 
+    public function school()
+    {
+        return $this->belongsTo(School::class);
+    }
+
     public function payments()
     {
         return $this->hasMany(FeePayment::class);
@@ -86,5 +92,11 @@ class FeeStructure extends Model
     public function updater()
     {
         return $this->belongsTo(User::class, 'updated_by');
+    }
+
+    // Scopes
+    public function scopeForSchool($query, int $schoolId)
+    {
+        return $query->where('school_id', $schoolId);
     }
 }

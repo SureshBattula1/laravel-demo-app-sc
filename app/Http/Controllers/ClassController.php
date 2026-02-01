@@ -18,6 +18,12 @@ class ClassController extends Controller
         try {
             $query = ClassModel::with(['branch', 'classTeacher']);
 
+            // 🔥 APPLY SCHOOL FILTERING - School-level isolation
+            $schoolId = $this->getCurrentSchoolId($request);
+            if ($schoolId) {
+                $query->where('school_id', $schoolId);
+            }
+
             // 🔥 APPLY BRANCH FILTERING - Restrict to accessible branches
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
             if ($accessibleBranchIds !== 'all') {

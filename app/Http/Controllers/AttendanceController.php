@@ -56,6 +56,12 @@ class AttendanceController extends Controller
                     );
             }
 
+            // 🔥 APPLY SCHOOL FILTERING - School-level isolation
+            $schoolId = $this->getCurrentSchoolId($request);
+            if ($schoolId) {
+                $query->where($type . '_attendance.school_id', $schoolId);
+            }
+
             // 🔥 APPLY BRANCH FILTERING
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
             if ($accessibleBranchIds !== 'all') {

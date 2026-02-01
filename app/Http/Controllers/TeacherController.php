@@ -49,6 +49,12 @@ class TeacherController extends Controller
                 'department:id,name'  // ✅ Removed 'code' - doesn't exist in departments table
             ]);
 
+            // 🔥 APPLY SCHOOL FILTERING - School-level isolation
+            $schoolId = $this->getCurrentSchoolId($request);
+            if ($schoolId) {
+                $query->where('school_id', $schoolId);
+            }
+
             // 🔥 APPLY BRANCH FILTERING - Restrict to accessible branches
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
             if ($accessibleBranchIds !== 'all') {

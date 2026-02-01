@@ -15,6 +15,7 @@ class Exam extends Model
         // 'id', // Not fillable - auto-increment
         'exam_term_id',
         'branch_id',
+        'school_id',
         'name',
         'exam_type',
         'academic_year',
@@ -62,6 +63,11 @@ class Exam extends Model
         return $this->belongsTo(Branch::class);
     }
 
+    public function school()
+    {
+        return $this->belongsTo(School::class);
+    }
+
     public function schedules()
     {
         return $this->hasMany(ExamSchedule::class);
@@ -80,5 +86,11 @@ class Exam extends Model
     public function updater()
     {
         return $this->belongsTo(User::class, 'updated_by');
+    }
+
+    // Scopes
+    public function scopeForSchool($query, int $schoolId)
+    {
+        return $query->where('school_id', $schoolId);
     }
 }

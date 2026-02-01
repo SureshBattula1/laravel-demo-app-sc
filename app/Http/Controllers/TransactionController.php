@@ -28,6 +28,15 @@ class TransactionController extends Controller
         try {
             $query = Transaction::with(['category', 'branch', 'createdBy', 'approvedBy']);
 
+            // 🔥 APPLY SCHOOL FILTERING - School-level isolation
+            $schoolId = $this->getCurrentSchoolId($request);
+            if ($schoolId) {
+                $query->where('school_id', $schoolId);
+            }
+
+            // Apply branch access filtering
+            $this->applyBranchFilter($query, $request);
+
             // Filters
             if ($request->has('branch_id')) {
                 $query->where('branch_id', $request->branch_id);

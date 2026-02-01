@@ -40,6 +40,9 @@ class DatabaseSeeder extends Seeder
             // Step 4: Create Super Admin Users
             $this->createSuperAdmins();
             
+            // Step 5: Create Company Portal (Company and Company Admin)
+            $this->call(CompanyPortalSeeder::class);
+            
             DB::commit();
             
             $this->command->info('✅ Database seeding completed successfully!');

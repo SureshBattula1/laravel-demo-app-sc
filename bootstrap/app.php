@@ -10,6 +10,11 @@ return Application::configure(basePath: dirname(__DIR__))
         api: __DIR__.'/../routes/api.php',
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
+        then: function () {
+            Route::middleware('api')
+                ->prefix('api/company-portal')
+                ->group(base_path('routes/company-portal.php'));
+        },
     )
     ->withMiddleware(function (Middleware $middleware): void {
         // Register custom middleware
@@ -18,6 +23,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'permission' => \App\Http\Middleware\CheckPermission::class,
             'branch.access' => \App\Http\Middleware\CheckBranchAccess::class,
             'api.logger' => \App\Http\Middleware\ApiLogger::class,
+            'company.auth' => \App\Http\Middleware\CompanyAuthMiddleware::class,
         ]);
         
         // Enable CORS for API routes

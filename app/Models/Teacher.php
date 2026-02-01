@@ -12,7 +12,7 @@ class Teacher extends Model
 
     // ONLY actual database columns (verified via Schema::getColumnListing)
     protected $fillable = [
-        'id', 'user_id', 'branch_id', 'department_id', 'reporting_manager_id',
+        'id', 'user_id', 'branch_id', 'school_id', 'department_id', 'reporting_manager_id',
         'employee_id', 'category_type', 'joining_date', 'designation', 'employee_type',
         'subjects', 'classes_assigned', 'is_class_teacher', 'date_of_birth', 'gender',
         'current_address', 'permanent_address', 'city', 'state', 'pincode',
@@ -101,6 +101,11 @@ class Teacher extends Model
     public function branch()
     {
         return $this->belongsTo(Branch::class);
+    }
+
+    public function school()
+    {
+        return $this->belongsTo(School::class);
     }
 
     public function department()
@@ -303,6 +308,11 @@ class Teacher extends Model
     public function scopeByDepartment($query, $departmentId)
     {
         return $query->where('department_id', $departmentId);
+    }
+
+    public function scopeForSchool($query, int $schoolId)
+    {
+        return $query->where('school_id', $schoolId);
     }
 
     // Methods

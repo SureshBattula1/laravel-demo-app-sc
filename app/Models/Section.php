@@ -13,6 +13,7 @@ class Section extends Model
 
     protected $fillable = [
         'branch_id',
+        'school_id',
         'name',
         'code',
         'grade_level',
@@ -86,6 +87,11 @@ class Section extends Model
         return $this->belongsTo(Branch::class);
     }
 
+    public function school()
+    {
+        return $this->belongsTo(School::class);
+    }
+
     public function classTeacher()
     {
         return $this->belongsTo(User::class, 'class_teacher_id');
@@ -153,6 +159,12 @@ class Section extends Model
     public function isFull()
     {
         return $this->current_strength >= $this->capacity;
+    }
+
+    // Scopes
+    public function scopeForSchool($query, int $schoolId)
+    {
+        return $query->where('school_id', $schoolId);
     }
 }
 

@@ -27,6 +27,7 @@ class User extends Authenticatable
         'user_type',
         'user_type_id',
         'branch_id',
+        'company_id',
         'avatar',
         'is_active',
         'last_login',
@@ -52,6 +53,16 @@ class User extends Authenticatable
     public function branch()
     {
         return $this->belongsTo(Branch::class);
+    }
+
+    public function company()
+    {
+        return $this->belongsTo(Company::class);
+    }
+
+    public function school()
+    {
+        return $this->hasOneThrough(School::class, Branch::class, 'id', 'id', 'branch_id', 'school_id');
     }
 
     /**
@@ -92,6 +103,21 @@ class User extends Authenticatable
     public function isSuperAdmin()
     {
         return $this->role === 'SuperAdmin';
+    }
+
+    public function isCompanyAdmin()
+    {
+        return $this->user_type === 'CompanyAdmin';
+    }
+
+    public function isSupportStaff()
+    {
+        return $this->user_type === 'SupportStaff';
+    }
+
+    public function isSchoolUser()
+    {
+        return $this->user_type === 'SchoolUser' || is_null($this->user_type);
     }
 
     public function isTeacher()

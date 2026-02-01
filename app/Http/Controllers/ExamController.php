@@ -20,6 +20,15 @@ class ExamController extends Controller
         try {
             $query = Exam::with(['branch', 'examTerm', 'creator']);
 
+            // 🔥 APPLY SCHOOL FILTERING - School-level isolation
+            $schoolId = $this->getCurrentSchoolId($request);
+            if ($schoolId) {
+                $query->where('school_id', $schoolId);
+            }
+
+            // Apply branch access filtering
+            $this->applyBranchFilter($query, $request);
+
             // Filter by branch
             if ($request->has('branch_id')) {
                 $query->where('branch_id', $request->branch_id);

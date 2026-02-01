@@ -12,7 +12,7 @@ class Branch extends Model
     use HasFactory, SoftDeletes;
 
     protected $fillable = [
-        'name', 'code', 'parent_branch_id', 'branch_type', 'address', 'city', 'state', 
+        'name', 'code', 'parent_branch_id', 'school_id', 'branch_type', 'address', 'city', 'state', 
         'country', 'pincode', 'latitude', 'longitude', 'timezone', 'region',
         'phone', 'email', 'website', 'fax', 'emergency_contact',
         'principal_name', 'principal_contact', 'principal_email',
@@ -48,6 +48,12 @@ class Branch extends Model
             'latitude' => 'decimal:8',
             'longitude' => 'decimal:8',
         ];
+    }
+
+    // School relationship
+    public function school()
+    {
+        return $this->belongsTo(School::class);
     }
 
     // Hierarchical relationships
@@ -223,6 +229,11 @@ class Branch extends Model
     public function scopeTopLevel($query)
     {
         return $query->whereNull('parent_branch_id');
+    }
+
+    public function scopeForSchool($query, int $schoolId)
+    {
+        return $query->where('school_id', $schoolId);
     }
 
     public function scopeInRegion($query, $region)
