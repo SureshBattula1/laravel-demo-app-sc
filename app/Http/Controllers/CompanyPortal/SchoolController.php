@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\School;
 use App\Models\Company;
 use App\Models\Branch;
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Log;
@@ -401,6 +402,109 @@ class SchoolController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch statistics'
+            ], 500);
+        }
+    }
+
+    /**
+     * Get users from a school
+     * Returns users from all branches in the school, prioritizing BranchAdmin role
+     */
+    public function getSchoolUsers(Request $request, $id)
+    {
+        try {
+            $user = $request->user();
+            
+            if (!$user || $user->user_type !== 'CompanyAdmin') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthorized'
+                ], 401);
+            }
+
+            // Validate school belongs to company admin's company
+            $school = School::where('company_id', $user->company_id)->findOrFail($id);
+
+            // Get all branch IDs for this school
+            $branchIds = Branch::where('school_id', $school->id)->pluck('id');
+
+            if ($branchIds->isEmpty()) {
+                return response()->json([
+                    'success' => true,
+                    'data' => [],
+                    'message' => 'No branches found for this school'
+                ]);
+            }
+
+            // Build query for users
+            $query = User::with(['branch'])
+                ->whereIn('branch_id', $branchIds)
+                ->where('is_active', true)
+                ->where('user_type', '!=', 'CompanyAdmin'); // Exclude company admins
+
+            // Filter by role if provided
+            if ($request->has('role')) {
+                $query->where('role', $request->role);
+            } else {
+                // Prioritize admin roles: BranchAdmin, SuperAdmin, Staff
+                // But include all roles if no filter specified
+                $query->whereIn('role', ['BranchAdmin', 'SuperAdmin', 'Staff', 'Teacher']);
+            }
+
+            // Get users
+            $users = $query->get();
+
+            // Sort: BranchAdmin first, then others
+            $sortedUsers = $users->sortBy(function ($user) {
+                if ($user->role === 'BranchAdmin') {
+                    return 0;
+                } elseif ($user->role === 'SuperAdmin') {
+                    return 1;
+                } elseif ($user->role === 'Staff') {
+                    return 2;
+                } else {
+                    return 3;
+                }
+            })->values();
+
+            // Format user data
+            $usersData = $sortedUsers->map(function ($user) {
+                return [
+                    'id' => $user->id,
+                    'first_name' => $user->first_name,
+                    'last_name' => $user->last_name,
+                    'full_name' => $user->full_name,
+                    'email' => $user->email,
+                    'phone' => $user->phone,
+                    'role' => $user->role,
+                    'branch_id' => $user->branch_id,
+                    'branch' => $user->branch ? [
+                        'id' => $user->branch->id,
+                        'name' => $user->branch->name,
+                        'code' => $user->branch->code
+                    ] : null,
+                    'avatar' => $user->avatar,
+                    'is_active' => $user->is_active,
+                    'last_login' => $user->last_login,
+                    'created_at' => $user->created_at,
+                    'updated_at' => $user->updated_at
+                ];
+            });
+
+            return response()->json([
+                'success' => true,
+                'data' => $usersData->all()
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Get school users error', [
+                'error' => $e->getMessage(),
+                'school_id' => $id,
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch school users'
             ], 500);
         }
     }

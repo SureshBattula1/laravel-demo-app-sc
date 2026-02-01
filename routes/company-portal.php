@@ -50,6 +50,7 @@ Route::middleware(['auth:sanctum', 'company.auth', 'throttle:120,1'])->group(fun
         Route::put('/{id}/activate', [SchoolController::class, 'activate']);
         Route::put('/{id}/deactivate', [SchoolController::class, 'deactivate']);
         Route::get('/{id}/statistics', [SchoolController::class, 'statistics']);
+        Route::get('/{id}/users', [SchoolController::class, 'getSchoolUsers']);
     });
     
     // Company admin management routes
