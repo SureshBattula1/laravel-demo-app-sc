@@ -73,8 +73,8 @@ class BranchController extends Controller
                 $query->where('school_id', $schoolId);
             }
 
-            // Apply branch access filtering
-            $this->applyBranchFilter($query, $request);
+            // Apply branch access filtering (use 'id' column for branches table)
+            $this->applyBranchFilter($query, $request, 'id');
 
             // Search functionality
             if ($request->has('search')) {

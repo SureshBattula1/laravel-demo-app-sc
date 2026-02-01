@@ -7,10 +7,12 @@ use App\Models\School;
 use App\Models\Company;
 use App\Models\Branch;
 use App\Models\User;
+use App\Models\Role;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 
 class SchoolController extends Controller
 {
@@ -112,9 +114,30 @@ class SchoolController extends Controller
                 ->where('company_id', $user->company_id)
                 ->findOrFail($id);
 
+            // Get admin user for the main branch if it exists
+            $adminUser = null;
+            if ($school->main_branch_id) {
+                $adminUser = User::where('branch_id', $school->main_branch_id)
+                    ->whereIn('role', ['BranchAdmin', 'SuperAdmin', 'Admin'])
+                    ->where('is_active', true)
+                    ->first();
+            }
+
+            $schoolData = $school->toArray();
+            if ($adminUser) {
+                $schoolData['admin_user'] = [
+                    'id' => $adminUser->id,
+                    'first_name' => $adminUser->first_name,
+                    'last_name' => $adminUser->last_name,
+                    'email' => $adminUser->email,
+                    'phone' => $adminUser->phone,
+                    'role' => $adminUser->role
+                ];
+            }
+
             return response()->json([
                 'success' => true,
-                'data' => $school
+                'data' => $schoolData
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -140,10 +163,32 @@ class SchoolController extends Controller
             }
 
             $validator = Validator::make($request->all(), [
+                // School fields
                 'name' => 'required|string|max:255',
                 'code' => 'required|string|max:50|unique:schools,code',
-                'main_branch_id' => 'nullable|exists:branches,id',
-                'status' => 'sometimes|in:Active,Inactive,Suspended,UnderConstruction'
+                'status' => 'sometimes|in:Active,Inactive,Suspended,UnderConstruction',
+                
+                // Branch fields (required when creating school)
+                'branch' => 'required|array',
+                'branch.name' => 'required|string|max:255',
+                'branch.code' => 'required|string|max:50|unique:branches,code',
+                'branch.address' => 'required|string|max:500',
+                'branch.city' => 'required|string|max:100',
+                'branch.state' => 'required|string|max:100',
+                'branch.country' => 'required|string|max:100',
+                'branch.pincode' => 'required|string|max:10',
+                'branch.phone' => 'required|string|max:20|unique:branches,phone',
+                'branch.email' => 'required|email|max:255|unique:branches,email',
+                'branch.website' => 'nullable|url|max:255',
+                
+                // Admin user fields (required when creating school)
+                'admin_user' => 'required|array',
+                'admin_user.first_name' => 'required|string|max:255',
+                'admin_user.last_name' => 'required|string|max:255',
+                'admin_user.email' => 'required|email|max:255|unique:users,email',
+                'admin_user.password' => 'required|string|min:8',
+                'admin_user.phone' => 'nullable|string|max:20',
+                'admin_user.role' => 'required|in:BranchAdmin,SuperAdmin'
             ]);
 
             if ($validator->fails()) {
@@ -155,28 +200,102 @@ class SchoolController extends Controller
 
             DB::beginTransaction();
 
+            // Create school
             $school = School::create([
                 'company_id' => $user->company_id,
                 'name' => $request->name,
                 'code' => $request->code,
-                'main_branch_id' => $request->main_branch_id,
                 'status' => $request->status ?? 'Active',
                 'settings' => $request->settings ?? []
             ]);
 
-            // If main_branch_id is provided, update the branch's school_id
-            if ($request->main_branch_id) {
-                Branch::where('id', $request->main_branch_id)->update(['school_id' => $school->id]);
+            // Create main branch for the school
+            $branchData = $request->branch;
+            $branch = Branch::create([
+                'name' => $branchData['name'],
+                'code' => strtoupper($branchData['code']),
+                'school_id' => $school->id,
+                'branch_type' => 'School',
+                'address' => $branchData['address'],
+                'city' => $branchData['city'],
+                'state' => $branchData['state'],
+                'country' => $branchData['country'],
+                'pincode' => $branchData['pincode'],
+                'phone' => $branchData['phone'],
+                'email' => $branchData['email'],
+                'website' => $branchData['website'] ?? null,
+                'is_main_branch' => true,
+                'status' => 'Active',
+                'is_active' => true,
+                'current_enrollment' => 0
+            ]);
+
+            // Update school with main branch ID
+            $school->update(['main_branch_id' => $branch->id]);
+
+            // Create admin user for the branch
+            $adminData = $request->admin_user;
+            $adminUser = User::create([
+                'first_name' => $adminData['first_name'],
+                'last_name' => $adminData['last_name'],
+                'email' => $adminData['email'],
+                'password' => Hash::make($adminData['password']),
+                'phone' => $adminData['phone'] ?? null,
+                'role' => $adminData['role'],
+                'user_type' => 'SchoolUser',
+                'branch_id' => $branch->id,
+                'company_id' => $school->company_id,
+                'is_active' => true
+            ]);
+
+            // Assign role to user via user_roles table (this gives them permissions)
+            // Map role name to role slug
+            $roleSlugMap = [
+                'SuperAdmin' => 'super-admin',
+                'Admin' => 'super-admin', // Admin also uses super-admin role
+                'BranchAdmin' => 'branch-admin'
+            ];
+            
+            $roleSlug = $roleSlugMap[$adminData['role']] ?? 'branch-admin';
+            $role = Role::where('slug', $roleSlug)->first();
+            
+            if ($role) {
+                $adminUser->roles()->attach($role->id, [
+                    'is_primary' => true,
+                    'branch_id' => $branch->id,
+                    'created_at' => now(),
+                    'updated_at' => now()
+                ]);
+            } else {
+                // Log warning if role not found, but don't fail the transaction
+                Log::warning('Role not found when creating admin user', [
+                    'role_slug' => $roleSlug,
+                    'user_id' => $adminUser->id,
+                    'user_role' => $adminData['role']
+                ]);
             }
 
             DB::commit();
 
-            Log::info('School created', ['school_id' => $school->id, 'company_id' => $user->company_id, 'created_by' => $user->id]);
+            Log::info('School created', [
+                'school_id' => $school->id,
+                'company_id' => $user->company_id,
+                'created_by' => $user->id,
+                'branch_id' => $branch->id,
+                'admin_user_id' => $adminUser->id
+            ]);
 
             return response()->json([
                 'success' => true,
-                'message' => 'School created successfully',
-                'data' => $school->load(['company', 'mainBranch'])
+                'message' => 'School created successfully with main branch and admin user',
+                'data' => $school->load(['company', 'mainBranch']),
+                'branch' => $branch,
+                'admin_user' => [
+                    'id' => $adminUser->id,
+                    'name' => $adminUser->full_name,
+                    'email' => $adminUser->email,
+                    'role' => $adminUser->role
+                ]
             ], 201);
         } catch (\Exception $e) {
             DB::rollBack();
@@ -202,9 +321,30 @@ class SchoolController extends Controller
             $validator = Validator::make($request->all(), [
                 'name' => 'sometimes|required|string|max:255',
                 'code' => 'sometimes|required|string|max:50|unique:schools,code,' . $id,
-                'main_branch_id' => 'sometimes|nullable|exists:branches,id',
                 'status' => 'sometimes|in:Active,Inactive,Suspended,UnderConstruction',
-                'settings' => 'sometimes|array'
+                'settings' => 'sometimes|array',
+                
+                // Branch fields (optional for updates)
+                'branch' => 'sometimes|array',
+                'branch.name' => 'sometimes|string|max:255',
+                'branch.code' => 'sometimes|string|max:50',
+                'branch.address' => 'sometimes|string|max:500',
+                'branch.city' => 'sometimes|string|max:100',
+                'branch.state' => 'sometimes|string|max:100',
+                'branch.country' => 'sometimes|string|max:100',
+                'branch.pincode' => 'sometimes|string|max:10',
+                'branch.phone' => 'sometimes|string|max:20',
+                'branch.email' => 'sometimes|email|max:255',
+                'branch.website' => 'nullable|url|max:255',
+
+                // Admin user fields (optional for updates)
+                'admin_user' => 'sometimes|array',
+                'admin_user.first_name' => 'sometimes|string|max:255',
+                'admin_user.last_name' => 'sometimes|string|max:255',
+                'admin_user.email' => 'sometimes|email|max:255',
+                'admin_user.password' => 'sometimes|nullable|string|min:8',
+                'admin_user.phone' => 'nullable|string|max:20',
+                'admin_user.role' => 'sometimes|in:BranchAdmin,SuperAdmin,Admin'
             ]);
 
             if ($validator->fails()) {
@@ -216,20 +356,84 @@ class SchoolController extends Controller
 
             DB::beginTransaction();
 
-            $school->update($request->only(['name', 'code', 'main_branch_id', 'status', 'settings']));
+            // Update school basic info
+            $school->update($request->only(['name', 'code', 'status', 'settings']));
 
-            // If main_branch_id is updated, update the branch's school_id
-            if ($request->has('main_branch_id')) {
-                // Remove school_id from old main branch
-                if ($school->getOriginal('main_branch_id')) {
-                    Branch::where('id', $school->getOriginal('main_branch_id'))
-                        ->where('school_id', $school->id)
-                        ->update(['school_id' => null]);
-                }
+            // Update main branch if branch data is provided
+            if ($request->has('branch') && $school->main_branch_id) {
+                $branchData = $request->branch;
+                $mainBranch = Branch::where('id', $school->main_branch_id)
+                    ->where('school_id', $school->id)
+                    ->first();
                 
-                // Set school_id on new main branch
-                if ($request->main_branch_id) {
-                    Branch::where('id', $request->main_branch_id)->update(['school_id' => $school->id]);
+                if ($mainBranch) {
+                    $mainBranch->update([
+                        'name' => $branchData['name'] ?? $mainBranch->name,
+                        'code' => $branchData['code'] ?? $mainBranch->code,
+                        'address' => $branchData['address'] ?? $mainBranch->address,
+                        'city' => $branchData['city'] ?? $mainBranch->city,
+                        'state' => $branchData['state'] ?? $mainBranch->state,
+                        'country' => $branchData['country'] ?? $mainBranch->country,
+                        'pincode' => $branchData['pincode'] ?? $mainBranch->pincode,
+                        'phone' => $branchData['phone'] ?? $mainBranch->phone,
+                        'email' => $branchData['email'] ?? $mainBranch->email,
+                        'website' => $branchData['website'] ?? $mainBranch->website
+                    ]);
+                }
+            }
+
+            // Update admin user if admin_user data is provided
+            if ($request->has('admin_user') && $school->main_branch_id) {
+                $adminData = $request->admin_user;
+                $adminUser = User::where('branch_id', $school->main_branch_id)
+                    ->whereIn('role', ['BranchAdmin', 'SuperAdmin', 'Admin'])
+                    ->where('is_active', true)
+                    ->first();
+                
+                if ($adminUser) {
+                    // Store original role before update
+                    $oldRole = $adminUser->role;
+                    
+                    $updateData = [
+                        'first_name' => $adminData['first_name'] ?? $adminUser->first_name,
+                        'last_name' => $adminData['last_name'] ?? $adminUser->last_name,
+                        'email' => $adminData['email'] ?? $adminUser->email,
+                        'phone' => $adminData['phone'] ?? $adminUser->phone,
+                        'role' => $adminData['role'] ?? $adminUser->role
+                    ];
+                    
+                    // Only update password if provided
+                    if (!empty($adminData['password'])) {
+                        $updateData['password'] = Hash::make($adminData['password']);
+                    }
+                    
+                    $adminUser->update($updateData);
+                    
+                    // Update role assignment if role changed
+                    if (isset($adminData['role']) && $adminData['role'] !== $oldRole) {
+                        // Remove old role
+                        $oldRoleSlug = ($oldRole === 'SuperAdmin' || $oldRole === 'Admin') 
+                            ? 'super-admin' 
+                            : 'branch-admin';
+                        $oldRoleModel = Role::where('slug', $oldRoleSlug)->first();
+                        if ($oldRoleModel) {
+                            $adminUser->roles()->detach($oldRoleModel->id);
+                        }
+                        
+                        // Attach new role
+                        $newRoleSlug = ($adminData['role'] === 'SuperAdmin' || $adminData['role'] === 'Admin')
+                            ? 'super-admin'
+                            : 'branch-admin';
+                        $newRoleModel = Role::where('slug', $newRoleSlug)->first();
+                        if ($newRoleModel) {
+                            $adminUser->roles()->attach($newRoleModel->id, [
+                                'is_primary' => true,
+                                'branch_id' => $school->main_branch_id,
+                                'created_at' => now(),
+                                'updated_at' => now()
+                            ]);
+                        }
+                    }
                 }
             }
 
@@ -237,14 +441,36 @@ class SchoolController extends Controller
 
             Log::info('School updated', ['school_id' => $school->id, 'updated_by' => $user->id]);
 
+            // Reload school with relationships
+            $school->refresh();
+            $adminUser = null;
+            if ($school->main_branch_id) {
+                $adminUser = User::where('branch_id', $school->main_branch_id)
+                    ->whereIn('role', ['BranchAdmin', 'SuperAdmin', 'Admin'])
+                    ->where('is_active', true)
+                    ->first();
+            }
+
+            $schoolData = $school->load(['company', 'mainBranch'])->toArray();
+            if ($adminUser) {
+                $schoolData['admin_user'] = [
+                    'id' => $adminUser->id,
+                    'first_name' => $adminUser->first_name,
+                    'last_name' => $adminUser->last_name,
+                    'email' => $adminUser->email,
+                    'phone' => $adminUser->phone,
+                    'role' => $adminUser->role
+                ];
+            }
+
             return response()->json([
                 'success' => true,
                 'message' => 'School updated successfully',
-                'data' => $school->fresh()->load(['company', 'mainBranch'])
+                'data' => $schoolData
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
-            Log::error('School update error', ['error' => $e->getMessage()]);
+            Log::error('School update error', ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
             
             return response()->json([
                 'success' => false,
