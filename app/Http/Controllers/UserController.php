@@ -217,7 +217,8 @@ class UserController extends Controller
             'role' => $roleName,
             'branch_id' => $request->branch_id,
             'is_active' => $request->get('is_active', true),
-            'email_verified_at' => now()
+            'email_verified_at' => now(),
+            'is_password_changed' => false // New users must change password on first login
         ]);
 
         // Add role_id to response for frontend

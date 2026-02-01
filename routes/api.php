@@ -56,6 +56,13 @@ Route::post('/login', [AuthController::class, 'login']);
 Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
 Route::post('/reset-password', [AuthController::class, 'resetPassword']);
 
+// Password Change OTP Routes (require authentication)
+Route::middleware(['auth:sanctum'])->group(function () {
+    Route::post('/request-password-change-otp', [AuthController::class, 'requestPasswordChangeOtp']);
+    Route::post('/verify-otp-only', [AuthController::class, 'verifyOtpOnly']);
+    Route::post('/verify-otp-change-password', [AuthController::class, 'verifyOtpAndChangePassword']);
+});
+
 // Health Check
 Route::get('/health', function () {
     return response()->json([
@@ -73,6 +80,7 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::put('/profile', [AuthController::class, 'updateProfile']);
     Route::put('/change-password', [AuthController::class, 'changePassword']);
+    Route::get('/password-change-status', [AuthController::class, 'checkPasswordChangeStatus']);
     
     // User Preferences Routes
     Route::prefix('preferences')->group(function () {

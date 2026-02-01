@@ -30,6 +30,10 @@ class User extends Authenticatable
         'avatar',
         'is_active',
         'last_login',
+        'is_password_changed',
+        'password_changed_at',
+        'otp_code',
+        'otp_expires_at',
     ];
 
     protected $hidden = [
@@ -45,6 +49,9 @@ class User extends Authenticatable
             'last_login' => 'datetime',
             'is_active' => 'boolean',
             'password' => 'hashed',
+            'is_password_changed' => 'boolean',
+            'password_changed_at' => 'datetime',
+            'otp_expires_at' => 'datetime',
         ];
     }
 
@@ -107,6 +114,14 @@ class User extends Authenticatable
     public function isParent()
     {
         return $this->role === 'Parent';
+    }
+
+    /**
+     * Check if user needs to change password (first-time login)
+     */
+    public function needsPasswordChange(): bool
+    {
+        return !$this->is_password_changed;
     }
 
     /**

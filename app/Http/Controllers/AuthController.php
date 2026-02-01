@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\User;
+use App\Services\OtpService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
@@ -55,7 +56,8 @@ class AuthController extends Controller
                 'password' => Hash::make($request->password),
                 'role' => $request->role,
                 'branch_id' => $request->branch_id,
-                'is_active' => true
+                'is_active' => true,
+                'is_password_changed' => false // New users must change password on first login
             ]);
 
             $token = $user->createToken('auth_token', ['*'], now()->addDays(30))->plainTextToken;
@@ -125,9 +127,9 @@ class AuthController extends Controller
             // Determine if login is email or phone
             $loginField = filter_var($login, FILTER_VALIDATE_EMAIL) ? 'email' : 'phone';
             
-            // OPTIMIZED: Select only needed columns first
+            // OPTIMIZED: Select only needed columns first (including password change status)
             $user = User::where($loginField, $login)
-                ->select('id', $loginField, 'password', 'role', 'branch_id', 'is_active', 'first_name', 'last_name', 'avatar')
+                ->select('id', $loginField, 'password', 'role', 'branch_id', 'is_active', 'first_name', 'last_name', 'avatar', 'is_password_changed')
                 ->first();
 
             if (!$user || !Hash::check($request->password, $user->password)) {
@@ -168,13 +170,17 @@ class AuthController extends Controller
             // OPTIMIZED: Load branch only when needed
             $user->load('branch');
 
+            // Check if password change is required
+            $requiresPasswordChange = !$user->is_password_changed;
+
             return response()->json([
                 'success' => true,
                 'message' => 'Login successful',
                 'user' => $user,
                 'access_token' => $token,
                 'token_type' => 'Bearer',
-                'expires_in' => '30 days'
+                'expires_in' => '30 days',
+                'requires_password_change' => $requiresPasswordChange
             ]);
 
         } catch (\Exception $e) {
@@ -529,6 +535,289 @@ class AuthController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Password change failed',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Request OTP for password change (first-time login)
+     */
+    public function requestPasswordChangeOtp(Request $request)
+    {
+        try {
+            // Verify user is authenticated
+            $user = $request->user();
+            
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthenticated'
+                ], 401);
+            }
+
+            // Check if user needs password change
+            if ($user->is_password_changed) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Password has already been changed'
+                ], 400);
+            }
+
+            // Check if user has phone number
+            $phoneNumber = $user->mobile ?? $user->phone;
+            if (!$phoneNumber) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Phone number not found. Please contact administrator.'
+                ], 400);
+            }
+
+            // Rate limiting for OTP requests
+            $rateLimitKey = 'otp_request:' . $user->id;
+            if (RateLimiter::tooManyAttempts($rateLimitKey, 3)) {
+                $seconds = RateLimiter::availableIn($rateLimitKey);
+                return response()->json([
+                    'success' => false,
+                    'message' => "Too many OTP requests. Please try again in {$seconds} seconds."
+                ], 429);
+            }
+
+            DB::beginTransaction();
+
+            // Generate 6-digit OTP
+            $otpService = new OtpService();
+            $otp = $otpService->generateOtp(6);
+            
+            // Store OTP with expiration (10 minutes)
+            $user->update([
+                'otp_code' => $otp,
+                'otp_expires_at' => now()->addMinutes(10)
+            ]);
+
+            // Send OTP via SMS
+            $smsSent = $otpService->sendOtpViaSms($user, $otp);
+
+            if (!$smsSent) {
+                DB::rollBack();
+                RateLimiter::hit($rateLimitKey, 900); // 15 minutes
+                
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Failed to send OTP. Please try again or contact administrator.'
+                ], 500);
+            }
+
+            DB::commit();
+            RateLimiter::hit($rateLimitKey, 900); // 15 minutes
+
+            Log::info('Password change OTP requested', [
+                'user_id' => $user->id,
+                'phone' => $phoneNumber
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'OTP sent successfully to your registered phone number',
+                'expires_in' => 600 // 10 minutes in seconds
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Request password change OTP error', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to send OTP. Please try again.',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Verify OTP and change password (first-time login)
+     */
+    public function verifyOtpAndChangePassword(Request $request)
+    {
+        try {
+            $user = $request->user();
+            
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthenticated'
+                ], 401);
+            }
+
+            $validator = Validator::make($request->all(), [
+                'otp' => 'required|string|size:6|regex:/^[0-9]{6}$/',
+                'password' => [
+                    'required',
+                    'string',
+                    'min:8',
+                    'confirmed',
+                    'regex:/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/'
+                ]
+            ], [
+                'otp.regex' => 'OTP must be 6 digits',
+                'password.regex' => 'Password must contain uppercase, lowercase, number and special character'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            // Refresh user to get latest OTP data
+            $user->refresh();
+            
+            // Verify OTP
+            $otpService = new OtpService();
+            if (!$otpService->verifyOtp($user, $request->otp)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Invalid or expired OTP'
+                ], 400);
+            }
+
+            DB::beginTransaction();
+
+            // Update password
+            $user->update([
+                'password' => Hash::make($request->password),
+                'is_password_changed' => true,
+                'password_changed_at' => now()
+            ]);
+
+            // Clear OTP
+            $otpService->clearOtp($user);
+
+            DB::commit();
+
+            Log::info('Password changed successfully (first-time login)', [
+                'user_id' => $user->id
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Password changed successfully. You can now access the application.'
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Verify OTP and change password error', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Password change failed. Please try again.',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Verify OTP only (without changing password)
+     */
+    public function verifyOtpOnly(Request $request)
+    {
+        try {
+            $user = $request->user();
+            
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthenticated'
+                ], 401);
+            }
+
+            $validator = Validator::make($request->all(), [
+                'otp' => 'required|string|size:6|regex:/^[0-9]{6}$/'
+            ], [
+                'otp.regex' => 'OTP must be 6 digits'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            // Refresh user to get latest OTP data
+            $user->refresh();
+            
+            // Verify OTP
+            $otpService = new OtpService();
+            if (!$otpService->verifyOtp($user, $request->otp)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Invalid or expired OTP'
+                ], 400);
+            }
+
+            Log::info('OTP verified successfully', [
+                'user_id' => $user->id
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'OTP verified successfully'
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Verify OTP only error', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'OTP verification failed. Please try again.',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Check password change status
+     */
+    public function checkPasswordChangeStatus(Request $request)
+    {
+        try {
+            $user = $request->user();
+            
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthenticated'
+                ], 401);
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'is_password_changed' => $user->is_password_changed,
+                    'password_changed_at' => $user->password_changed_at,
+                    'needs_password_change' => $user->needsPasswordChange()
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Check password change status error', [
+                'error' => $e->getMessage()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to check password change status',
                 'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
             ], 500);
         }

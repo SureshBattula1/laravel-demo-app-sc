@@ -374,7 +374,8 @@ class TeacherController extends Controller
                 'role' => 'Teacher',
                 'user_type' => 'Teacher',
                 'branch_id' => $request->branch_id,
-                'is_active' => $request->is_active ?? true
+                'is_active' => $request->is_active ?? true,
+                'is_password_changed' => false // New users must change password on first login
             ]);
             
             // Assign Teacher role via roles relationship

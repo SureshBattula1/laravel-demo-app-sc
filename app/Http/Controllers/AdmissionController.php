@@ -513,7 +513,8 @@ class AdmissionController extends Controller
                 'role' => 'Student',
                 'user_type' => 'Student',
                 'branch_id' => $application->branch_id,
-                'is_active' => true
+                'is_active' => true,
+                'is_password_changed' => false // New users must change password on first login
             ]);
             
             // Assign Student role
