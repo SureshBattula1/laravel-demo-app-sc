@@ -428,37 +428,90 @@ class SchoolController extends Controller
             // Get all branch IDs for this school
             $branchIds = Branch::where('school_id', $school->id)->pluck('id');
 
-            if ($branchIds->isEmpty()) {
-                return response()->json([
-                    'success' => true,
-                    'data' => [],
-                    'message' => 'No branches found for this school'
-                ]);
-            }
-
-            // Build query for users
-            $query = User::with(['branch'])
-                ->whereIn('branch_id', $branchIds)
-                ->where('is_active', true)
-                ->where('user_type', '!=', 'CompanyAdmin'); // Exclude company admins
+            // Build base query conditions
+            $baseConditions = [
+                ['is_active', '=', true],
+                ['user_type', '!=', 'CompanyAdmin'],
+            ];
 
             // Filter by role if provided
-            if ($request->has('role')) {
-                $query->where('role', $request->role);
+            $rolesToInclude = [];
+            if ($request->has('role') && $request->role !== 'All' && $request->role !== '' && $request->role !== null) {
+                $rolesToInclude = [$request->role];
             } else {
-                // Prioritize admin roles: BranchAdmin, SuperAdmin, Staff
-                // But include all roles if no filter specified
-                $query->whereIn('role', ['BranchAdmin', 'SuperAdmin', 'Staff', 'Teacher']);
+                // When no role filter or "All" is selected, include all relevant roles
+                $rolesToInclude = ['BranchAdmin', 'SuperAdmin', 'Admin', 'Staff', 'Teacher'];
             }
 
-            // Get users
-            $users = $query->get();
+            // Get users from branches - this is the primary source
+            // Users whose branch belongs to the school
+            $usersFromBranches = collect();
+            if ($branchIds->isNotEmpty()) {
+                $usersFromBranches = User::with(['branch'])
+                    ->where($baseConditions)
+                    ->whereNotNull('role')
+                    ->whereIn('branch_id', $branchIds)
+                    ->whereIn('role', $rolesToInclude)
+                    ->get();
+                
+                // Also get users that might not have company_id set but belong to school branches
+                // This handles legacy data or users created before company_id was added
+                $usersWithoutCompany = User::with(['branch'])
+                    ->where('is_active', true)
+                    ->where('user_type', '!=', 'CompanyAdmin')
+                    ->whereNotNull('role')
+                    ->whereNull('company_id') // Users without company_id
+                    ->whereIn('branch_id', $branchIds)
+                    ->whereIn('role', $rolesToInclude)
+                    ->get();
+                
+                $usersFromBranches = $usersFromBranches->merge($usersWithoutCompany);
+            }
 
-            // Sort: BranchAdmin first, then others
+            // Get admin users from company (may not have branch_id or have branch_id in school)
+            // Also get Staff users
+            // Only get SuperAdmin, BranchAdmin, and Staff from company level
+            $adminUsers = collect();
+            $adminRolesToGet = array_intersect(['SuperAdmin', 'Admin', 'Staff'], $rolesToInclude);
+            if (!empty($adminRolesToGet)) {
+                // First try with company_id
+                $adminUsers = User::with(['branch'])
+                    ->where($baseConditions)
+                    ->whereNotNull('role')
+                    ->where('company_id', $school->company_id)
+                    ->whereIn('role', $adminRolesToGet)
+                    ->where(function($q) use ($branchIds) {
+                        $q->whereNull('branch_id');
+                        if ($branchIds->isNotEmpty()) {
+                            $q->orWhereIn('branch_id', $branchIds);
+                        }
+                    })
+                    ->get();
+                
+                // Also get admin users that might not have company_id set but belong to school branches
+                // This handles legacy data
+                if ($branchIds->isNotEmpty()) {
+                    $adminUsersWithoutCompany = User::with(['branch'])
+                        ->where('is_active', true)
+                        ->where('user_type', '!=', 'CompanyAdmin')
+                        ->whereNotNull('role')
+                        ->whereNull('company_id') // Users without company_id
+                        ->whereIn('branch_id', $branchIds)
+                        ->whereIn('role', $adminRolesToGet)
+                        ->get();
+                    
+                    $adminUsers = $adminUsers->merge($adminUsersWithoutCompany);
+                }
+            }
+
+            // Merge and deduplicate users
+            $users = $usersFromBranches->merge($adminUsers)->unique('id');
+
+            // Sort: BranchAdmin first, then Admin, then Staff, then others
             $sortedUsers = $users->sortBy(function ($user) {
                 if ($user->role === 'BranchAdmin') {
                     return 0;
-                } elseif ($user->role === 'SuperAdmin') {
+                } elseif ($user->role === 'SuperAdmin' || $user->role === 'Admin') {
                     return 1;
                 } elseif ($user->role === 'Staff') {
                     return 2;
@@ -493,7 +546,8 @@ class SchoolController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data' => $usersData->all()
+                'data' => $usersData->all(),
+                'roles_found' => $adminRolesToGet
             ]);
         } catch (\Exception $e) {
             Log::error('Get school users error', [

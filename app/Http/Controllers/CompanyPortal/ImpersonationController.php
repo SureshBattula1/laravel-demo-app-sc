@@ -28,8 +28,8 @@ class ImpersonationController extends Controller
                 ], 403);
             }
 
-            // Get user to impersonate
-            $impersonatedUser = User::findOrFail($userId);
+            // Get user to impersonate with relationships
+            $impersonatedUser = User::with('branch')->findOrFail($userId);
 
             // Validate user belongs to a school in the same company
             if ($impersonatedUser->branch_id) {
