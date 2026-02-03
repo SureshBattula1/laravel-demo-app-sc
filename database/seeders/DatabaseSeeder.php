@@ -258,7 +258,7 @@ class DatabaseSeeder extends Seeder
                 'icon' => 'business',
                 'route' => '/branches',
                 'order' => 6,
-                'permissions' => ['view', 'create', 'edit', 'delete', 'stats']
+                'permissions' => ['view', 'create', 'edit', 'delete', 'stats', 'export']
             ],
             [
                 'name' => 'Accounts',
@@ -306,7 +306,7 @@ class DatabaseSeeder extends Seeder
                 'icon' => 'class',
                 'route' => '/sections',
                 'order' => 12,
-                'permissions' => ['view', 'create', 'edit', 'delete']
+                'permissions' => ['view', 'create', 'edit', 'delete', 'export']
             ],
             [
                 'name' => 'Subjects',
@@ -467,11 +467,11 @@ class DatabaseSeeder extends Seeder
             'student_attendance.edit', 'student_attendance.delete', 'student_attendance.report', 'student_attendance.export',
             'teacher_attendance.view', 'teacher_attendance.create', 'teacher_attendance.mark', 
             'teacher_attendance.edit', 'teacher_attendance.delete', 'teacher_attendance.report', 'teacher_attendance.export',
-            'branches.view', 'branches.create', 'branches.edit', 'branches.delete', 'branches.stats',
+            'branches.view', 'branches.create', 'branches.edit', 'branches.delete', 'branches.stats', 'branches.export',
             'fees.view', 'fees.collect', 'fees.report',
             'exams.view', 'exams.create', 'exams.edit', 'exams.results',
             'grades.view', 'grades.create', 'grades.edit', 'grades.delete',
-            'sections.view', 'sections.create', 'sections.edit', 'sections.delete',
+            'sections.view', 'sections.create', 'sections.edit', 'sections.delete', 'sections.export',
             'subjects.view', 'subjects.create', 'subjects.edit', 'subjects.delete',
             'departments.view', 'departments.create', 'departments.edit', 'departments.delete',
             'groups.view', 'groups.create', 'groups.edit', 'groups.delete',

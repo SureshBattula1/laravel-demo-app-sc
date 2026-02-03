@@ -91,8 +91,8 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
         Route::get('/', [BranchController::class, 'index']);
         Route::post('/', [BranchController::class, 'store']);
         
-        // Export
-        Route::get('export', [BranchController::class, 'export']);
+        // Export (requires branches.export permission)
+        Route::get('export', [BranchController::class, 'export'])->middleware('permission:branches.export');
         
         // Deleted branches (soft deleted - status = Closed)
         Route::get('deleted', [BranchController::class, 'getDeleted']);
@@ -197,7 +197,7 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
     Route::prefix('sections')->group(function () {
         Route::get('/', [SectionController::class, 'index']);
         Route::post('/', [SectionController::class, 'store']);
-        Route::get('export', [SectionController::class, 'export']);
+        Route::get('export', [SectionController::class, 'export'])->middleware('permission:sections.export');
         Route::get('{id}/subjects', [SectionSubjectController::class, 'getSectionSubjects']);
         Route::get('{id}', [SectionController::class, 'show']);
         Route::put('{id}', [SectionController::class, 'update']);
@@ -295,13 +295,16 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
     Route::get('notifications/stream', [RealTimeNotificationController::class, 'streamNotifications']);
     
     // Attendance Routes (specific routes MUST come before apiResource)
-    Route::get('attendance/export', [AttendanceController::class, 'export']);
-    Route::post('attendance/bulk', [AttendanceController::class, 'markBulk']);
-    Route::get('attendance/report', [AttendanceController::class, 'getReport']);
-    Route::get('attendance/student/{studentId}', [AttendanceController::class, 'getStudentAttendance']);
-    Route::get('attendance/teacher/{teacherId}', [AttendanceController::class, 'getTeacherAttendance']);
-    Route::get('attendance/class/{grade}/{section}', [AttendanceController::class, 'getClassAttendance']);
-    Route::get('attendance/report/{studentId}', [AttendanceController::class, 'generateReport']);
+    Route::prefix('attendance')->group(function () {
+        Route::get('dashboard', [AttendanceController::class, 'getDashboard']);
+        Route::get('export', [AttendanceController::class, 'export']);
+        Route::post('bulk', [AttendanceController::class, 'markBulk']);
+        Route::get('report', [AttendanceController::class, 'getReport']);
+        Route::get('student/{studentId}', [AttendanceController::class, 'getStudentAttendance']);
+        Route::get('teacher/{teacherId}', [AttendanceController::class, 'getTeacherAttendance']);
+        Route::get('class/{grade}/{section}', [AttendanceController::class, 'getClassAttendance']);
+        Route::get('report/{studentId}', [AttendanceController::class, 'generateReport']);
+    });
     Route::apiResource('attendance', AttendanceController::class);
     
     // Leave Routes (specific routes MUST come before apiResource)
