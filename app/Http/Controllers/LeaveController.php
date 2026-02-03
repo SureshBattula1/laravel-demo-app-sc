@@ -27,6 +27,7 @@ class LeaveController extends Controller
                     ->join('users', 'student_leaves.student_id', '=', 'users.id')
                     ->leftJoin('students', 'users.id', '=', 'students.user_id')
                     ->leftJoin('grades', 'students.grade', '=', 'grades.value')
+                    ->leftJoin('branches', 'student_leaves.branch_id', '=', 'branches.id')
                     ->select(
                         'student_leaves.*',
                         'users.first_name',
@@ -35,19 +36,22 @@ class LeaveController extends Controller
                         'students.admission_number',
                         'students.grade',
                         'grades.label as grade_label',
-                        'students.section'
+                        'students.section',
+                        'branches.name as branch_name'
                     );
             } else {
                 $query = DB::table('teacher_leaves')
                     ->join('users', 'teacher_leaves.teacher_id', '=', 'users.id')
                     ->leftJoin('teachers', 'users.id', '=', 'teachers.user_id')
+                    ->leftJoin('branches', 'teacher_leaves.branch_id', '=', 'branches.id')
                     ->select(
                         'teacher_leaves.*',
                         'users.first_name',
                         'users.last_name',
                         'users.email',
                         'teachers.employee_id',
-                        'teachers.designation'
+                        'teachers.designation',
+                        'branches.name as branch_name'
                     );
             }
 
@@ -118,6 +122,7 @@ class LeaveController extends Controller
                     'student_leaves.created_at',
                     'users.first_name',
                     'users.last_name',
+                    'branches.name',
                     'students.admission_number',
                     'students.grade'
                 ]
@@ -130,6 +135,7 @@ class LeaveController extends Controller
                     'teacher_leaves.created_at',
                     'users.first_name',
                     'users.last_name',
+                    'branches.name',
                     'teachers.employee_id'
                 ];
 
@@ -260,44 +266,51 @@ class LeaveController extends Controller
     }
 
     /**
-     * Get single leave record - OPTIMIZED with UNION
+     * Get single leave record
      */
     public function show($id)
     {
         try {
-            // OPTIMIZED: Single query using UNION to check both tables at once
-            $leave = DB::table('student_leaves')
-                ->join('users', 'student_leaves.student_id', '=', 'users.id')
-                ->leftJoin('students', 'users.id', '=', 'students.user_id')
-                ->leftJoin('grades', 'students.grade', '=', 'grades.value')
-                ->where('student_leaves.id', $id)
-                ->select(
-                    'student_leaves.*',
-                    'users.first_name',
-                    'users.last_name',
-                    'users.email',
-                    'students.admission_number',
-                    'students.grade',
-                    'grades.label as grade_label',
-                    'students.section',
-                    DB::raw("'student' as leave_for")
-                )
-                ->union(
-                    DB::table('teacher_leaves')
-                        ->join('users', 'teacher_leaves.teacher_id', '=', 'users.id')
-                        ->leftJoin('teachers', 'users.id', '=', 'teachers.user_id')
-                        ->where('teacher_leaves.id', $id)
-                        ->select(
-                            'teacher_leaves.*',
-                            'users.first_name',
-                            'users.last_name',
-                            'users.email',
-                            'teachers.employee_id',
-                            'teachers.designation',
-                            DB::raw("'teacher' as leave_for")
-                        )
-                )
-                ->first();
+            $type = request()->get('type', 'student');
+            
+            if ($type === 'student') {
+                $leave = DB::table('student_leaves')
+                    ->join('users', 'student_leaves.student_id', '=', 'users.id')
+                    ->leftJoin('students', 'users.id', '=', 'students.user_id')
+                    ->leftJoin('grades', 'students.grade', '=', 'grades.value')
+                    ->leftJoin('branches', 'student_leaves.branch_id', '=', 'branches.id')
+                    ->where('student_leaves.id', $id)
+                    ->select(
+                        'student_leaves.*',
+                        'users.first_name',
+                        'users.last_name',
+                        'users.email',
+                        'students.admission_number',
+                        'students.grade',
+                        'grades.label as grade_label',
+                        'students.section',
+                        'branches.name as branch_name',
+                        DB::raw("'student' as leave_for")
+                    )
+                    ->first();
+            } else {
+                $leave = DB::table('teacher_leaves')
+                    ->join('users', 'teacher_leaves.teacher_id', '=', 'users.id')
+                    ->leftJoin('teachers', 'users.id', '=', 'teachers.user_id')
+                    ->leftJoin('branches', 'teacher_leaves.branch_id', '=', 'branches.id')
+                    ->where('teacher_leaves.id', $id)
+                    ->select(
+                        'teacher_leaves.*',
+                        'users.first_name',
+                        'users.last_name',
+                        'users.email',
+                        'teachers.employee_id',
+                        'teachers.designation',
+                        'branches.name as branch_name',
+                        DB::raw("'teacher' as leave_for")
+                    )
+                    ->first();
+            }
             
             if (!$leave) {
                 return response()->json([
