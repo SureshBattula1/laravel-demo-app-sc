@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Traits\PaginatesAndSorts;
 use App\Models\Department;
+use App\Models\Branch;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
@@ -140,6 +141,10 @@ class DepartmentController extends Controller
                 'teachers_count' => $request->teachers_count ?? 0,
                 'is_active' => $request->is_active ?? true
             ];
+
+            // Set school_id from the selected branch
+            $branch = Branch::find($request->branch_id);
+            $sanitizedData['school_id'] = $branch ? $branch->school_id : null;
 
             $department = Department::create($sanitizedData);
 

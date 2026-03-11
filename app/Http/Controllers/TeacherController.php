@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Traits\PaginatesAndSorts;
 use App\Models\User;
 use App\Models\Teacher;
+use App\Models\Branch;
 use App\Models\TeacherAttachment;
 use App\Exports\TeachersExport;
 use App\Services\PdfExportService;
@@ -480,6 +481,10 @@ class TeacherController extends Controller
             $teacherData['branch_id'] = $request->branch_id;
             $teacherData['teacher_status'] = 'Active';
 
+            // Set school_id from the selected branch so teacher is linked to the correct school
+            $branch = Branch::find($request->branch_id);
+            $teacherData['school_id'] = $branch ? $branch->school_id : null;
+
             $teacher = Teacher::create($teacherData);
 
             // Update profile completion percentage
@@ -801,6 +806,13 @@ class TeacherController extends Controller
             if (!empty(array_filter($extendedData))) {
                 $existingExtended = $teacher->extended_profile ?? [];
                 $teacherData['extended_profile'] = array_merge($existingExtended, $extendedData);
+            }
+
+            // When branch_id is changed, sync teacher's branch_id and school_id from the new branch
+            if ($request->filled('branch_id')) {
+                $teacherData['branch_id'] = $request->branch_id;
+                $branch = Branch::find($request->branch_id);
+                $teacherData['school_id'] = $branch ? $branch->school_id : null;
             }
 
             $teacher->update($teacherData);
