@@ -129,8 +129,10 @@ class StudentGroupController extends Controller
 
             DB::beginTransaction();
 
+            $branch = \App\Models\Branch::find($request->branch_id);
             $group = StudentGroup::create([
                 'branch_id' => $request->branch_id,
+                'school_id' => $branch ? $branch->school_id : null,
                 'name' => strip_tags($request->name),
                 'code' => strtoupper($request->code),
                 'type' => $request->type,

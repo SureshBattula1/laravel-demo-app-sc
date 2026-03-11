@@ -12,6 +12,7 @@ class ExamTerm extends Model
         'name',
         'code',
         'branch_id',
+        'school_id',
         'academic_year',
         'start_date',
         'end_date',

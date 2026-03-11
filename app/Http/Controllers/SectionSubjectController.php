@@ -177,11 +177,13 @@ class SectionSubjectController extends Controller
                 ], 400);
             }
 
+            $branch = \App\Models\Branch::find($request->branch_id);
             $assignment = SectionSubject::create([
                 'section_id' => $request->section_id,
                 'subject_id' => $request->subject_id,
                 'teacher_id' => $request->teacher_id,
                 'branch_id' => $request->branch_id,
+                'school_id' => $branch ? $branch->school_id : null,
                 'academic_year' => $request->academic_year,
                 'is_active' => true
             ]);
@@ -243,6 +245,9 @@ class SectionSubjectController extends Controller
                 ->pluck('subject_id')
                 ->toArray();
 
+            $branch = \App\Models\Branch::find($request->branch_id);
+            $schoolId = $branch ? $branch->school_id : null;
+
             foreach ($request->subjects as $subjectData) {
                 // Check if already exists (no query)
                 if (in_array($subjectData['subject_id'], $existingSubjectIds)) {
@@ -255,6 +260,7 @@ class SectionSubjectController extends Controller
                     'subject_id' => $subjectData['subject_id'],
                     'teacher_id' => $subjectData['teacher_id'] ?? null,
                     'branch_id' => $request->branch_id,
+                    'school_id' => $schoolId,
                     'academic_year' => $request->academic_year,
                     'is_active' => true
                 ]);
@@ -347,6 +353,7 @@ class SectionSubjectController extends Controller
                             'subject_id' => $sourceSubject->subject_id,
                             'teacher_id' => $copyTeachers ? $sourceSubject->teacher_id : null,
                             'branch_id' => $targetSection->branch_id,
+                            'school_id' => $targetSection->school_id,
                             'academic_year' => $request->academic_year,
                             'is_active' => true
                         ]);

@@ -119,6 +119,7 @@ class ExamScheduleController extends Controller
                 'passing_marks' => $request->passing_marks,
                 'room_number' => $request->room_number,
                 'invigilator_id' => $request->invigilator_id,
+                'instructions' => $request->instructions,
             ];
 
             $schedule = ExamSchedule::create($scheduleData);
@@ -147,7 +148,7 @@ class ExamScheduleController extends Controller
                     'id', 'exam_id', 'subject_id', 'grade', 'section',
                     'exam_date', 'start_time', 'end_time', 'duration',
                     'total_marks', 'passing_marks', 'room_number', 'invigilator_id',
-                    'created_at', 'updated_at'
+                    'instructions', 'created_at', 'updated_at'
                 ])
                 ->findOrFail($id);
             return response()->json(['success' => true, 'data' => $schedule]);

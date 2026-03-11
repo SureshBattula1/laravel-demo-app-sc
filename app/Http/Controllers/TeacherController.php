@@ -483,7 +483,8 @@ class TeacherController extends Controller
 
             // Set school_id from the selected branch so teacher is linked to the correct school
             $branch = Branch::find($request->branch_id);
-            $teacherData['school_id'] = $branch ? $branch->school_id : null;
+            $schoolId = $branch ? $branch->school_id : null;
+            $teacherData['school_id'] = $schoolId ?? $this->getCurrentSchoolId($request);
 
             $teacher = Teacher::create($teacherData);
 

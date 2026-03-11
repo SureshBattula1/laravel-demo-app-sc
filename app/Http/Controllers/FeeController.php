@@ -143,8 +143,10 @@ class FeeController extends Controller
                 ], 422);
             }
 
+            $branch = \App\Models\Branch::find($request->branch_id);
             $structure = FeeStructure::create([
                 ...$request->all(),
+                'school_id' => $branch ? $branch->school_id : null,
                 'created_by' => $request->user()->id,
                 'is_active' => $request->has('is_active') ? $request->boolean('is_active') : true
             ]);

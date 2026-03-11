@@ -153,8 +153,10 @@ class HolidayController extends Controller
             $startDate = $request->start_date;
             $academicYear = $request->academic_year ?: $this->getCurrentAcademicYear();
             
+            $branch = $branchId ? \App\Models\Branch::find($branchId) : null;
             $holiday = Holiday::create([
                 'branch_id' => $branchId ?: 1, // Default to branch 1 if null (for old schema)
+                'school_id' => $branch ? $branch->school_id : null,
                 'name' => $title, // Old schema column
                 'title' => $title,
                 'date' => $startDate, // Old schema column

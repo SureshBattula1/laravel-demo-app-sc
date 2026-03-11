@@ -12,6 +12,7 @@ class Holiday extends Model
 
     protected $fillable = [
         'branch_id',
+        'school_id',
         'name',  // Old column (keep for compatibility)
         'title',
         'description',

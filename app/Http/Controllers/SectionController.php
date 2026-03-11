@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Traits\PaginatesAndSorts;
 use App\Models\Section;
+use App\Models\Branch;
 use App\Exports\SectionsExport;
 use App\Services\PdfExportService;
 use App\Services\CsvExportService;
@@ -197,8 +198,10 @@ class SectionController extends Controller
                 ], 400);
             }
 
+            $branch = Branch::find($request->branch_id);
             $section = Section::create([
                 'branch_id' => $request->branch_id,
+                'school_id' => $branch ? $branch->school_id : null,
                 'name' => strtoupper(strip_tags($request->name)),
                 'code' => strtoupper(strip_tags($request->code)),
                 'grade_level' => $request->grade_level ? strip_tags($request->grade_level) : null,

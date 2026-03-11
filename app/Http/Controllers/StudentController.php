@@ -1149,9 +1149,12 @@ class StudentController extends Controller
      */
     private function prepareStudentData(Request $request, int $userId): array
     {
+        $branch = \App\Models\Branch::find($request->branch_id);
+        $schoolId = $branch ? $branch->school_id : null;
         $data = [
             'user_id' => $userId,
             'branch_id' => $request->branch_id,
+            'school_id' => $schoolId ?? $this->getCurrentSchoolId($request),
             'student_status' => 'Active',
             'created_at' => now(),
             'updated_at' => now()
@@ -1174,7 +1177,7 @@ class StudentController extends Controller
         $data['gender'] = $request->gender;
         $data['blood_group'] = $request->blood_group ?? null;
         $data['religion'] = $request->religion ?? null;
-        $data['nationality'] = $request->nationality ?? null;
+        $data['nationality'] = !empty(trim((string)($request->nationality ?? ''))) ? trim($request->nationality) : 'Indian';
         $data['mother_tongue'] = $request->mother_tongue ?? null;
         $data['category'] = $request->category ?? null;
         $data['caste'] = $request->caste ?? null;
@@ -1358,7 +1361,7 @@ class StudentController extends Controller
         // Personal Information
         if ($request->has('blood_group')) $data['blood_group'] = $request->blood_group ?: null;
         if ($request->has('religion')) $data['religion'] = $request->religion ?: null;
-        if ($request->has('nationality')) $data['nationality'] = $request->nationality ?: null;
+        if ($request->has('nationality')) $data['nationality'] = !empty(trim((string)$request->nationality)) ? trim($request->nationality) : 'Indian';
         if ($request->has('mother_tongue')) $data['mother_tongue'] = $request->mother_tongue ?: null;
         if ($request->has('category')) $data['category'] = $request->category ?: null;
         if ($request->has('caste')) $data['caste'] = $request->caste ?: null;

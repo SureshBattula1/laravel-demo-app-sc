@@ -12,6 +12,7 @@ class SectionSubject extends Model
         'subject_id',
         'teacher_id',
         'branch_id',
+        'school_id',
         'academic_year',
         'is_active'
     ];

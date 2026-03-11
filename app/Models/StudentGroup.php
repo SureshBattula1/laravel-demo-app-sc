@@ -11,6 +11,7 @@ class StudentGroup extends Model
 
     protected $fillable = [
         'branch_id',
+        'school_id',
         'name',
         'code',
         'type',

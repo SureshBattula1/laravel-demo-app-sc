@@ -90,6 +90,8 @@ class FeeTypeController extends Controller
                 'is_active' => 'boolean',
             ]);
 
+            $branch = \App\Models\Branch::find($validated['branch_id']);
+            $validated['school_id'] = $branch ? $branch->school_id : null;
             $feeType = FeeType::create($validated);
             $feeType->load('branch');
 

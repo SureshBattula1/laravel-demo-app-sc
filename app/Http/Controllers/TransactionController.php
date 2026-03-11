@@ -157,8 +157,10 @@ class TransactionController extends Controller
             $financialYear = $this->getFinancialYear($date);
             $month = $date->format('F');
 
+            $branch = \App\Models\Branch::find($request->branch_id);
             $transaction = Transaction::create([
                 'branch_id' => $request->branch_id,
+                'school_id' => $branch ? $branch->school_id : null,
                 'category_id' => $request->category_id,
                 'transaction_number' => $transactionNumber,
                 'transaction_date' => $request->transaction_date,

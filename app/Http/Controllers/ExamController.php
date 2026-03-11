@@ -134,6 +134,10 @@ class ExamController extends Controller
             $examData = $request->only([
                 'exam_term_id', 'branch_id', 'name', 'exam_type', 'academic_year', 'description'
             ]);
+
+            // Set school_id from branch
+            $branch = \App\Models\Branch::find($request->branch_id);
+            $examData['school_id'] = $branch ? $branch->school_id : null;
             
             // Set default values for total_marks and passing_marks
             $examData['total_marks'] = 0;

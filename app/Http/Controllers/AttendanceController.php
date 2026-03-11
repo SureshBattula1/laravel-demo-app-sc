@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Traits\PaginatesAndSorts;
+use App\Models\Branch;
 use App\Models\Student;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -214,9 +215,13 @@ class AttendanceController extends Controller
                     ], 422);
                 }
 
+                $branch = Branch::find($request->branch_id);
+                $schoolId = $branch ? $branch->school_id : null;
+
                 DB::table('student_attendance')->insert([
                     'student_id' => $request->student_id,
                     'branch_id' => $request->branch_id,
+                    'school_id' => $schoolId,
                     'grade_level' => $request->grade_level,
                     'section' => $request->section,
                     'date' => $request->date,
@@ -255,9 +260,13 @@ class AttendanceController extends Controller
                     ], 422);
                 }
 
+                $branch = Branch::find($request->branch_id);
+                $schoolId = $branch ? $branch->school_id : null;
+
                 DB::table('teacher_attendance')->insert([
                     'teacher_id' => $request->teacher_id,
                     'branch_id' => $request->branch_id,
+                    'school_id' => $schoolId,
                     'date' => $request->date,
                     'status' => $request->status,
                     'remarks' => $request->remarks,
@@ -312,6 +321,9 @@ class AttendanceController extends Controller
             $marked = 0;
             $errors = [];
 
+            $branch = Branch::find($request->branch_id);
+            $schoolId = $branch ? $branch->school_id : null;
+
             foreach ($request->attendance as $item) {
                 try {
                     if ($type === 'student') {
@@ -328,6 +340,7 @@ class AttendanceController extends Controller
                             ],
                             [
                                 'branch_id' => $request->branch_id,
+                                'school_id' => $schoolId,
                                 'grade_level' => $item['grade_level'],
                                 'section' => $item['section'],
                                 'status' => $item['status'],
@@ -346,6 +359,7 @@ class AttendanceController extends Controller
                             ],
                             [
                                 'branch_id' => $request->branch_id,
+                                'school_id' => $schoolId,
                                 'status' => $item['status'],
                                 'remarks' => $item['remarks'] ?? null,
                                 'updated_at' => now(),

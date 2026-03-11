@@ -20,7 +20,8 @@ class ExamSchedule extends Model
         'total_marks',
         'passing_marks',
         'room_number',
-        'invigilator_id'
+        'invigilator_id',
+        'instructions'
     ];
 
     protected function casts(): array

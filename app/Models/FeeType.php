@@ -16,6 +16,7 @@ class FeeType extends Model
         'code',
         'description',
         'branch_id',
+        'school_id',
         'is_mandatory',
         'is_refundable',
         'is_active',

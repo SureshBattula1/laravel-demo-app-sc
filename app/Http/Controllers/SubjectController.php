@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Traits\PaginatesAndSorts;
 use App\Models\Subject;
+use App\Models\Branch;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
@@ -136,6 +137,7 @@ class SubjectController extends Controller
 
             DB::beginTransaction();
 
+            $branch = Branch::find($request->branch_id);
             $sanitizedData = [
                 'name' => strip_tags($request->name),
                 'code' => strtoupper(strip_tags($request->code)),
@@ -146,6 +148,7 @@ class SubjectController extends Controller
                 'credits' => $request->credits ?? 0,
                 'type' => $request->type,
                 'branch_id' => $request->branch_id,
+                'school_id' => $branch ? $branch->school_id : null,
                 'is_active' => $request->is_active ?? true
             ];
 

@@ -122,8 +122,10 @@ class EventController extends Controller
                 ], 422);
             }
 
+            $branch = \App\Models\Branch::find($request->branch_id);
             $event = Event::create([
                 'branch_id' => $request->branch_id,
+                'school_id' => $branch ? $branch->school_id : null,
                 'title' => strip_tags($request->title),
                 'description' => strip_tags($request->description ?? ''),
                 'event_type' => $request->event_type,

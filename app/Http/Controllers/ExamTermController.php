@@ -92,7 +92,10 @@ class ExamTermController extends Controller
 
         DB::beginTransaction();
         try {
-            $term = ExamTerm::create($request->all());
+            $branch = \App\Models\Branch::find($request->branch_id);
+            $termData = $request->all();
+            $termData['school_id'] = $branch ? $branch->school_id : null;
+            $term = ExamTerm::create($termData);
             DB::commit();
             return response()->json(['success' => true, 'data' => $term->load('branch'), 'message' => 'Exam term created'], 201);
         } catch (\Exception $e) {

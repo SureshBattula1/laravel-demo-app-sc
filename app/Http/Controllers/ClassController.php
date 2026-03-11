@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\ClassModel;
+use App\Models\Branch;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
@@ -140,8 +141,10 @@ class ClassController extends Controller
                 ], 400);
             }
 
+            $branch = Branch::find($request->branch_id);
             $class = ClassModel::create([
                 'branch_id' => $request->branch_id,
+                'school_id' => $branch ? $branch->school_id : null,
                 'grade' => strip_tags($request->grade),
                 'section' => $request->section ? strip_tags($request->section) : null,
                 'class_name' => $className,
