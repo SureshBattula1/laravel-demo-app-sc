@@ -69,3 +69,5 @@ If you get an error about tables not existing, make sure you've run migrations f
 
 If the seeder says the company or user already exists, that's fine - it means they were already created.
 
+
+

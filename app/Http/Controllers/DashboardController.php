@@ -38,13 +38,24 @@ class DashboardController extends Controller
             $fromDate = $dateRange['from'];
             $toDate = $dateRange['to'];
             
-            // Get accessible branch IDs for user
+            // Get accessible branch IDs for user (never use global "all" for dashboard counts)
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
             
             // If user selected specific branch in filter, use only that branch
             if ($request->has('branch_id') && $request->branch_id) {
-                if ($accessibleBranchIds === 'all' || in_array($request->branch_id, $accessibleBranchIds)) {
-                    $accessibleBranchIds = [$request->branch_id];
+                if ($accessibleBranchIds === 'all' || in_array((int) $request->branch_id, (array) $accessibleBranchIds)) {
+                    $accessibleBranchIds = [(int) $request->branch_id];
+                }
+            }
+            
+            // Resolve 'all' to actual branch IDs so dashboard shows only this user's branches
+            if ($accessibleBranchIds === 'all') {
+                if ($user->branch_id) {
+                    $accessibleBranchIds = [$user->branch_id];
+                } elseif (!empty($user->company_id)) {
+                    $accessibleBranchIds = $this->getBranchIdsForCompany($user->company_id);
+                } else {
+                    $accessibleBranchIds = DB::table('branches')->where('is_active', true)->pluck('id')->toArray();
                 }
             }
             
@@ -146,20 +157,22 @@ class DashboardController extends Controller
      */
     private function getOverviewStats($branchIds): array
     {
+        $branchIdsArray = is_array($branchIds) ? $branchIds : [];
         $studentQuery = DB::table('students')->where('student_status', 'Active');
         $teacherQuery = DB::table('teachers')->where('teacher_status', 'Active');
         
-        if ($branchIds !== 'all' && !empty($branchIds)) {
-            $studentQuery->whereIn('branch_id', $branchIds);
-            $teacherQuery->whereIn('branch_id', $branchIds);
+        if (!empty($branchIdsArray)) {
+            $studentQuery->whereIn('branch_id', $branchIdsArray);
+            $teacherQuery->whereIn('branch_id', $branchIdsArray);
+        } else {
+            $studentQuery->whereRaw('1 = 0');
+            $teacherQuery->whereRaw('1 = 0');
         }
 
         return [
             'total_students' => $studentQuery->count(),
             'total_teachers' => $teacherQuery->count(),
-            'total_branches' => $branchIds === 'all' 
-                ? DB::table('branches')->where('is_active', true)->count() 
-                : count($branchIds)
+            'total_branches' => count($branchIdsArray),
         ];
     }
     

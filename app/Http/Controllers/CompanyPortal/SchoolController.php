@@ -23,7 +23,7 @@ class SchoolController extends Controller
     {
         try {
             $user = $request->user();
-            
+
             if (!$user || $user->user_type !== 'CompanyAdmin') {
                 return response()->json([
                     'success' => false,
@@ -31,9 +31,14 @@ class SchoolController extends Controller
                 ], 401);
             }
 
+            // Show schools across all companies in the portal, with optional filter
             $query = School::with(['company', 'mainBranch'])
-                ->where('company_id', $user->company_id)
                 ->withCount(['branches', 'activeBranches']);
+
+            // Optional filter by company if provided
+            if ($request->has('company_id') && $request->company_id) {
+                $query->where('company_id', $request->company_id);
+            }
 
             // Filtering
             if ($request->has('status')) {
@@ -108,10 +113,8 @@ class SchoolController extends Controller
     public function show(Request $request, $id)
     {
         try {
-            $user = $request->user();
-            
+            // Allow loading any school by ID (no company_id restriction)
             $school = School::with(['company', 'mainBranch', 'branches'])
-                ->where('company_id', $user->company_id)
                 ->findOrFail($id);
 
             // Get admin user for the main branch if it exists
@@ -163,6 +166,9 @@ class SchoolController extends Controller
             }
 
             $validator = Validator::make($request->all(), [
+                // Company selection (for multi-company management)
+                'company_id' => 'required|exists:companies,id',
+
                 // School fields
                 'name' => 'required|string|max:255',
                 'code' => 'required|string|max:50|unique:schools,code',
@@ -200,9 +206,12 @@ class SchoolController extends Controller
 
             DB::beginTransaction();
 
+            // Determine company for the new school (selected in UI)
+            $companyId = $request->company_id;
+
             // Create school
             $school = School::create([
-                'company_id' => $user->company_id,
+                'company_id' => $companyId,
                 'name' => $request->name,
                 'code' => $request->code,
                 'status' => $request->status ?? 'Active',
@@ -244,7 +253,7 @@ class SchoolController extends Controller
                 'role' => $adminData['role'],
                 'user_type' => 'SchoolUser',
                 'branch_id' => $branch->id,
-                'company_id' => $school->company_id,
+                'company_id' => $companyId,
                 'is_active' => true
             ]);
 
@@ -315,8 +324,9 @@ class SchoolController extends Controller
     {
         try {
             $user = $request->user();
-            
-            $school = School::where('company_id', $user->company_id)->findOrFail($id);
+
+            // Allow updating any school by ID (no company_id restriction)
+            $school = School::findOrFail($id);
 
             $validator = Validator::make($request->all(), [
                 'name' => 'sometimes|required|string|max:255',

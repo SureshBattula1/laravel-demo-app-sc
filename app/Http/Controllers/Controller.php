@@ -30,6 +30,25 @@ abstract class Controller
     }
 
     /**
+     * Get branch IDs that belong to the given company (via schools).
+     * Used so dashboard "all" shows only that company's branches.
+     *
+     * @param int $companyId
+     * @return array
+     */
+    protected function getBranchIdsForCompany(int $companyId): array
+    {
+        return \Illuminate\Support\Facades\DB::table('branches')
+            ->join('schools', 'branches.school_id', '=', 'schools.id')
+            ->where('schools.company_id', $companyId)
+            ->whereNull('schools.deleted_at')
+            ->whereNull('branches.deleted_at')
+            ->where('branches.is_active', true)
+            ->pluck('branches.id')
+            ->toArray();
+    }
+
+    /**
      * Get accessible branch IDs for current user
      * Supports: SuperAdmin, Cross-Branch Permission, BranchAdmin, Regular Users
      * Now includes school-level filtering
@@ -46,8 +65,14 @@ abstract class Controller
             return [];
         }
         
-        // SuperAdmin has access to all branches (fastest check - no DB query)
+        // SuperAdmin: if user has company_id or branch_id, limit to those (e.g. Company Portal)
         if ($user->role === 'SuperAdmin') {
+            if (!empty($user->company_id)) {
+                return $this->getBranchIdsForCompany($user->company_id);
+            }
+            if (!empty($user->branch_id)) {
+                return [$user->branch_id];
+            }
             return 'all';
         }
 
@@ -124,6 +149,10 @@ abstract class Controller
                     ->pluck('id')
                     ->toArray();
                 return $branchIds;
+            }
+            // Company Portal: limit to company's branches when user has company_id
+            if (!empty($user->company_id)) {
+                return $this->getBranchIdsForCompany($user->company_id);
             }
             return 'all';
         }
