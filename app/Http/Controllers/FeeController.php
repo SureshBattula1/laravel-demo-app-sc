@@ -292,6 +292,15 @@ class FeeController extends Controller
                 ->whereBetween('fp.payment_date', [$fromDate, $toDate])
                 ->whereIn('fp.payment_status', ['Completed', 'Partial']);
 
+            // 🔥 APPLY SCHOOL FILTERING - Only current school's data
+            $schoolId = $this->getCurrentSchoolId($request);
+            if ($schoolId) {
+                $baseQuery->where(function ($q) use ($schoolId) {
+                    $q->where('fp.school_id', $schoolId)
+                      ->orWhere('fs.school_id', $schoolId);
+                });
+            }
+
             // 🔥 APPLY BRANCH FILTERING - Restrict to accessible branches
             // Use branch_id from fee_structure (more reliable)
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
@@ -394,6 +403,14 @@ class FeeController extends Controller
                     DB::raw('SUM(COALESCE(fp.amount_paid, 0)) as paid_amount')
                 )
                 ->groupBy('s.grade', 'g.label');
+
+            // Apply school filtering to pending query
+            if ($schoolId) {
+                $pendingQuery->where(function ($q) use ($schoolId) {
+                    $q->where('fs.school_id', $schoolId)
+                      ->orWhere('s.school_id', $schoolId);
+                });
+            }
             
             // Apply branch filtering
             if ($accessibleBranchIds !== 'all') {
@@ -652,11 +669,34 @@ class FeeController extends Controller
 
             $totalAmount = $request->amount_paid + ($request->late_fee ?? 0) - ($request->discount_amount ?? 0);
 
-            $payment = FeePayment::create([
-                ...$request->all(),
+            $feeStructure = FeeStructure::find($request->fee_structure_id);
+            $branchId = $feeStructure ? (int) $feeStructure->branch_id : null;
+            $schoolId = $feeStructure?->school_id
+                ?? ($branchId ? \App\Models\Branch::find($branchId)?->school_id : null)
+                ?? $this->getCurrentSchoolId($request);
+            if ($schoolId !== null) {
+                $schoolId = (int) $schoolId;
+            }
+
+            $paymentData = [
+                'fee_structure_id' => $request->fee_structure_id,
+                'student_id' => $request->student_id,
+                'branch_id' => $branchId,
+                'school_id' => $schoolId,
+                'amount_paid' => $request->amount_paid,
+                'payment_date' => $request->payment_date,
+                'payment_method' => $request->payment_method,
+                'transaction_id' => $request->transaction_id,
+                'discount_amount' => $request->discount_amount ?? 0,
+                'late_fee' => $request->late_fee ?? 0,
                 'total_amount' => $totalAmount,
+                'payment_status' => $request->payment_status,
+                'remarks' => $request->remarks,
+                'academic_year' => $request->academic_year,
                 'created_by' => $request->user()->id
-            ]);
+            ];
+
+            $payment = FeePayment::create($paymentData);
 
             DB::commit();
 

@@ -20,7 +20,23 @@ class FeeTypeController extends Controller
         try {
             $query = FeeType::with('branch');
 
-            // Filter by branch
+            // Apply school filtering - show only fee types for the current school
+            $schoolId = $this->getCurrentSchoolId($request);
+            if ($schoolId) {
+                $query->where('school_id', $schoolId);
+            }
+
+            // Apply branch filtering - restrict to accessible branches
+            $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+            if ($accessibleBranchIds !== 'all') {
+                if (!empty($accessibleBranchIds)) {
+                    $query->whereIn('branch_id', $accessibleBranchIds);
+                } else {
+                    $query->whereRaw('1 = 0');
+                }
+            }
+
+            // Filter by specific branch when provided
             if ($request->has('branch_id') && $request->branch_id) {
                 $query->where('branch_id', $request->branch_id);
             }

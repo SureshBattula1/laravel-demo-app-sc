@@ -15,6 +15,8 @@ class FeePayment extends Model
         'id',
         'fee_structure_id',
         'student_id',
+        'branch_id',
+        'school_id',
         'amount_paid',
         'payment_date',
         'payment_method',
