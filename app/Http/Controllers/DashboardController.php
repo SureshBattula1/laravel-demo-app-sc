@@ -48,11 +48,12 @@ class DashboardController extends Controller
                 }
             }
             
-            // Resolve 'all' to actual branch IDs so dashboard shows only this user's branches
+            // Resolve 'all' to actual branch IDs. Super Admin with company_id: see that company only (all branches of company)
             if ($accessibleBranchIds === 'all') {
                 if ($user->branch_id) {
                     $accessibleBranchIds = [$user->branch_id];
                 } elseif (!empty($user->company_id)) {
+                    // Super Admin with company: income, expense, fees, attendance etc. for that company's branches only
                     $accessibleBranchIds = $this->getBranchIdsForCompany($user->company_id);
                 } else {
                     $accessibleBranchIds = DB::table('branches')->where('is_active', true)->pluck('id')->toArray();

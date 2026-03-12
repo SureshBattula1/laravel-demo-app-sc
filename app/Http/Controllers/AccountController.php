@@ -4,7 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Models\Transaction;
 use App\Models\AccountCategory;
+use App\Models\Branch;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -19,6 +21,14 @@ class AccountController extends Controller
             $branchId = $request->get('branch_id');
             $financialYear = $request->get('financial_year', $this->getCurrentFinancialYear());
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+            $user = $request->user();
+
+            // Super Admin with company_id: see all accounts/income/expense of that company only (all branches of company)
+            if ($accessibleBranchIds === 'all' && $user && $user->role === 'SuperAdmin' && !empty($user->company_id)) {
+                $accessibleBranchIds = $this->getBranchIdsForCompany($user->company_id);
+            }
+
+            $schoolId = $this->getCurrentSchoolId($request);
 
             // Early return for no access
             if ($accessibleBranchIds !== 'all' && empty($accessibleBranchIds)) {
@@ -34,12 +44,15 @@ class AccountController extends Controller
                 ]);
             }
 
-            // OPTIMIZED: Use indexes - status + financial_year + branch_id
+            // Only Approved transactions; use same school/branch scope as transaction list
             $baseQuery = DB::table('transactions')
                 ->where('status', 'Approved')
                 ->where('financial_year', $financialYear)
                 ->whereNull('deleted_at');
 
+            if ($schoolId) {
+                $baseQuery->where('school_id', $schoolId);
+            }
             if ($accessibleBranchIds !== 'all') {
                 $baseQuery->whereIn('branch_id', $accessibleBranchIds);
             } elseif ($branchId) {
@@ -55,12 +68,13 @@ class AccountController extends Controller
             $totalIncome = (float) ($totals->total_income ?? 0);
             $totalExpense = (float) ($totals->total_expense ?? 0);
 
-            // Query 2: Category breakdown (uses index on category_id, financial_year)
+            // Query 2: Category breakdown (Approved only; same school/branch scope)
             $categoryBreakdown = DB::table('transactions')
                 ->join('account_categories', 'transactions.category_id', '=', 'account_categories.id')
                 ->where('transactions.status', 'Approved')
                 ->where('transactions.financial_year', $financialYear)
                 ->whereNull('transactions.deleted_at')
+                ->when($schoolId, fn($q) => $q->where('transactions.school_id', $schoolId))
                 ->when($accessibleBranchIds !== 'all', fn($q) => $q->whereIn('transactions.branch_id', $accessibleBranchIds))
                 ->when($branchId, fn($q) => $q->where('transactions.branch_id', $branchId))
                 ->selectRaw('transactions.type, account_categories.name as category, SUM(transactions.amount) as amount')
@@ -70,10 +84,11 @@ class AccountController extends Controller
             $incomeByCategory = $categoryBreakdown->where('type', 'Income')->map(fn($i) => ['category' => $i->category, 'amount' => (float) $i->amount])->values();
             $expenseByCategory = $categoryBreakdown->where('type', 'Expense')->map(fn($i) => ['category' => $i->category, 'amount' => (float) $i->amount])->values();
 
-            // Query 3: Recent transactions (uses index on transaction_date) - MINIMAL DATA
+            // Query 3: Recent transactions (same school/branch scope)
             $recentTransactions = Transaction::select('id', 'transaction_number', 'transaction_date', 'type', 'amount', 'status', 'category_id')
                 ->where('financial_year', $financialYear)
                 ->whereNull('deleted_at')
+                ->when($schoolId, fn($q) => $q->where('school_id', $schoolId))
                 ->when($accessibleBranchIds !== 'all', fn($q) => $q->whereIn('branch_id', $accessibleBranchIds))
                 ->when($branchId, fn($q) => $q->where('branch_id', $branchId))
                 ->with('category:id,name')
@@ -81,11 +96,12 @@ class AccountController extends Controller
                 ->limit(5)
                 ->get();
 
-            // Query 4: Monthly trend (uses index on transaction_date) - REDUCED TO 6 MONTHS
+            // Query 4: Monthly trend (Approved only; same school/branch scope)
             $monthlyTrend = DB::table('transactions')
                 ->where('status', 'Approved')
                 ->where('transaction_date', '>=', now()->subMonths(6)->format('Y-m-d'))
                 ->whereNull('deleted_at')
+                ->when($schoolId, fn($q) => $q->where('school_id', $schoolId))
                 ->when($accessibleBranchIds !== 'all', fn($q) => $q->whereIn('branch_id', $accessibleBranchIds))
                 ->when($branchId, fn($q) => $q->where('branch_id', $branchId))
                 ->selectRaw('MONTH(transaction_date) as month, YEAR(transaction_date) as year, type, SUM(amount) as total')
@@ -121,41 +137,46 @@ class AccountController extends Controller
     }
 
     /**
-     * Get account categories - INDEX OPTIMIZED
+     * Get account categories - branch-wise for users, company-wise for Super Admin with company
      */
     public function getCategories(Request $request)
     {
         try {
-            // OPTIMIZED: Select only needed columns, use indexes
             $query = AccountCategory::select([
                 'id',
                 'branch_id',
-                'name', 
-                'code', 
-                'type', 
-                'sub_type', 
+                'name',
+                'code',
+                'type',
+                'sub_type',
                 'is_active'
             ])->with('branch:id,name,code');
 
-            // Use index on branch_id (null = global for all branches)
-            if ($request->has('branch_id')) {
-                $query->where(function($q) use ($request) {
-                    $q->where('branch_id', $request->branch_id)
-                      ->orWhereNull('branch_id'); // Include global categories
-                });
+            // Restrict to accessible branches: branch-wise for normal users, company's branches for Super Admin with company_id
+            $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+            if ($accessibleBranchIds !== 'all') {
+                if (empty($accessibleBranchIds)) {
+                    $query->whereRaw('1 = 0');
+                } else {
+                    $query->whereIn('branch_id', $accessibleBranchIds);
+                }
             }
 
-            // Use index on type column
+            // Optional request filter: single branch (must be in accessible set)
+            if ($request->has('branch_id') && $request->branch_id) {
+                if ($accessibleBranchIds === 'all' || in_array((int) $request->branch_id, array_map('intval', (array) $accessibleBranchIds))) {
+                    $query->where('branch_id', $request->branch_id);
+                }
+            }
+
             if ($request->has('type')) {
                 $query->where('type', $request->type);
             }
 
-            // Use index on is_active column
             if ($request->has('is_active')) {
                 $query->where('is_active', $request->boolean('is_active'));
             }
 
-            // Order by name (no index needed for ORDER BY on small dataset)
             $categories = $query->orderBy('name', 'asc')->get();
 
             return response()->json([
@@ -215,7 +236,7 @@ class AccountController extends Controller
     }
 
     /**
-     * Create new account category
+     * Create new account category (saves branch_id and school_id)
      */
     public function createCategory(Request $request)
     {
@@ -223,13 +244,56 @@ class AccountController extends Controller
         try {
             $validated = $request->validate([
                 'branch_id' => 'nullable|exists:branches,id',
-                'name' => 'required|string|max:255|unique:account_categories,name',
-                'code' => 'required|string|max:50|unique:account_categories,code',
+                'name' => 'required|string|max:255',
+                'code' => 'required|string|max:50',
                 'type' => 'required|in:Income,Expense',
                 'sub_type' => 'nullable|string|max:255',
                 'description' => 'nullable|string',
                 'is_active' => 'boolean'
             ]);
+
+            // Ensure branch_id and school_id are set: from request or current user's branch
+            $branchId = $validated['branch_id'] ?? null;
+            if ($branchId === null) {
+                $user = Auth::user();
+                $branchId = $user && $user->branch_id ? $user->branch_id : null;
+            }
+            $validated['branch_id'] = $branchId;
+
+            $schoolId = null;
+            if ($branchId) {
+                $branch = Branch::find($branchId);
+                $schoolId = $branch ? $branch->school_id : null;
+            }
+            $validated['school_id'] = $schoolId;
+
+            // Unique per branch (or global) - scope uniqueness by branch_id for name/code
+            $uniqueQuery = AccountCategory::where('name', $validated['name']);
+            if ($branchId) {
+                $uniqueQuery->where('branch_id', $branchId);
+            } else {
+                $uniqueQuery->whereNull('branch_id');
+            }
+            if ($uniqueQuery->exists()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Validation failed',
+                    'errors' => ['name' => ['An account category with this name already exists for this branch.']]
+                ], 422);
+            }
+            $uniqueQuery = AccountCategory::where('code', $validated['code']);
+            if ($branchId) {
+                $uniqueQuery->where('branch_id', $branchId);
+            } else {
+                $uniqueQuery->whereNull('branch_id');
+            }
+            if ($uniqueQuery->exists()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Validation failed',
+                    'errors' => ['code' => ['An account category with this code already exists for this branch.']]
+                ], 422);
+            }
 
             // Convert empty strings to null for nullable fields
             $validated['sub_type'] = !empty($validated['sub_type']) ? $validated['sub_type'] : null;
@@ -275,13 +339,48 @@ class AccountController extends Controller
 
             $validated = $request->validate([
                 'branch_id' => 'nullable|exists:branches,id',
-                'name' => 'required|string|max:255|unique:account_categories,name,' . $id,
-                'code' => 'required|string|max:50|unique:account_categories,code,' . $id,
+                'name' => 'required|string|max:255',
+                'code' => 'required|string|max:50',
                 'type' => 'required|in:Income,Expense',
                 'sub_type' => 'nullable|string|max:255',
                 'description' => 'nullable|string',
                 'is_active' => 'boolean'
             ]);
+
+            // Keep branch_id and set school_id from branch when branch_id is present
+            $branchId = array_key_exists('branch_id', $validated) ? $validated['branch_id'] : $category->branch_id;
+            $validated['school_id'] = null;
+            if ($branchId) {
+                $branch = Branch::find($branchId);
+                $validated['school_id'] = $branch ? $branch->school_id : null;
+            }
+            if (!array_key_exists('branch_id', $validated)) {
+                $validated['branch_id'] = $branchId;
+            }
+
+            // Uniqueness per branch (name/code)
+            $nameExists = AccountCategory::where('name', $validated['name'])
+                ->where('id', '!=', $id)
+                ->when($branchId, fn ($q) => $q->where('branch_id', $branchId), fn ($q) => $q->whereNull('branch_id'))
+                ->exists();
+            if ($nameExists) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Validation failed',
+                    'errors' => ['name' => ['An account category with this name already exists for this branch.']]
+                ], 422);
+            }
+            $codeExists = AccountCategory::where('code', $validated['code'])
+                ->where('id', '!=', $id)
+                ->when($branchId, fn ($q) => $q->where('branch_id', $branchId), fn ($q) => $q->whereNull('branch_id'))
+                ->exists();
+            if ($codeExists) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Validation failed',
+                    'errors' => ['code' => ['An account category with this code already exists for this branch.']]
+                ], 422);
+            }
 
             // Convert empty strings to null for nullable fields
             if (isset($validated['sub_type'])) {

@@ -12,6 +12,7 @@ class AccountCategory extends Model
 
     protected $fillable = [
         'branch_id',
+        'school_id',
         'name',
         'code',
         'type',
@@ -31,6 +32,11 @@ class AccountCategory extends Model
     public function branch()
     {
         return $this->belongsTo(Branch::class);
+    }
+
+    public function school()
+    {
+        return $this->belongsTo(School::class);
     }
 
     public function transactions()

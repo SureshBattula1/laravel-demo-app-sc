@@ -25,15 +25,14 @@ class HolidayController extends Controller
             $user = Auth::user();
             $query = Holiday::with(['branch', 'createdBy']);
 
-            // 🔥 APPLY BRANCH FILTERING - Restrict to accessible branches
+            // Restrict to company holidays only: holidays in user's accessible branches (no National/State or branch-null)
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
             if ($accessibleBranchIds !== 'all') {
-                // Show: user's branch holidays + national/state holidays (no branch)
-                $query->where(function($q) use ($accessibleBranchIds) {
-                    $q->whereIn('branch_id', $accessibleBranchIds)
-                      ->orWhereNull('branch_id')
-                      ->orWhereIn('type', ['National', 'State']);
-                });
+                if (empty($accessibleBranchIds)) {
+                    $query->whereRaw('1 = 0'); // no branches = no holidays
+                } else {
+                    $query->whereIn('branch_id', $accessibleBranchIds);
+                }
             }
 
             // Apply filters
@@ -339,13 +338,15 @@ class HolidayController extends Controller
             $query = Holiday::active()
                 ->inDateRange($startDate, $endDate);
 
-            // Role-based filtering
-            if ($user->role === 'BranchAdmin') {
-                $query->where(function($q) use ($user) {
-                    $q->where('branch_id', $user->branch_id)
-                      ->orWhereNull('branch_id')
-                      ->orWhereIn('type', ['National', 'State']);
-                });
+            // Company holidays only: restrict to user's accessible branches
+            $request = request();
+            $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+            if ($accessibleBranchIds !== 'all') {
+                if (empty($accessibleBranchIds)) {
+                    $query->whereRaw('1 = 0');
+                } else {
+                    $query->whereIn('branch_id', $accessibleBranchIds);
+                }
             }
 
             $holidays = $query->get();
@@ -374,12 +375,14 @@ class HolidayController extends Controller
 
             $query = Holiday::active()->upcoming();
 
-            if ($user->role === 'BranchAdmin') {
-                $query->where(function($q) use ($user) {
-                    $q->where('branch_id', $user->branch_id)
-                      ->orWhereNull('branch_id')
-                      ->orWhereIn('type', ['National', 'State']);
-                });
+            // Company holidays only: restrict to user's accessible branches
+            $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+            if ($accessibleBranchIds !== 'all') {
+                if (empty($accessibleBranchIds)) {
+                    $query->whereRaw('1 = 0');
+                } else {
+                    $query->whereIn('branch_id', $accessibleBranchIds);
+                }
             }
 
             $holidays = $query->orderBy('start_date', 'asc')
@@ -505,14 +508,14 @@ class HolidayController extends Controller
     {
         $query = Holiday::with(['branch', 'createdBy']);
 
-        // Apply branch filtering
+        // Restrict to company holidays only (branches accessible to user)
         $accessibleBranchIds = $this->getAccessibleBranchIds($request);
         if ($accessibleBranchIds !== 'all') {
-            $query->where(function($q) use ($accessibleBranchIds) {
-                $q->whereIn('branch_id', $accessibleBranchIds)
-                  ->orWhereNull('branch_id')
-                  ->orWhereIn('type', ['National', 'State']);
-            });
+            if (empty($accessibleBranchIds)) {
+                $query->whereRaw('1 = 0');
+            } else {
+                $query->whereIn('branch_id', $accessibleBranchIds);
+            }
         }
 
         // Filter by type
