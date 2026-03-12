@@ -242,30 +242,24 @@ class SchoolController extends Controller
             // Update school with main branch ID
             $school->update(['main_branch_id' => $branch->id]);
 
-            // Create admin user for the branch
+            // Create admin user for the branch (always SuperAdmin when creating school from company portal)
             $adminData = $request->admin_user;
+            $adminRole = 'SuperAdmin';
             $adminUser = User::create([
                 'first_name' => $adminData['first_name'],
                 'last_name' => $adminData['last_name'],
                 'email' => $adminData['email'],
                 'password' => Hash::make($adminData['password']),
                 'phone' => $adminData['phone'] ?? null,
-                'role' => $adminData['role'],
+                'role' => $adminRole,
                 'user_type' => 'SchoolUser',
                 'branch_id' => $branch->id,
                 'company_id' => $companyId,
                 'is_active' => true
             ]);
 
-            // Assign role to user via user_roles table (this gives them permissions)
-            // Map role name to role slug
-            $roleSlugMap = [
-                'SuperAdmin' => 'super-admin',
-                'Admin' => 'super-admin', // Admin also uses super-admin role
-                'BranchAdmin' => 'branch-admin'
-            ];
-            
-            $roleSlug = $roleSlugMap[$adminData['role']] ?? 'branch-admin';
+            // Assign SuperAdmin role via user_roles table (school admin from company portal is always SuperAdmin)
+            $roleSlug = 'super-admin';
             $role = Role::where('slug', $roleSlug)->first();
             
             if ($role) {
@@ -280,7 +274,7 @@ class SchoolController extends Controller
                 Log::warning('Role not found when creating admin user', [
                     'role_slug' => $roleSlug,
                     'user_id' => $adminUser->id,
-                    'user_role' => $adminData['role']
+                    'user_role' => $adminRole
                 ]);
             }
 
