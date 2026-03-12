@@ -4,7 +4,10 @@ namespace App\Http\Controllers;
 
 use App\Http\Traits\PaginatesAndSorts;
 use App\Models\Branch;
+use App\Models\User;
+use App\Models\Role;
 use App\Exports\BranchesExport;
+use Illuminate\Support\Facades\Hash;
 use App\Services\PdfExportService;
 use App\Services\CsvExportService;
 use App\Services\ExportService;
@@ -221,7 +224,8 @@ class BranchController extends Controller
                 'code' => 'required|string|max:50|unique:branches',
                 'branch_type' => 'required|in:HeadOffice,RegionalOffice,School,Campus,SubBranch',
                 'parent_branch_id' => 'nullable|exists:branches,id',
-                
+                'school_id' => 'nullable|exists:schools,id',
+
                 // Location
                 'address' => 'required|string|max:500',
                 'city' => 'required|string|max:100',
@@ -285,9 +289,24 @@ class BranchController extends Controller
                 'settings' => 'nullable|array',
                 
                 // Logo (accept string path from global upload or null)
-                'logo' => 'nullable|string|max:500'
+                'logo' => 'nullable|string|max:500',
+
+                // Branch admin (created with principal name/email, assigned to this branch)
+                'branch_admin_password' => 'nullable|string|min:8'
             ]);
-            
+
+            // If branch admin password provided, principal name and email are required and email must be unique
+            if ($request->filled('branch_admin_password')) {
+                $validator->after(function ($v) use ($request) {
+                    if (empty($request->principal_name) || empty($request->principal_email)) {
+                        $v->errors()->add('branch_admin_password', 'Principal name and email are required when setting branch admin password.');
+                    }
+                    if ($request->filled('principal_email') && \App\Models\User::where('email', $request->principal_email)->exists()) {
+                        $v->errors()->add('principal_email', 'A user with this email already exists.');
+                    }
+                });
+            }
+
             // Clean up logo field before validation passes data
             $validatedData = $validator->validated();
             
@@ -307,11 +326,21 @@ class BranchController extends Controller
 
             DB::beginTransaction();
 
-            $branchData = $validatedData;
+            $branchAdminPassword = $request->branch_admin_password ?? null;
+            $branchData = array_diff_key($validatedData, array_flip(['branch_admin_password']));
             $branchData['code'] = strtoupper($branchData['code'] ?? '');
             $branchData['status'] = $branchData['status'] ?? 'Active';
             $branchData['current_enrollment'] = 0;
-            
+
+            // Ensure school_id is set: from request, or from parent branch, or from current user's school
+            if (empty($branchData['school_id']) && !empty($branchData['parent_branch_id'])) {
+                $parent = \App\Models\Branch::find($branchData['parent_branch_id']);
+                $branchData['school_id'] = $parent ? $parent->school_id : null;
+            }
+            if (empty($branchData['school_id'])) {
+                $branchData['school_id'] = $this->getCurrentSchoolId($request);
+            }
+
             // Sanitize text fields
             if (isset($branchData['name'])) $branchData['name'] = strip_tags($branchData['name']);
             if (isset($branchData['address'])) $branchData['address'] = strip_tags($branchData['address']);
@@ -330,6 +359,37 @@ class BranchController extends Controller
 
             $branch = Branch::create($branchData);
 
+            // Create Branch Admin user with principal name/email when password is provided
+            $adminUser = null;
+            if ($branchAdminPassword && $branch->principal_name && $branch->principal_email) {
+                $parts = preg_split('/\s+/', trim($branch->principal_name), 2);
+                $firstName = $parts[0] ?? $branch->principal_name;
+                $lastName = $parts[1] ?? '';
+                $adminUser = User::create([
+                    'first_name' => $firstName,
+                    'last_name' => $lastName,
+                    'email' => $branch->principal_email,
+                    'password' => Hash::make($branchAdminPassword),
+                    'role' => 'BranchAdmin',
+                    'user_type' => 'SchoolUser',
+                    'branch_id' => $branch->id,
+                    'is_active' => true,
+                ]);
+                $role = Role::where('slug', 'branch-admin')->first();
+                if ($role) {
+                    $adminUser->roles()->attach($role->id, [
+                        'is_primary' => true,
+                        'branch_id' => $branch->id,
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ]);
+                }
+                Log::info('Branch admin created with branch', [
+                    'branch_id' => $branch->id,
+                    'admin_user_id' => $adminUser->id,
+                ]);
+            }
+
             DB::commit();
 
             Log::info('Branch created', [
@@ -337,11 +397,21 @@ class BranchController extends Controller
                 'user_id' => auth()->id()
             ]);
 
-            return response()->json([
+            $response = [
                 'success' => true,
                 'message' => 'Branch created successfully',
-                'data' => $branch->load('parentBranch')
-            ], 201);
+                'data' => $branch->load('parentBranch'),
+            ];
+            if ($adminUser) {
+                $response['branch_admin'] = [
+                    'id' => $adminUser->id,
+                    'name' => trim($adminUser->first_name . ' ' . $adminUser->last_name),
+                    'email' => $adminUser->email,
+                    'role' => $adminUser->role,
+                ];
+            }
+
+            return response()->json($response, 201);
 
         } catch (\Exception $e) {
             DB::rollBack();

@@ -218,7 +218,7 @@ class TeacherController extends Controller
                 
                 // Teacher Specific
                 'employee_id' => 'required|string|max:50|unique:teachers,employee_id',
-                'category_type' => 'required|in:Teaching,Non-Teaching',
+                'category_type' => 'required|in:Teaching,Staff,Account',
                 'designation' => 'required|string|max:255',
                 'department_id' => 'nullable|exists:departments,id',
                 
@@ -371,6 +371,20 @@ class TeacherController extends Controller
 
             DB::beginTransaction();
 
+            // Map category_type to user role: Teaching→Teacher, Staff→Staff, Account→Accountant
+            $roleMap = [
+                'Teaching' => 'Teacher',
+                'Staff' => 'Staff',
+                'Account' => 'Accountant',
+            ];
+            $userRole = $roleMap[$request->category_type] ?? 'Teacher';
+            $roleSlugMap = [
+                'Teacher' => 'teacher',
+                'Staff' => 'staff',
+                'Accountant' => 'accountant',
+            ];
+            $roleSlug = $roleSlugMap[$userRole] ?? 'teacher';
+
             // Create user first
             $user = User::create([
                 'first_name' => strip_tags($request->first_name),
@@ -378,16 +392,16 @@ class TeacherController extends Controller
                 'email' => $request->email,
                 'phone' => $request->phone,
                 'password' => bcrypt($request->password),
-                'role' => 'Teacher',
+                'role' => $userRole,
                 'user_type' => 'Teacher',
                 'branch_id' => $request->branch_id,
                 'is_active' => $request->is_active ?? true
             ]);
-            
-            // Assign Teacher role via roles relationship
-            $teacherRole = \App\Models\Role::where('slug', 'teacher')->first();
-            if ($teacherRole) {
-                $user->roles()->attach($teacherRole->id, [
+
+            // Assign role via roles relationship
+            $role = \App\Models\Role::where('slug', $roleSlug)->first();
+            if ($role) {
+                $user->roles()->attach($role->id, [
                     'is_primary' => true,
                     'branch_id' => $request->branch_id,
                     'created_at' => now(),
@@ -514,6 +528,15 @@ class TeacherController extends Controller
     public function update(Request $request, $id)
     {
         try {
+            // Ensure JSON body is merged for PUT requests (PHP may not auto-parse)
+            $content = $request->getContent();
+            if (!empty($content) && (str_contains($request->header('Content-Type', ''), 'application/json') || $request->isJson())) {
+                $decoded = json_decode($content, true);
+                if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                    $request->merge($decoded);
+                }
+            }
+
             $teacher = Teacher::with(['user', 'branch', 'department'])->findOrFail($id);
 
             $validator = Validator::make($request->all(), [
@@ -536,7 +559,7 @@ class TeacherController extends Controller
                 
                 // Teacher Specific
                 'employee_id' => 'sometimes|string|max:50|unique:teachers,employee_id,' . $id,
-                'category_type' => 'sometimes|in:Teaching,Non-Teaching',
+                'category_type' => 'sometimes|in:Teaching,Staff,Account',
                 'designation' => 'sometimes|string|max:255',
                 'department_id' => 'nullable|exists:departments,id',
                 
@@ -691,7 +714,20 @@ class TeacherController extends Controller
 
             // Update user information
             $userData = $request->only(['first_name', 'last_name', 'email', 'phone', 'branch_id', 'is_active']);
-            
+
+            // Map category_type to user role: Teaching→Teacher, Staff→Staff, Account→Accountant
+            $categoryToRole = [
+                'Teaching' => 'Teacher',
+                'Staff' => 'Staff',
+                'Account' => 'Accountant',
+            ];
+            $newRole = null;
+            if ($request->has('category_type')) {
+                $categoryType = trim((string) $request->input('category_type'));
+                $newRole = $categoryToRole[$categoryType] ?? $teacher->user->role;
+                $userData['role'] = $newRole;
+            }
+
             foreach (['first_name', 'last_name'] as $field) {
                 if (isset($userData[$field])) {
                     $userData[$field] = strip_tags($userData[$field]);
@@ -703,6 +739,27 @@ class TeacherController extends Controller
             }
 
             $teacher->user->update($userData);
+
+            // Sync user_roles when category_type (and thus role) changes
+            if ($newRole !== null) {
+                $roleSlugMap = [
+                    'Teacher' => 'teacher',
+                    'Staff' => 'staff',
+                    'Accountant' => 'accountant',
+                ];
+                $newRoleSlug = $roleSlugMap[$newRole] ?? 'teacher';
+                $roleModel = \App\Models\Role::where('slug', $newRoleSlug)->first();
+                if ($roleModel) {
+                    $teacher->user->roles()->sync([$roleModel->id => [
+                        'is_primary' => true,
+                        'branch_id' => $teacher->user->branch_id,
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ]]);
+                }
+                // Failsafe: direct DB update for users.role
+                DB::table('users')->where('id', $teacher->user->id)->update(['role' => $newRole]);
+            }
 
             // Update teacher profile with ONLY fields that ACTUALLY exist in database
             // Based on actual DB schema (verified via Schema::getColumnListing)
@@ -788,24 +845,31 @@ class TeacherController extends Controller
                 $teacherData['permanent_address'] = $teacherData['current_address'] ?? $request->current_address ?? null;
             }
             
-            // Store ALL other fields in extended_profile JSON
+            // Store ALL other fields in extended_profile JSON (exclude main DB columns like category_type, designation)
             $extendedData = $request->except([
                 // Exclude user fields
                 'first_name', 'last_name', 'email', 'phone', 'password', 'is_active',
-                // Exclude ONLY the actual DB columns that exist in teachers table
+                // Exclude main teachers DB columns (handled by teacherData)
                 'id', 'user_id', 'branch_id', 'department_id', 'reporting_manager_id',
+                'employee_id', 'category_type', 'designation', 'joining_date', 'leaving_date', 'employee_type',
                 'created_at', 'updated_at', 'deleted_at', 'extended_profile',
                 'bank_name', 'bank_ifsc_code', 'pan_number', 'aadhar_number', 'aadhaar_number',
                 'salary_grade', 'specialization', 'registration_number',
-                'class_teacher_of_grade', 'class_teacher_of_section', 'leaving_date',
-                'documents', 'remarks', 'same_as_current_address',
-                'blood_group', 'religion', 'nationality', 'qualification', 'experience_years',
-                // Also exclude profile_picture since it's handled separately
+                'class_teacher_of_grade', 'class_teacher_of_section',
+                'current_address', 'permanent_address', 'city', 'state', 'pincode',
+                'emergency_contact_name', 'emergency_contact_phone', 'emergency_contact_relation',
+                'basic_salary', 'teacher_status', 'documents', 'remarks',
+                'same_as_current_address', 'blood_group', 'religion', 'nationality',
+                'qualification', 'experience_years',
                 'profile_picture'
             ]);
             
             if (!empty(array_filter($extendedData))) {
                 $existingExtended = $teacher->extended_profile ?? [];
+                // Remove main columns from extended_profile so they never overwrite real DB values
+                foreach (['category_type', 'designation', 'employee_id', 'joining_date', 'leaving_date', 'employee_type'] as $col) {
+                    unset($existingExtended[$col]);
+                }
                 $teacherData['extended_profile'] = array_merge($existingExtended, $extendedData);
             }
 
@@ -816,17 +880,44 @@ class TeacherController extends Controller
                 $teacherData['school_id'] = $branch ? $branch->school_id : null;
             }
 
+            // Explicitly set category_type and designation - ensure they are always updated from request
+            if ($request->has('category_type')) {
+                $teacherData['category_type'] = $request->input('category_type');
+            }
+            if ($request->has('designation')) {
+                $teacherData['designation'] = $request->input('designation');
+            }
+
             $teacher->update($teacherData);
+
+            // Direct DB update for category_type and designation (failsafe - bypasses Eloquent)
+            $directUpdate = [];
+            if ($request->has('category_type')) {
+                $directUpdate['category_type'] = $request->input('category_type');
+            }
+            if ($request->has('designation')) {
+                $directUpdate['designation'] = $request->input('designation');
+            }
+            if (!empty($directUpdate)) {
+                DB::table('teachers')->where('id', $teacher->id)->update($directUpdate);
+            }
+
+            DB::commit();
+
+            // Fetch fresh instance from DB (after commit) to ensure we get persisted data
+            $teacher = Teacher::with(['user', 'branch', 'department'])->find($teacher->id);
 
             return response()->json([
                 'success' => true,
                 'message' => 'Teacher updated successfully',
-                'data' => $teacher->fresh(['user', 'branch', 'department'])
+                'data' => $teacher
             ]);
 
         } catch (\Exception $e) {
-            DB::rollBack();
-            Log::error('Update teacher error', ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
+            if (DB::transactionLevel() > 0) {
+                DB::rollBack();
+            }
+            Log::error('Teacher update error', ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
             
             return response()->json([
                 'success' => false,

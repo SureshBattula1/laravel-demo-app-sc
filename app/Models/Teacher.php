@@ -224,10 +224,13 @@ class Teacher extends Model
         $array = parent::toArray();
         
         // Merge extended_profile fields into main array for easier frontend access
+        // Only merge keys that are in extendedFields - never let extended_profile overwrite main DB columns
+        // (e.g. category_type, designation) which would show stale data after updates
         if (isset($array['extended_profile']) && is_array($array['extended_profile'])) {
             $extendedData = $array['extended_profile'];
-            unset($array['extended_profile']);  // Remove the nested object
-            $array = array_merge($array, $extendedData);  // Merge fields to root level
+            unset($array['extended_profile']);
+            $safeExtended = array_intersect_key($extendedData, array_flip($this->extendedFields));
+            $array = array_merge($array, $safeExtended);
         }
         
         // ✅ Ensure profile_picture uses the accessor (converts relative path to full URL)
