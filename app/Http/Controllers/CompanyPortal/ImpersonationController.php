@@ -28,21 +28,8 @@ class ImpersonationController extends Controller
                 ], 403);
             }
 
-            // Get user to impersonate with relationships
+            // Get user to impersonate (remote access: any company admin can impersonate any school user)
             $impersonatedUser = User::with('branch')->findOrFail($userId);
-
-            // Validate user belongs to a school in the same company
-            if ($impersonatedUser->branch_id) {
-                $branch = $impersonatedUser->branch;
-                if ($branch && $branch->school) {
-                    if ($branch->school->company_id !== $companyAdmin->company_id) {
-                        return response()->json([
-                            'success' => false,
-                            'message' => 'Cannot impersonate users from other companies'
-                        ], 403);
-                    }
-                }
-            }
 
             // Check if user is a company admin (cannot impersonate other company admins)
             if ($impersonatedUser->user_type === 'CompanyAdmin') {

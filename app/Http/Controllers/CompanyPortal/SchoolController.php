@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 
 class SchoolController extends Controller
 {
@@ -652,8 +653,8 @@ class SchoolController extends Controller
                 ], 401);
             }
 
-            // Validate school belongs to company admin's company
-            $school = School::where('company_id', $user->company_id)->findOrFail($id);
+            // Allow loading users for any school by ID (consistent with show() and portal listing all schools)
+            $school = School::findOrFail($id);
 
             // Get all branch IDs for this school
             $branchIds = Branch::where('school_id', $school->id)->pluck('id');
@@ -779,6 +780,11 @@ class SchoolController extends Controller
                 'data' => $usersData->all(),
                 'roles_found' => $adminRolesToGet
             ]);
+        } catch (ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'School not found or you do not have access to it.'
+            ], 404);
         } catch (\Exception $e) {
             Log::error('Get school users error', [
                 'error' => $e->getMessage(),
