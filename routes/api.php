@@ -364,6 +364,7 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
     
     // Transaction Routes - Full CRUD
     Route::get('transactions/export', [TransactionController::class, 'export']);
+    Route::get('transactions/{id}/receipt', [TransactionController::class, 'downloadReceipt']);
     Route::apiResource('transactions', TransactionController::class);
     Route::post('transactions/{id}/approve', [TransactionController::class, 'approve']);
     Route::post('transactions/{id}/reject', [TransactionController::class, 'reject']);

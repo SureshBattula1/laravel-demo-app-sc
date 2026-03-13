@@ -357,6 +357,54 @@ class TransactionController extends Controller
     }
 
     /**
+     * Download transaction receipt as PDF (approved transactions only)
+     */
+    public function downloadReceipt(string $id)
+    {
+        try {
+            $transaction = Transaction::with(['category', 'branch', 'createdBy', 'approvedBy'])->findOrFail($id);
+
+            if ($transaction->status !== 'Approved') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Receipt is only available for approved transactions',
+                ], 403);
+            }
+
+            $html = view('pdf.transaction_receipt', [
+                'transaction' => $transaction,
+            ])->render();
+
+            $pdf = app('dompdf.wrapper');
+            $pdf->loadHTML($html);
+            $pdf->setPaper('a4', 'portrait');
+
+            $filename = sprintf(
+                '%s-receipt-%s.pdf',
+                strtolower($transaction->type),
+                str_replace([' ', '#'], ['-', ''], $transaction->transaction_number)
+            );
+
+            return $pdf->download($filename);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Transaction not found',
+            ], 404);
+        } catch (\Exception $e) {
+            Log::error('Error generating transaction receipt PDF: ' . $e->getMessage(), [
+                'transaction_id' => $id,
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Unable to generate receipt PDF',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+            ], 500);
+        }
+    }
+
+    /**
      * Delete transaction
      */
     public function destroy($id)
