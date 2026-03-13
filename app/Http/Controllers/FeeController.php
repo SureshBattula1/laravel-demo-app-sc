@@ -334,6 +334,8 @@ class FeeController extends Controller
 
             // ✅ Get Total Amount Paid (from both Completed and Partial payments)
             $totalAmount = (float) (clone $baseQuery)->sum('fp.amount_paid');
+            $totalDiscount = (float) (clone $baseQuery)->sum('fp.discount_amount');
+            $totalLateFee = (float) (clone $baseQuery)->sum('fp.late_fee');
 
             // ✅ Get Total Count (including both Completed and Partial payments)
             $totalCount = (clone $baseQuery)->count('fp.id');
@@ -369,29 +371,63 @@ class FeeController extends Controller
             // ✅ Get Class/Grade Wise Breakdown (with pending payments)
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
             
-            // Get paid amounts by grade from payments
+            // Get paid amounts by grade from payments (including discount and late fee)
             $paidByGrade = (clone $baseQuery)
                 ->select(
                     's.grade',
                     DB::raw('COALESCE(g.label, CONCAT("Grade ", s.grade)) as grade_label'),
                     DB::raw('COUNT(DISTINCT fp.id) as payment_count'),
                     DB::raw('SUM(fp.amount_paid) as total_amount'),
+                    DB::raw('SUM(COALESCE(fp.discount_amount, 0)) as total_discount'),
+                    DB::raw('SUM(COALESCE(fp.late_fee, 0)) as total_late_fee'),
                     DB::raw('COUNT(DISTINCT s.id) as student_count')
                 )
                 ->groupBy('s.grade', 'g.label')
                 ->get()
                 ->keyBy('grade');
             
-            // Calculate pending amounts by grade using SQL aggregation
+            // Calculate pending amounts by grade
+            // Use subquery to aggregate payments per (fee_structure_id, student_id) to avoid
+            // double-counting expected_amount when students have multiple (partial) payments
+            // Pending = (fee_amount - total_discount) - amount_paid (late fee not counted)
+            $paidAggregateSubquery = DB::table('fee_payments')
+                ->whereIn('payment_status', ['Completed', 'Partial'])
+                ->select(
+                    'fee_structure_id',
+                    'student_id',
+                    DB::raw('SUM(COALESCE(amount_paid, 0)) as amount_paid'),
+                    DB::raw('SUM(COALESCE(discount_amount, 0)) as total_discount')
+                )
+                ->groupBy('fee_structure_id', 'student_id');
+
             $pendingQuery = DB::table('fee_structures as fs')
                 ->join('students as s', function($join) {
-                    $join->on('fs.grade', '=', 's.grade')
-                         ->where('s.student_status', '=', 'Active');
+                    $join->where('s.student_status', '=', 'Active')
+                        ->where(function($q) {
+                            $q->whereColumn('fs.grade', 's.grade')
+                              ->orWhereRaw('fs.grade = CONCAT("Grade ", s.grade)')
+                              ->orWhereRaw('s.grade = CONCAT("Grade ", TRIM(fs.grade))')
+                              ->orWhereRaw('TRIM(REPLACE(s.grade, "Grade ", "")) = TRIM(fs.grade)')
+                              ->orWhereRaw('TRIM(REPLACE(fs.grade, "Grade ", "")) = TRIM(s.grade)');
+                        });
                 })
-                ->leftJoin('fee_payments as fp', function($join) {
-                    $join->on('fs.id', '=', 'fp.fee_structure_id')
-                         ->on('s.user_id', '=', 'fp.student_id')
-                         ->whereIn('fp.payment_status', ['Completed', 'Partial']);
+                ->where(function($q) use ($request) {
+                    if ($request->has('academic_year') && $request->academic_year) {
+                        $ay = $request->academic_year;
+                        $q->where('fs.academic_year', $ay)
+                          ->where(function($q2) use ($ay) {
+                              $q2->where('s.academic_year', $ay)
+                                 ->orWhereNull('s.academic_year')
+                                 ->orWhere('s.academic_year', '');
+                          });
+                    } else {
+                        $q->whereColumn('fs.academic_year', 's.academic_year');
+                    }
+                })
+                ->whereColumn('fs.branch_id', 's.branch_id')
+                ->leftJoinSub($paidAggregateSubquery, 'paid', function($join) {
+                    $join->on('fs.id', '=', 'paid.fee_structure_id')
+                         ->on('s.user_id', '=', 'paid.student_id');
                 })
                 ->leftJoin('grades as g', 's.grade', '=', 'g.value')
                 ->where('fs.is_active', true)
@@ -400,7 +436,8 @@ class FeeController extends Controller
                     DB::raw('COALESCE(g.label, CONCAT("Grade ", s.grade)) as grade_label'),
                     DB::raw('COUNT(DISTINCT s.id) as total_students'),
                     DB::raw('SUM(fs.amount) as expected_amount'),
-                    DB::raw('SUM(COALESCE(fp.amount_paid, 0)) as paid_amount')
+                    DB::raw('SUM(COALESCE(paid.amount_paid, 0)) as paid_amount'),
+                    DB::raw('SUM(COALESCE(paid.total_discount, 0)) as total_discount')
                 )
                 ->groupBy('s.grade', 'g.label');
 
@@ -422,10 +459,21 @@ class FeeController extends Controller
                 }
             }
             
-            // Filter by branch if specified
+            // Filter by branch if specified; also use branch's current_academic_year when no academic_year in request
             if ($request->has('branch_id') && $request->branch_id) {
                 $pendingQuery->where('fs.branch_id', $request->branch_id)
                              ->where('s.branch_id', $request->branch_id);
+                if (!$request->has('academic_year') || !$request->academic_year) {
+                    $branch = \App\Models\Branch::find($request->branch_id);
+                    if ($branch && $branch->current_academic_year) {
+                        $pendingQuery->where('fs.academic_year', $branch->current_academic_year)
+                                     ->where(function($q) use ($branch) {
+                                         $q->where('s.academic_year', $branch->current_academic_year)
+                                           ->orWhereNull('s.academic_year')
+                                           ->orWhere('s.academic_year', '');
+                                     });
+                    }
+                }
             }
             
             $pendingByGrade = $pendingQuery->get()->keyBy('grade');
@@ -438,14 +486,18 @@ class FeeController extends Controller
                 $pending = $pendingByGrade->get($grade);
                 
                 $expectedAmount = $pending ? (float) $pending->expected_amount : 0;
+                $totalDiscountPending = $pending ? (float) ($pending->total_discount ?? 0) : 0;
                 $paidAmount = $pending ? (float) $pending->paid_amount : 0;
-                $pendingAmount = max(0, $expectedAmount - $paidAmount);
+                $expectedAfterDiscount = max(0, $expectedAmount - $totalDiscountPending);
+                $pendingAmount = max(0, $expectedAfterDiscount - $paidAmount);
                 
                 return [
                     'grade' => $grade,
                     'grade_label' => $paid ? $paid->grade_label : ($pending ? $pending->grade_label : "Grade $grade"),
                     'payment_count' => $paid ? (int) $paid->payment_count : 0,
                     'total_amount' => $paid ? (float) $paid->total_amount : 0,
+                    'total_discount' => $paid ? (float) ($paid->total_discount ?? 0) : 0,
+                    'total_late_fee' => $paid ? (float) ($paid->total_late_fee ?? 0) : 0,
                     'student_count' => $paid ? (int) $paid->student_count : ($pending ? (int) $pending->total_students : 0),
                     'pending_amount' => round($pendingAmount, 2),
                     'pending_count' => $pendingAmount > 0 ? 1 : 0
@@ -529,6 +581,8 @@ class FeeController extends Controller
                 'data' => [
                     'summary' => [
                         'total_amount' => round($totalAmount, 2),
+                        'total_discount' => round($totalDiscount, 2),
+                        'total_late_fee' => round($totalLateFee, 2),
                         'total_count' => $totalCount,
                         'period' => $period,
                         'from_date' => $fromDate,
@@ -607,8 +661,8 @@ class FeeController extends Controller
             // Define sortable columns
             $sortableColumns = ['id', 'student_id', 'payment_date', 'amount_paid', 'payment_method', 'payment_status', 'created_at'];
 
-            // Apply pagination and sorting
-            $payments = $this->paginateAndSort($query, $request, $sortableColumns, 'payment_date', 'desc');
+            // Apply pagination and sorting (default: created_at desc)
+            $payments = $this->paginateAndSort($query, $request, $sortableColumns, 'created_at', 'desc');
 
             // Map data to ensure fee_type is never empty in feeStructure relationship
             $data = collect($payments->items())->map(function($payment) {
@@ -667,9 +721,29 @@ class FeeController extends Controller
                 ], 422);
             }
 
-            $totalAmount = $request->amount_paid + ($request->late_fee ?? 0) - ($request->discount_amount ?? 0);
-
             $feeStructure = FeeStructure::find($request->fee_structure_id);
+            $lateFee = (float) ($request->late_fee ?? 0);
+            $amountPaid = (float) $request->amount_paid;
+
+            // Overpayment validation: Amount Paid must not exceed Remaining + Late Fee (already paid excludes late fee)
+            $previousPayments = FeePayment::where('student_id', $request->student_id)
+                ->where('fee_structure_id', $request->fee_structure_id)
+                ->whereIn('payment_status', ['Completed', 'Partial'])
+                ->get();
+            $alreadyPaid = (float) $previousPayments->sum('amount_paid');
+            $totalDiscount = (float) $previousPayments->sum('discount_amount') + (float) ($request->discount_amount ?? 0);
+            $remainingBeforePayment = max(0, (float) $feeStructure->amount - $alreadyPaid - $totalDiscount);
+            $maxAllowed = $remainingBeforePayment + $lateFee;
+
+            if ($amountPaid > $maxAllowed) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You entered more than the actual amount. Maximum allowed: ₹' . number_format($maxAllowed, 2) . ' (Remaining: ₹' . number_format($remainingBeforePayment, 2) . ' + Late Fee: ₹' . number_format($lateFee, 2) . ')',
+                ], 422);
+            }
+
+            // Total collected in this payment (discount applies to fee amount, not this payment)
+            $totalAmount = $amountPaid + $lateFee;
             $branchId = $feeStructure ? (int) $feeStructure->branch_id : null;
             $schoolId = $feeStructure?->school_id
                 ?? ($branchId ? \App\Models\Branch::find($branchId)?->school_id : null)
@@ -796,11 +870,11 @@ class FeeController extends Controller
                         $fee->fee_type = 'General Fee';
                     }
                     
-                    // Calculate total amount already paid for this fee structure by this student
+                    // Calculate amount already paid (excludes late fee - late fee is extra charge)
                     $amountPaid = FeePayment::where('student_id', $studentId)
                         ->where('fee_structure_id', $fee->id)
                         ->whereIn('payment_status', ['Completed', 'Partial'])
-                        ->sum('total_amount');
+                        ->sum('amount_paid');
                     
                     // Add amount_paid and remaining_amount to fee structure
                     $fee->amount_paid = (float) $amountPaid;
@@ -886,6 +960,16 @@ class FeeController extends Controller
             if ($payment->feeStructure && empty($payment->feeStructure->fee_type)) {
                 $payment->feeStructure->fee_type = 'General Fee';
             }
+
+            // Load all past transactions for this student + fee structure
+            $pastTransactions = FeePayment::where('student_id', $payment->student_id)
+                ->where('fee_structure_id', $payment->fee_structure_id)
+                ->orderBy('payment_date', 'asc')
+                ->orderBy('created_at', 'asc')
+                ->get(['id', 'receipt_number', 'payment_date', 'payment_method', 'amount_paid', 'discount_amount', 'late_fee', 'total_amount', 'payment_status'])
+                ->toArray();
+
+            $payment->past_transactions = $pastTransactions;
             
             return response()->json([
                 'success' => true,
@@ -898,6 +982,67 @@ class FeeController extends Controller
                 'message' => 'Fee payment not found',
                 'error' => $e->getMessage()
             ], 404);
+        }
+    }
+
+    /**
+     * Download a single fee payment receipt as PDF.
+     */
+    public function downloadReceipt(string $id)
+    {
+        try {
+            $payment = FeePayment::with(['feeStructure', 'student', 'creator'])->findOrFail($id);
+
+            if ($payment->feeStructure && empty($payment->feeStructure->fee_type)) {
+                $payment->feeStructure->fee_type = 'General Fee';
+            }
+
+            $studentName = $payment->student
+                ? trim(($payment->student->first_name ?? '') . ' ' . ($payment->student->last_name ?? ''))
+                : 'Student';
+
+            $receiptNumber = $payment->receipt_number ?? ('PAYMENT-' . $payment->id);
+
+            // Load all payments for this student & fee structure to show history
+            $paymentHistory = FeePayment::where('student_id', $payment->student_id)
+                ->where('fee_structure_id', $payment->fee_structure_id)
+                ->orderBy('payment_date', 'asc')
+                ->orderBy('created_at', 'asc')
+                ->get();
+
+            $previousPayments = $paymentHistory->where('id', '!=', $payment->id);
+            $alreadyPaid = (float) $paymentHistory->sum('amount_paid');
+            $alreadyPaidExcludingCurrent = (float) $previousPayments->sum('amount_paid');
+            $totalLateFee = (float) $paymentHistory->sum('late_fee');
+
+            $html = view('pdf.fee_receipt', [
+                'payment' => $payment,
+                'studentName' => $studentName,
+                'receiptNumber' => $receiptNumber,
+                'previousPayments' => $previousPayments,
+                'paymentHistory' => $paymentHistory,
+                'alreadyPaid' => $alreadyPaid,
+                'alreadyPaidExcludingCurrent' => $alreadyPaidExcludingCurrent,
+                'totalLateFee' => $totalLateFee,
+            ])->render();
+
+            $pdf = app('dompdf.wrapper');
+            $pdf->loadHTML($html);
+            $pdf->setPaper('a4', 'portrait');
+
+            $filename = sprintf('fee-receipt-%s.pdf', str_replace([' ', '#'], ['-', ''], $receiptNumber));
+
+            return $pdf->download($filename);
+        } catch (\Exception $e) {
+            Log::error('Error generating fee payment receipt PDF: ' . $e->getMessage(), [
+                'payment_id' => $id,
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Unable to generate receipt PDF',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+            ], 500);
         }
     }
 

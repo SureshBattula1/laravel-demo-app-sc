@@ -268,6 +268,7 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
         Route::get('today', [FeeController::class, 'getTodayPayments']);
         Route::get('/', [FeeController::class, 'indexPayments']);
         Route::post('/', [FeeController::class, 'recordPayment']);
+        Route::get('{id}/receipt', [FeeController::class, 'downloadReceipt']);
         Route::get('{id}', [FeeController::class, 'showPayment']);
     });
     Route::get('students/{studentId}/fees', [FeeController::class, 'getStudentFees']);
