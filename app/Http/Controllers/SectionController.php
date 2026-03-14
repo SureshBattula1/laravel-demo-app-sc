@@ -11,6 +11,7 @@ use App\Services\CsvExportService;
 use App\Services\ExportService;
 use Maatwebsite\Excel\Facades\Excel;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -164,10 +165,20 @@ class SectionController extends Controller
     public function store(Request $request)
     {
         try {
+            $branch = Branch::find($request->branch_id);
+            $schoolId = $branch?->school_id;
+
             $validator = Validator::make($request->all(), [
                 'branch_id' => 'required|exists:branches,id',
                 'name' => 'required|string|max:50',
-                'code' => 'required|string|max:50|unique:sections',
+                'code' => [
+                    'required',
+                    'string',
+                    'max:50',
+                    Rule::unique('sections', 'code')->where(function ($query) use ($schoolId) {
+                        $query->where('school_id', $schoolId);
+                    }),
+                ],
                 'grade_level' => 'nullable|string|max:20',
                 'capacity' => 'required|integer|min:1|max:100',
                 'room_number' => 'nullable|string|max:50',
@@ -288,10 +299,18 @@ class SectionController extends Controller
     {
         try {
             $section = Section::findOrFail($id);
+            $schoolId = $section->school_id;
 
             $validator = Validator::make($request->all(), [
                 'name' => 'sometimes|string|max:50',
-                'code' => 'sometimes|string|max:50|unique:sections,code,' . $id,
+                'code' => [
+                    'sometimes',
+                    'string',
+                    'max:50',
+                    Rule::unique('sections', 'code')->where(function ($query) use ($schoolId) {
+                        $query->where('school_id', $schoolId);
+                    })->ignore($id),
+                ],
                 'grade_level' => 'nullable|string|max:20',
                 'capacity' => 'sometimes|integer|min:1|max:100',
                 'room_number' => 'nullable|string|max:50',
