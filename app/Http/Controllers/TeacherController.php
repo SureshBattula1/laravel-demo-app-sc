@@ -481,11 +481,27 @@ class TeacherController extends Controller
                 $teacherData['aadhar_number'] = $request->aadhaar_number;
             }
             
-            // Handle profile_picture separately (store in extended_profile)
+            // Build extended_profile with fields not in main teachers columns
+            $extendedData = [];
             if ($request->has('profile_picture')) {
                 $extendedData['profile_picture'] = $request->profile_picture;
             }
-            
+            if ($request->has('alternate_phone')) {
+                $extendedData['alternate_phone'] = $request->alternate_phone;
+            }
+            if ($request->has('whatsapp_number')) {
+                $extendedData['whatsapp_number'] = $request->whatsapp_number;
+            }
+            if ($request->has('father_name')) {
+                $extendedData['father_name'] = $request->father_name;
+            }
+            if ($request->has('mother_name')) {
+                $extendedData['mother_name'] = $request->mother_name;
+            }
+            if ($request->has('ctc')) {
+                $extendedData['ctc'] = $request->ctc;
+            }
+
             // Only add extended_profile if there's data
             if (!empty(array_filter($extendedData))) {
                 $teacherData['extended_profile'] = $extendedData;
@@ -860,8 +876,7 @@ class TeacherController extends Controller
                 'emergency_contact_name', 'emergency_contact_phone', 'emergency_contact_relation',
                 'basic_salary', 'teacher_status', 'documents', 'remarks',
                 'same_as_current_address', 'blood_group', 'religion', 'nationality',
-                'qualification', 'experience_years',
-                'profile_picture'
+                'qualification', 'experience_years'
             ]);
             
             if (!empty(array_filter($extendedData))) {
@@ -1065,8 +1080,10 @@ class TeacherController extends Controller
             $filePath = $this->handleFileUpload($request, $teacher, 'profile_picture', 'profile_picture');
             
             if ($filePath) {
-                // Update teacher profile_picture field with path
-                $teacher->update(['profile_picture' => $filePath]);
+                // Save profile_picture to extended_profile (teachers table has no profile_picture column)
+                $extendedProfile = $teacher->extended_profile ?? [];
+                $extendedProfile['profile_picture'] = $filePath;
+                $teacher->update(['extended_profile' => $extendedProfile]);
                 
                 return response()->json([
                     'success' => true,
