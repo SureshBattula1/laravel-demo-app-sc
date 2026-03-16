@@ -467,7 +467,11 @@ class StudentController extends Controller
 
             $validator = Validator::make($request->all(), [
                 'section' => 'sometimes|string',
-                'roll_number' => 'sometimes|string',
+                'roll_number' => ['sometimes', 'nullable', function ($attr, $value, $fail) {
+                    if ($value !== null && $value !== '' && !is_string($value) && !is_numeric($value)) {
+                        $fail('The roll number must be a string or number.');
+                    }
+                }],
                 'current_address' => 'sometimes|string',
                 'city' => 'sometimes|string',
                 'state' => 'sometimes|string',
@@ -1164,7 +1168,7 @@ class StudentController extends Controller
         $data['admission_number'] = $request->admission_number;
         $data['admission_date'] = $request->admission_date;
         $data['admission_type'] = $request->admission_type ?? 'Regular';
-        $data['roll_number'] = $request->roll_number ?? null;
+        $data['roll_number'] = $request->roll_number !== null && $request->roll_number !== '' ? (string) $request->roll_number : null;
         $data['grade'] = $request->grade;
         $data['section'] = $request->section ?? null;
         $data['academic_year'] = $request->academic_year;
@@ -1352,7 +1356,7 @@ class StudentController extends Controller
 
         // Admission & Academic Fields
         if ($request->has('admission_type')) $data['admission_type'] = $request->admission_type;
-        if ($request->has('roll_number')) $data['roll_number'] = $request->roll_number ?: null;
+        if ($request->has('roll_number')) $data['roll_number'] = $request->roll_number !== null && $request->roll_number !== '' ? (string) $request->roll_number : null;
         if ($request->has('section')) $data['section'] = $request->section ?: null;
         if ($request->has('stream')) $data['stream'] = $request->stream ?: null;
         if ($request->has('elective_subjects')) $data['elective_subjects'] = $request->elective_subjects ?: null;
