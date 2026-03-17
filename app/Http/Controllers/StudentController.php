@@ -98,6 +98,10 @@ class StudentController extends Controller
                 $query->where('students.branch_id', $request->branch_id);
             }
 
+            if ($request->has('academic_year') && $request->academic_year !== '') {
+                $query->where('students.academic_year', $request->academic_year);
+            }
+
             if ($request->has('search')) {
                 // Sanitize search input to prevent SQL injection
                 $search = strip_tags($request->search);
