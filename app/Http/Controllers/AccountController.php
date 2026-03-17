@@ -20,6 +20,8 @@ class AccountController extends Controller
         try {
             $branchId = $request->get('branch_id');
             $financialYear = $request->get('financial_year', $this->getCurrentFinancialYear());
+            $fromDate = $request->get('from_date');
+            $toDate = $request->get('to_date');
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
             $user = $request->user();
 
@@ -53,10 +55,17 @@ class AccountController extends Controller
             if ($schoolId) {
                 $baseQuery->where('school_id', $schoolId);
             }
-            if ($accessibleBranchIds !== 'all') {
-                $baseQuery->whereIn('branch_id', $accessibleBranchIds);
-            } elseif ($branchId) {
+            // Branch filter: if user selected a branch, filter by it; otherwise show all accessible branches (company)
+            if ($branchId) {
                 $baseQuery->where('branch_id', $branchId);
+            } elseif ($accessibleBranchIds !== 'all') {
+                $baseQuery->whereIn('branch_id', $accessibleBranchIds);
+            }
+            if ($fromDate) {
+                $baseQuery->whereDate('transaction_date', '>=', $fromDate);
+            }
+            if ($toDate) {
+                $baseQuery->whereDate('transaction_date', '<=', $toDate);
             }
 
             // Query 1: Get totals (uses index on status, financial_year)
@@ -75,8 +84,10 @@ class AccountController extends Controller
                 ->where('transactions.financial_year', $financialYear)
                 ->whereNull('transactions.deleted_at')
                 ->when($schoolId, fn($q) => $q->where('transactions.school_id', $schoolId))
-                ->when($accessibleBranchIds !== 'all', fn($q) => $q->whereIn('transactions.branch_id', $accessibleBranchIds))
                 ->when($branchId, fn($q) => $q->where('transactions.branch_id', $branchId))
+                ->when(!$branchId && $accessibleBranchIds !== 'all', fn($q) => $q->whereIn('transactions.branch_id', $accessibleBranchIds))
+                ->when($fromDate, fn($q) => $q->whereDate('transactions.transaction_date', '>=', $fromDate))
+                ->when($toDate, fn($q) => $q->whereDate('transactions.transaction_date', '<=', $toDate))
                 ->selectRaw('transactions.type, account_categories.name as category, SUM(transactions.amount) as amount')
                 ->groupBy('transactions.type', 'account_categories.name')
                 ->get();
@@ -89,8 +100,10 @@ class AccountController extends Controller
                 ->where('financial_year', $financialYear)
                 ->whereNull('deleted_at')
                 ->when($schoolId, fn($q) => $q->where('school_id', $schoolId))
-                ->when($accessibleBranchIds !== 'all', fn($q) => $q->whereIn('branch_id', $accessibleBranchIds))
                 ->when($branchId, fn($q) => $q->where('branch_id', $branchId))
+                ->when(!$branchId && $accessibleBranchIds !== 'all', fn($q) => $q->whereIn('branch_id', $accessibleBranchIds))
+                ->when($fromDate, fn($q) => $q->whereDate('transaction_date', '>=', $fromDate))
+                ->when($toDate, fn($q) => $q->whereDate('transaction_date', '<=', $toDate))
                 ->with('category:id,name')
                 ->orderBy('transaction_date', 'desc')
                 ->limit(5)
@@ -102,8 +115,10 @@ class AccountController extends Controller
                 ->where('transaction_date', '>=', now()->subMonths(6)->format('Y-m-d'))
                 ->whereNull('deleted_at')
                 ->when($schoolId, fn($q) => $q->where('school_id', $schoolId))
-                ->when($accessibleBranchIds !== 'all', fn($q) => $q->whereIn('branch_id', $accessibleBranchIds))
                 ->when($branchId, fn($q) => $q->where('branch_id', $branchId))
+                ->when(!$branchId && $accessibleBranchIds !== 'all', fn($q) => $q->whereIn('branch_id', $accessibleBranchIds))
+                ->when($fromDate, fn($q) => $q->whereDate('transaction_date', '>=', $fromDate))
+                ->when($toDate, fn($q) => $q->whereDate('transaction_date', '<=', $toDate))
                 ->selectRaw('MONTH(transaction_date) as month, YEAR(transaction_date) as year, type, SUM(amount) as total')
                 ->groupBy(DB::raw('YEAR(transaction_date), MONTH(transaction_date), type'))
                 ->orderByRaw('year ASC, month ASC')
