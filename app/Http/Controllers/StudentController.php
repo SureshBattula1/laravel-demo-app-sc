@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use App\Models\Branch;
 use App\Models\Student;
 use App\Exports\StudentsExport;
 use App\Services\PdfExportService;
@@ -45,9 +46,17 @@ class StudentController extends Controller
                 );
 
             // 🔥 APPLY SCHOOL FILTERING - School-level isolation
+            // Include students with school_id = current school OR null school_id but branch belongs to current school (e.g. converted from admission)
             $schoolId = $this->getCurrentSchoolId($request);
             if ($schoolId) {
-                $query->where('students.school_id', $schoolId);
+                $branchIdsForSchool = Branch::where('school_id', $schoolId)->pluck('id');
+                $query->where(function ($q) use ($schoolId, $branchIdsForSchool) {
+                    $q->where('students.school_id', $schoolId)
+                        ->orWhere(function ($q2) use ($branchIdsForSchool) {
+                            $q2->whereNull('students.school_id')
+                                ->whereIn('students.branch_id', $branchIdsForSchool);
+                        });
+                });
             }
 
             // 🔥 APPLY BRANCH FILTERING - This restricts data based on user's branch access

@@ -475,6 +475,19 @@ class AdmissionController extends Controller
                 ], 400);
             }
             
+            // Check 4: Student must have class (grade) and section
+            $grade = $application->applying_for_grade ?? $request->input('grade');
+            $section = $application->applying_for_section ?? $request->input('section');
+            if (empty($grade)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Application must have a class (grade) before converting to student. Please set "Applying for Grade" on the application.',
+                ], 400);
+            }
+            if (empty($section)) {
+                $section = 'A'; // Default section when not set
+            }
+            
             DB::beginTransaction();
             
             // Generate unique admission number for student
@@ -516,26 +529,35 @@ class AdmissionController extends Controller
                 'is_active' => true
             ]);
             
-            // Assign Student role
+            // Assign Student role (ensure role exists so converted user always has Student role)
             $studentRole = Role::where('slug', 'student')->first();
-            if ($studentRole) {
-                $user->roles()->attach($studentRole->id, [
-                    'is_primary' => true,
-                    'branch_id' => $application->branch_id,
-                    'created_at' => now(),
-                    'updated_at' => now()
+            if (!$studentRole) {
+                $studentRole = Role::create([
+                    'name' => 'Student',
+                    'slug' => 'student',
+                    'description' => 'Student role for school students',
+                    'level' => 10,
+                    'is_system_role' => true,
+                    'is_active' => true,
                 ]);
             }
+            $user->roles()->attach($studentRole->id, [
+                'is_primary' => true,
+                'branch_id' => $application->branch_id,
+                'created_at' => now(),
+                'updated_at' => now()
+            ]);
             
             // Step 4: Create Student record (Student is created AFTER User, and linked via user_id)
             $studentData = [
             'user_id' => $user->id,
             'branch_id' => $application->branch_id,
+            'school_id' => $branch->school_id ?? $this->getCurrentSchoolId($request),
             'admission_number' => $admissionNumber,
             'admission_date' => $application->admission_confirmed_date ?? $application->admission_decision_date ?? now(),
             'admission_type' => 'Regular',
-            'grade' => $application->applying_for_grade,
-            'section' => $application->applying_for_section,
+            'grade' => $grade,
+            'section' => $section,
             'academic_year' => $application->academic_year,
             'date_of_birth' => $application->date_of_birth,
             'gender' => $application->gender,
@@ -605,6 +627,8 @@ class AdmissionController extends Controller
                     'student_id' => $studentId,
                     'user_id' => $user->id,
                     'admission_number' => $admissionNumber,
+                    'grade' => $grade,
+                    'section' => $section,
                     'email' => $user->email,
                     'default_password' => app()->environment('local') ? $defaultPassword : null // Only return in development
                 ]

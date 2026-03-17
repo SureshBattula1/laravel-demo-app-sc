@@ -43,6 +43,7 @@ use App\Http\Controllers\UserPreferenceController;
 use App\Http\Controllers\AdmissionController;
 use App\Http\Controllers\CommunicationController;
 use App\Http\Controllers\MessageController;
+use App\Http\Controllers\AcademicYearController;
 
 /*
 |--------------------------------------------------------------------------
@@ -411,6 +412,15 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
         Route::get('/{id}/permissions', [UserController::class, 'getPermissions']);
         Route::post('/{id}/permissions', [UserController::class, 'updatePermissions']);
         Route::post('/{id}/roles', [UserController::class, 'assignRoles']);
+    });
+
+    // Academic Years Management
+    Route::prefix('academic-years')->group(function () {
+        Route::get('/', [AcademicYearController::class, 'index']);
+        Route::post('/', [AcademicYearController::class, 'store']);
+        Route::get('/{id}', [AcademicYearController::class, 'show']);
+        Route::put('/{id}', [AcademicYearController::class, 'update']);
+        Route::delete('/{id}', [AcademicYearController::class, 'destroy']);
     });
     
     // Roles Management

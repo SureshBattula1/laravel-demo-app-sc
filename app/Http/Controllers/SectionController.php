@@ -38,9 +38,12 @@ class SectionController extends Controller
             ]);
 
             // 🔥 APPLY SCHOOL FILTERING - School-level isolation
+            // Include sections with matching school_id OR null school_id (so dropdown gets data when sections not yet linked to school)
             $schoolId = $this->getCurrentSchoolId($request);
             if ($schoolId) {
-                $query->where('school_id', $schoolId);
+                $query->where(function ($q) use ($schoolId) {
+                    $q->where('school_id', $schoolId)->orWhereNull('school_id');
+                });
             }
 
             // 🔥 APPLY BRANCH FILTERING - Restrict to accessible branches
@@ -67,8 +70,8 @@ class SectionController extends Controller
                 // If branch_id is not accessible, the query will already be filtered by accessibleBranchIds above
             }
 
-            if ($request->has('grade_level')) {
-                $query->where('grade_level', $request->grade_level);
+            if ($request->has('grade_level') && $request->grade_level !== '' && $request->grade_level !== null) {
+                $query->where('grade_level', (string) $request->grade_level);
             }
 
             if ($request->has('is_active')) {
