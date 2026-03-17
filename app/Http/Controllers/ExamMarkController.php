@@ -86,31 +86,30 @@ class ExamMarkController extends Controller
     }
 
     /**
-     * Get marks for a specific student
+     * Get marks for a specific student (only for exams in the student's branch/school)
      */
     public function getStudentMarks($studentId)
     {
         try {
-            Log::info('Fetching marks for student ID: ' . $studentId);
-            
-            // Get student's academic year for filtering
-            $student = \App\Models\Student::where('user_id', $studentId)->first();
-            $academicYear = $student->academic_year ?? request('academic_year');
-            
-            // Join with exam_schedules and exams to filter by academic_year
+            // studentId is user_id (users.id)
+            $student = Student::where('user_id', $studentId)->first();
+            if (!$student) {
+                return response()->json(['success' => true, 'data' => []]);
+            }
+
+            // Only show marks for exams in the same branch as the student (company/school scoping)
             $marksQuery = ExamMark::where('exam_marks.student_id', $studentId)
                 ->join('exam_schedules', 'exam_marks.exam_schedule_id', '=', 'exam_schedules.id')
-                ->join('exams', 'exam_schedules.exam_id', '=', 'exams.id');
-            
-            // Filter by academic year if available
-            if ($academicYear) {
-                $marksQuery->where('exams.academic_year', $academicYear);
+                ->join('exams', 'exam_schedules.exam_id', '=', 'exams.id')
+                ->where('exams.branch_id', $student->branch_id);
+
+            // Optional: filter by school if student has school_id
+            if (!empty($student->school_id)) {
+                $marksQuery->where('exams.school_id', $student->school_id);
             }
-            
+
             $marks = $marksQuery->select('exam_marks.*')->get();
-            
-            Log::info('Found ' . $marks->count() . ' marks for student (academic year: ' . ($academicYear ?? 'all') . ')');
-            
+
             if ($marks->isEmpty()) {
                 return response()->json(['success' => true, 'data' => []]);
             }

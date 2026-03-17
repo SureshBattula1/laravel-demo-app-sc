@@ -23,12 +23,57 @@ class ExamScheduleController extends Controller
                 'exam_date', 'start_time', 'end_time', 'duration', 
                 'total_marks', 'passing_marks', 'room_number', 'invigilator_id', 'created_at'
             ])->with([
-                'exam:id,name,branch_id',
+                'exam:id,name,branch_id,school_id',
                 'exam.branch:id,name,code',
                 'subject:id,name,code'
             ]);
 
-            // Filters
+            // Apply company/school/branch scoping - show only accessible data:
+            // - Super admin: all branches of company (or all if no company context)
+            // - Branch admin / cross-branch: branches they can access
+            // - Regular user: only their branch's exams
+            $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+            if ($accessibleBranchIds === 'all') {
+                $schoolId = $this->getCurrentSchoolId($request);
+                if ($schoolId) {
+                    $query->whereHas('exam', function($q) use ($schoolId) {
+                        $q->where('school_id', $schoolId);
+                    });
+                }
+            } elseif (!empty($accessibleBranchIds)) {
+                $query->whereHas('exam', function($q) use ($accessibleBranchIds) {
+                    $q->whereIn('branch_id', $accessibleBranchIds);
+                });
+            } else {
+                $query->whereRaw('1 = 0');
+            }
+
+            // Student view: show only schedules for this student's branch, grade, and section
+            if ($request->has('student_id')) {
+                $student = \App\Models\Student::find($request->student_id);
+                if ($student) {
+                    $query->whereHas('exam', function($q) use ($student) {
+                        $q->where('branch_id', $student->branch_id);
+                    });
+                    $query->where('grade', $student->grade);
+                    if ($student->section) {
+                        $query->where(function($q) use ($student) {
+                            $q->where('section', $student->section)->orWhereNull('section');
+                        });
+                    } else {
+                        $query->whereNull('section');
+                    }
+                } else {
+                    $query->whereRaw('1 = 0');
+                }
+            }
+
+            // Upcoming only: exam date today or in the future
+            if ($request->boolean('upcoming')) {
+                $query->whereDate('exam_date', '>=', Carbon::today()->toDateString());
+            }
+
+            // Optional filters (user-selected, must be within accessible branches)
             if ($request->has('branch_id')) {
                 $query->whereHas('exam', function($q) use ($request) {
                     $q->where('branch_id', $request->branch_id);
@@ -140,10 +185,10 @@ class ExamScheduleController extends Controller
         }
     }
 
-    public function show($id)
+    public function show(Request $request, $id)
     {
         try {
-            $schedule = ExamSchedule::with(['exam:id,name,branch_id', 'subject:id,name,code'])
+            $schedule = ExamSchedule::with(['exam:id,name,branch_id,school_id', 'subject:id,name,code'])
                 ->select([
                     'id', 'exam_id', 'subject_id', 'grade', 'section',
                     'exam_date', 'start_time', 'end_time', 'duration',
@@ -151,6 +196,9 @@ class ExamScheduleController extends Controller
                     'instructions', 'created_at', 'updated_at'
                 ])
                 ->findOrFail($id);
+            if (!$this->canAccessSchedule($request, $schedule)) {
+                return response()->json(['success' => false, 'message' => 'Schedule not found'], 404);
+            }
             return response()->json(['success' => true, 'data' => $schedule]);
         } catch (\Exception $e) {
             return response()->json(['success' => false, 'message' => 'Schedule not found'], 404);
@@ -160,7 +208,10 @@ class ExamScheduleController extends Controller
     public function update(Request $request, $id)
     {
         try {
-            $schedule = ExamSchedule::findOrFail($id);
+            $schedule = ExamSchedule::with('exam')->findOrFail($id);
+            if (!$this->canAccessSchedule($request, $schedule)) {
+                return response()->json(['success' => false, 'message' => 'Schedule not found'], 404);
+            }
             $schedule->update($request->all());
             return response()->json(['success' => true, 'data' => $schedule->fresh(['exam', 'subject']), 'message' => 'Schedule updated']);
         } catch (\Exception $e) {
@@ -168,10 +219,13 @@ class ExamScheduleController extends Controller
         }
     }
 
-    public function destroy($id)
+    public function destroy(Request $request, $id)
     {
         try {
-            $schedule = ExamSchedule::findOrFail($id);
+            $schedule = ExamSchedule::with('exam')->findOrFail($id);
+            if (!$this->canAccessSchedule($request, $schedule)) {
+                return response()->json(['success' => false, 'message' => 'Schedule not found'], 404);
+            }
             $schedule->delete();
             return response()->json(['success' => true, 'message' => 'Schedule deleted']);
         } catch (\Exception $e) {
@@ -182,10 +236,13 @@ class ExamScheduleController extends Controller
     /**
      * Get students for an exam schedule
      */
-    public function getStudents($id)
+    public function getStudents(Request $request, $id)
     {
         try {
             $schedule = ExamSchedule::with(['exam'])->findOrFail($id);
+            if (!$this->canAccessSchedule($request, $schedule)) {
+                return response()->json(['success' => false, 'message' => 'Schedule not found'], 404);
+            }
             
             $query = DB::table('students')
                 ->join('users', 'students.user_id', '=', 'users.id')
@@ -217,6 +274,26 @@ class ExamScheduleController extends Controller
             Log::error('Get schedule students error', ['error' => $e->getMessage()]);
             return response()->json(['success' => false, 'message' => 'Failed to fetch students'], 500);
         }
+    }
+
+    /**
+     * Check if the current user can access the given exam schedule (company/branch scoping)
+     */
+    protected function canAccessSchedule(Request $request, ExamSchedule $schedule): bool
+    {
+        $exam = $schedule->exam;
+        if (!$exam) {
+            return false;
+        }
+        $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+        if ($accessibleBranchIds === 'all') {
+            $schoolId = $this->getCurrentSchoolId($request);
+            if ($schoolId) {
+                return $exam->school_id == $schoolId;
+            }
+            return true;
+        }
+        return in_array($exam->branch_id, $accessibleBranchIds);
     }
 }
 

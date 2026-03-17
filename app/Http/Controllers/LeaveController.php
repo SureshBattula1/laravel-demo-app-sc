@@ -432,29 +432,11 @@ class LeaveController extends Controller
     public function getStudentLeaves($studentId)
     {
         try {
-            // Get student's academic year for filtering
-            $student = \App\Models\Student::where('user_id', $studentId)->first();
-            $academicYear = $student->academic_year ?? request('academic_year');
-            
+            // Do NOT filter by academic_year - leaves may fall outside the student's
+            // academic year range (e.g. leave in March when year is July-June), causing
+            // them to not show. Use student_id + optional from_date/to_date only.
             $baseQuery = DB::table('student_leaves')
                 ->where('student_id', $studentId);
-            
-            // Filter by academic year date range if academic year is available
-            if ($academicYear) {
-                $dateRange = $this->getAcademicYearDateRange($academicYear);
-                if ($dateRange) {
-                    $baseQuery->where(function($q) use ($dateRange) {
-                        // Include leaves that overlap with academic year
-                        $q->whereBetween('from_date', [$dateRange['start'], $dateRange['end']])
-                          ->orWhereBetween('to_date', [$dateRange['start'], $dateRange['end']])
-                          ->orWhere(function($q2) use ($dateRange) {
-                              // Leaves that span the entire academic year
-                              $q2->where('from_date', '<=', $dateRange['start'])
-                                 ->where('to_date', '>=', $dateRange['end']);
-                          });
-                    });
-                }
-            }
             
             if (request()->has('from_date')) {
                 $baseQuery->whereDate('from_date', '>=', request('from_date'));

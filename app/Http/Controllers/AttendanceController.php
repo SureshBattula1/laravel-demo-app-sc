@@ -514,18 +514,12 @@ class AttendanceController extends Controller
                 ], 404);
             }
             
-            // Get student's current academic year for filtering
-            // Use student's academic_year from database, fallback to request parameter
-            $academicYear = $student->academic_year ?? request('academic_year');
-            
             // OPTIMIZED: Build base query with filters
+            // Note: Do NOT filter by academic_year here - attendance may have been marked with
+            // a different academic year (e.g. form default vs student's). Use date range as primary filter
+            // so that marked attendance always shows in the student view.
             $baseQuery = DB::table('student_attendance')
                 ->where('student_id', $studentId);
-            
-            // Filter by academic year (if student has academic_year set)
-            if ($academicYear) {
-                $baseQuery->where('academic_year', $academicYear);
-            }
             
             if (request()->has('from_date')) {
                 $baseQuery->whereDate('date', '>=', request('from_date'));

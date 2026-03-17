@@ -30,9 +30,27 @@ class StudentGroupMember extends Model
         return $this->belongsTo(StudentGroup::class, 'group_id');
     }
 
+    /**
+     * Get the User (for display) via Student - student_id references students.id, not users.id
+     */
     public function student()
     {
-        return $this->belongsTo(User::class, 'student_id');
+        return $this->hasOneThrough(
+            User::class,
+            Student::class,
+            'id',           // Student.id = student_group_members.student_id
+            'id',           // User.id = students.user_id
+            'student_id',
+            'user_id'
+        );
+    }
+
+    /**
+     * Get the Student record
+     */
+    public function studentRecord()
+    {
+        return $this->belongsTo(Student::class, 'student_id');
     }
 }
 
