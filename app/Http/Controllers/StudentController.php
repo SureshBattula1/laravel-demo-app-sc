@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Traits\PaginatesAndSorts;
 use App\Models\User;
+use App\Services\AcademicYearContext;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
@@ -20,6 +21,10 @@ use Maatwebsite\Excel\Facades\Excel;
 class StudentController extends Controller
 {
     use PaginatesAndSorts;
+
+    public function __construct(
+        protected AcademicYearContext $academicYearContext
+    ) {}
 
     /**
      * Get all students with filters and server-side pagination/sorting
@@ -632,6 +637,8 @@ class StudentController extends Controller
      */
     public function promote(Request $request)
     {
+        $this->academicYearContext->rejectIfPast('Promotions are not allowed for past academic years.');
+
         try {
             $validator = Validator::make($request->all(), [
                 'student_ids' => 'required|array',
@@ -689,6 +696,8 @@ class StudentController extends Controller
      */
     public function promoteWithFeeHandling(Request $request)
     {
+        $this->academicYearContext->rejectIfPast('Promotions are not allowed for past academic years.');
+
         try {
             $validator = Validator::make($request->all(), [
                 'student_ids' => 'required|array',

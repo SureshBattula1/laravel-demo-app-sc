@@ -9,6 +9,7 @@ use App\Models\Grade;
 use App\Models\User;
 use App\Models\Role;
 use App\Models\Student;
+use App\Services\AcademicYearContext;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -19,6 +20,10 @@ use Illuminate\Support\Str;
 class AdmissionController extends Controller
 {
     use PaginatesAndSorts;
+
+    public function __construct(
+        protected AcademicYearContext $academicYearContext
+    ) {}
 
     /**
      * Get all admission applications with filters
@@ -122,6 +127,8 @@ class AdmissionController extends Controller
      */
     public function store(Request $request)
     {
+        $this->academicYearContext->rejectIfPast('New admissions are not allowed for past academic years.');
+
         try {
             $validator = Validator::make($request->all(), [
                 'branch_id' => 'required|exists:branches,id',

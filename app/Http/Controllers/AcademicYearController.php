@@ -11,6 +11,34 @@ class AcademicYearController extends Controller
 {
     use PaginatesAndSorts;
 
+    /**
+     * Get the current (is_current = true) academic year.
+     */
+    public function current(Request $request)
+    {
+        try {
+            $academicYear = AcademicYear::query()->current()->active()->first();
+            if (!$academicYear) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No current academic year is set.',
+                    'data' => null,
+                ], 404);
+            }
+            return response()->json([
+                'success' => true,
+                'data' => $academicYear,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Academic year current error', ['error' => $e->getMessage()]);
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch current academic year',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+            ], 500);
+        }
+    }
+
     public function index(Request $request)
     {
         try {
@@ -18,6 +46,13 @@ class AcademicYearController extends Controller
 
             if ($request->has('is_active')) {
                 $query->where('is_active', $request->boolean('is_active'));
+            }
+            if ($request->boolean('active')) {
+                $query->where('is_active', true);
+            }
+            if (!$request->boolean('include_past')) {
+                // By default exclude past years for dropdowns; use include_past=1 to get all
+                $query->where('end_date', '>=', now()->toDateString());
             }
             if ($request->has('search') && $request->search) {
                 $search = '%' . $request->search . '%';
@@ -28,7 +63,8 @@ class AcademicYearController extends Controller
             }
 
             $sortableColumns = ['name', 'start_date', 'end_date', 'is_current', 'is_active', 'created_at'];
-            $paginated = $this->paginateAndSort($query, $request, $sortableColumns, 'start_date', 'desc');
+            $defaultSort = $request->get('sort_by') ? null : 'start_date';
+            $paginated = $this->paginateAndSort($query, $request, $sortableColumns, $defaultSort ?? 'start_date', 'desc');
 
             return response()->json([
                 'success' => true,
@@ -80,6 +116,7 @@ class AcademicYearController extends Controller
 
         if (!empty($validated['is_current'])) {
             AcademicYear::query()->update(['is_current' => false]);
+            \App\Services\AcademicYearContext::clearCurrentCache();
         }
         $academicYear = AcademicYear::create($validated);
         return response()->json([
@@ -103,6 +140,7 @@ class AcademicYearController extends Controller
 
         if (!empty($validated['is_current'])) {
             AcademicYear::where('id', '!=', $id)->update(['is_current' => false]);
+            \App\Services\AcademicYearContext::clearCurrentCache();
         }
         $academicYear->update($validated);
         return response()->json([

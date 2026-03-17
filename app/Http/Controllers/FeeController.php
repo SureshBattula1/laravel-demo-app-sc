@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Traits\PaginatesAndSorts;
 use App\Models\FeeStructure;
 use App\Models\FeePayment;
+use App\Services\AcademicYearContext;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -13,6 +14,10 @@ use Illuminate\Support\Facades\Validator;
 class FeeController extends Controller
 {
     use PaginatesAndSorts;
+
+    public function __construct(
+        protected AcademicYearContext $academicYearContext
+    ) {}
 
     // Fee Structures with server-side pagination
     public function indexStructures(Request $request)
@@ -110,6 +115,8 @@ class FeeController extends Controller
      */
     public function storeStructure(Request $request)
     {
+        $this->academicYearContext->rejectIfPast('Creating fee structure is not allowed for past academic years.');
+
         DB::beginTransaction();
         try {
             $validator = Validator::make($request->all(), [

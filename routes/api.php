@@ -417,6 +417,7 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
     // Academic Years Management
     Route::prefix('academic-years')->group(function () {
         Route::get('/', [AcademicYearController::class, 'index']);
+        Route::get('/current', [AcademicYearController::class, 'current']);
         Route::post('/', [AcademicYearController::class, 'store']);
         Route::get('/{id}', [AcademicYearController::class, 'show']);
         Route::put('/{id}', [AcademicYearController::class, 'update']);

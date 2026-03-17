@@ -21,7 +21,8 @@ return [
         '/^http:\/\/127\.0\.0\.1:\d+$/',
     ],
 
-    'allowed_headers' => ['Content-Type', 'X-Requested-With', 'Authorization', 'Accept', 'Origin'],
+    // Allow all headers so custom headers like X-Academic-Year-Id work in local/dev
+    'allowed_headers' => ['*'],
 
     'exposed_headers' => [],
 

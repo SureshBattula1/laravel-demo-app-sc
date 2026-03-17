@@ -24,12 +24,18 @@ return Application::configure(basePath: dirname(__DIR__))
             'branch.access' => \App\Http\Middleware\CheckBranchAccess::class,
             'api.logger' => \App\Http\Middleware\ApiLogger::class,
             'company.auth' => \App\Http\Middleware\CompanyAuthMiddleware::class,
+            'academic_year.context' => \App\Http\Middleware\SetAcademicYearContext::class,
         ]);
         
-        // Enable CORS for API routes
-        $middleware->api(prepend: [
-            \Illuminate\Http\Middleware\HandleCors::class,
-        ]);
+        // Enable CORS for API routes; attach academic year context for scoping
+        $middleware->api(
+            prepend: [
+                \Illuminate\Http\Middleware\HandleCors::class,
+            ],
+            append: [
+                \App\Http\Middleware\SetAcademicYearContext::class,
+            ]
+        );
         
         // Disable CSRF for API routes
         $middleware->validateCsrfTokens(except: [
