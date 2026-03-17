@@ -42,5 +42,10 @@ class ExamSchedule extends Model
     {
         return $this->belongsTo(Subject::class);
     }
+
+    public function invigilator(): BelongsTo
+    {
+        return $this->belongsTo(\App\Models\User::class, 'invigilator_id');
+    }
 }
 

@@ -117,19 +117,23 @@ class ExamMarkController extends Controller
             $results = [];
             
             foreach ($marks as $mark) {
-                $schedule = \App\Models\ExamSchedule::with(['exam', 'subject'])->find($mark->exam_schedule_id);
-                
+                $schedule = \App\Models\ExamSchedule::with(['exam.examTerm', 'subject'])->find($mark->exam_schedule_id);
+                $passingMarks = isset($schedule->passing_marks) ? (float)$schedule->passing_marks : (float)($schedule?->total_marks ?? 100) * 0.4;
+                $isPass = !$mark->is_absent && (float)$mark->marks_obtained >= $passingMarks;
+
                 $results[] = [
                     'id' => $mark->id,
+                    'exam_id' => $schedule?->exam_id ?? null,
                     'exam_name' => $schedule?->exam?->name ?? 'Exam',
+                    'exam_term_name' => $schedule?->exam?->examTerm?->name ?? null,
                     'subject_name' => $schedule?->subject?->name ?? 'Subject',
                     'exam_date' => $schedule?->exam_date ?? null,
                     'marks_obtained' => (float)$mark->marks_obtained,
                     'total_marks' => (float)$mark->total_marks,
-                    'passing_marks' => isset($schedule->passing_marks) ? (float)$schedule->passing_marks : (float)$schedule?->total_marks * 0.4, // Default to 40% if not set
+                    'passing_marks' => $passingMarks,
                     'percentage' => (float)$mark->percentage,
                     'grade' => $mark->grade,
-                    'is_pass' => (bool)$mark->is_pass,
+                    'is_pass' => $isPass,
                     'is_absent' => (bool)$mark->is_absent,
                     'remarks' => $mark->remarks
                 ];

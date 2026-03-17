@@ -21,11 +21,13 @@ class ExamScheduleController extends Controller
             $query = ExamSchedule::select([
                 'id', 'exam_id', 'subject_id', 'grade', 'section',
                 'exam_date', 'start_time', 'end_time', 'duration', 
-                'total_marks', 'passing_marks', 'room_number', 'invigilator_id', 'created_at'
+                'total_marks', 'passing_marks', 'room_number', 'invigilator_id', 'instructions', 'created_at'
             ])->with([
-                'exam:id,name,branch_id,school_id',
+                'exam:id,name,exam_term_id,branch_id,school_id',
+                'exam.examTerm:id,name',
                 'exam.branch:id,name,code',
-                'subject:id,name,code'
+                'subject:id,name,code',
+                'invigilator:id,first_name,last_name'
             ]);
 
             // Apply company/school/branch scoping - show only accessible data:
