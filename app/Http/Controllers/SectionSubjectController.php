@@ -54,7 +54,25 @@ class SectionSubjectController extends Controller
     public function index(Request $request)
     {
         try {
-            $query = SectionSubject::with(['section', 'subject', 'teacher', 'branch']);
+            // List endpoint: keep payload small + eager-load only what the UI needs
+            $query = SectionSubject::query()
+                ->select([
+                    'id',
+                    'section_id',
+                    'subject_id',
+                    'teacher_id',
+                    'branch_id',
+                    'academic_year',
+                    'is_active',
+                    'created_at',
+                    'updated_at',
+                ])
+                ->with([
+                    'section:id,branch_id,name,code,grade_level',
+                    'subject:id,code,name,type,grade_level,branch_id,is_active',
+                    'teacher:id,first_name,last_name,email',
+                    'branch:id,name,code',
+                ]);
 
             // 🔥 APPLY BRANCH FILTERING
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
@@ -98,6 +116,12 @@ class SectionSubjectController extends Controller
                     ->orWhereHas('subject', function($sq) use ($search) {
                         $sq->where('name', 'like', "{$search}%")
                            ->orWhere('code', 'like', "{$search}%");
+                    })
+                    ->orWhereHas('teacher', function($tq) use ($search) {
+                        $tq->where('first_name', 'like', "{$search}%")
+                           ->orWhere('last_name', 'like', "{$search}%")
+                           ->orWhere('email', 'like', "{$search}%")
+                           ->orWhereRaw('CONCAT(first_name, " ", last_name) LIKE ?', ["{$search}%"]);
                     });
                 });
             }
@@ -108,11 +132,17 @@ class SectionSubjectController extends Controller
                 'section_id',
                 'subject_id',
                 'teacher_id',
+                'branch_id',
                 'academic_year',
                 'is_active',
                 'created_at'
             ];
 
+            // Default sort: branch-wise first, then newest
+            if (!$request->filled('sort_by')) {
+                $query->orderBy('branch_id', 'asc')
+                    ->orderBy('created_at', 'desc');
+            }
             $assignments = $this->paginateAndSort($query, $request, $sortableColumns, 'created_at', 'desc');
 
             return response()->json([

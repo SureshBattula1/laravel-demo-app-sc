@@ -9,6 +9,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 
 class SubjectController extends Controller
 {
@@ -20,12 +21,47 @@ class SubjectController extends Controller
     public function index(Request $request)
     {
         try {
-            $query = Subject::with(['department', 'teacher', 'branch'])
-                ->leftJoin('grades', 'subjects.grade_level', '=', 'grades.value')
-                ->select('subjects.*', 'grades.label as grade_label');
+            $schoolId = $this->getCurrentSchoolId($request);
+            $hasGradesBranchId = Schema::hasColumn('grades', 'branch_id');
+
+            // List endpoint: keep payload small by selecting only list fields + minimal relations
+            $query = Subject::query()
+                ->with([
+                    'department:id,name',
+                    'teacher:id,first_name,last_name,email',
+                    'branch:id,name,code',
+                ])
+                ->leftJoin('grades', function ($join) use ($schoolId, $hasGradesBranchId) {
+                    $join->on('subjects.grade_level', '=', 'grades.value');
+                    if ($hasGradesBranchId) {
+                        // Grades are branch-specific; prevent duplicate matches across branches.
+                        $join->whereColumn('grades.branch_id', 'subjects.branch_id');
+                    } elseif ($schoolId) {
+                        // Legacy fallback (before grades became branch-specific).
+                        $join->where('grades.school_id', '=', (int) $schoolId);
+                    }
+                })
+                ->select([
+                    'subjects.id',
+                    'subjects.code',
+                    'subjects.name',
+                    'subjects.description',
+                    'subjects.department_id',
+                    'subjects.teacher_id',
+                    'subjects.grade_level',
+                    'subjects.type',
+                    'subjects.credits',
+                    'subjects.branch_id',
+                    'subjects.school_id',
+                    'subjects.is_active',
+                    'subjects.created_at',
+                    'subjects.updated_at',
+                    'subjects.deleted_at',
+                ])
+                ->addSelect('grades.label as grade_label')
+                ->distinct('subjects.id');
 
             // 🔥 APPLY SCHOOL FILTERING - School-level isolation
-            $schoolId = $this->getCurrentSchoolId($request);
             if ($schoolId) {
                 $query->where('subjects.school_id', $schoolId);
             }
@@ -40,9 +76,9 @@ class SubjectController extends Controller
                 }
             }
 
-            // Filter by branch (only allow if SuperAdmin/cross-branch user)
-            if ($request->has('branch_id') && $accessibleBranchIds === 'all') {
-                $query->where('subjects.branch_id', $request->branch_id);
+            // Filter by branch (always allowed; still protected by accessible-branches scope above)
+            if ($request->filled('branch_id')) {
+                $query->where('subjects.branch_id', (int) $request->branch_id);
             }
 
             // Filter by department
@@ -83,7 +119,12 @@ class SubjectController extends Controller
                 'subjects.updated_at'
             ];
 
-            // Apply pagination and sorting (default: 25 per page, sorted by name asc)
+            // Apply pagination and sorting (default: branch_id asc, then name asc)
+            // The helper supports only one default column, so we apply a stable pre-order when client didn't request sorting.
+            if (!$request->filled('sort_by')) {
+                $query->orderBy('subjects.branch_id', 'asc')
+                    ->orderBy('subjects.name', 'asc');
+            }
             $subjects = $this->paginateAndSort($query, $request, $sortableColumns, 'subjects.name', 'asc');
 
             // Return standardized paginated response
@@ -161,7 +202,7 @@ class SubjectController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Subject created successfully',
-                'data' => $subject->load(['department', 'teacher'])
+                'data' => $subject->load(['department', 'teacher', 'branch'])
             ], 201);
 
         } catch (\Exception $e) {
@@ -186,7 +227,7 @@ class SubjectController extends Controller
                 ], 400);
             }
 
-            $subject = Subject::with(['department', 'teacher', 'exams'])->findOrFail($id);
+            $subject = Subject::with(['department', 'teacher', 'branch', 'exams'])->findOrFail($id);
             
             return response()->json([
                 'success' => true,
@@ -267,7 +308,7 @@ class SubjectController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Subject updated successfully',
-                'data' => $subject->load(['department', 'teacher'])
+                'data' => $subject->load(['department', 'teacher', 'branch'])
             ]);
 
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
