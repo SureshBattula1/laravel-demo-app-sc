@@ -35,6 +35,7 @@ class StudentController extends Controller
         try {
             $academicYearId = $this->academicYearContext->id(false);
             $hasEnrollments = Schema::hasTable('student_enrollments');
+            $hasGradesBranchId = Schema::hasColumn('grades', 'branch_id');
 
             // 🚀 OPTIMIZED: Select all necessary columns for complete student view
             $query = DB::table('students')
@@ -51,49 +52,72 @@ class StudentController extends Controller
                             ->where('se.academic_year_id', '=', $academicYearId);
                     })
                     ->leftJoin('academic_years as ay', 'se.academic_year_id', '=', 'ay.id')
-                    ->leftJoin('grades', function ($join) use ($schoolId) {
+                    ->leftJoin('grades', function ($join) use ($schoolId, $hasGradesBranchId) {
                         $join->on('grades.value', '=', DB::raw('COALESCE(se.grade, students.grade)'));
-                        if ($schoolId) {
+                        if ($hasGradesBranchId) {
+                            // Grades are branch-specific; prevent duplicate matches across branches.
+                            $join->where('grades.branch_id', '=', DB::raw('COALESCE(se.branch_id, students.branch_id)'));
+                        } elseif ($schoolId) {
+                            // Legacy fallback (before grades became branch-specific).
                             $join->where('grades.school_id', '=', $schoolId);
                         }
                     });
             } else {
                 $query
                     ->leftJoin('academic_years as ay', 'students.academic_year_id', '=', 'ay.id')
-                    ->leftJoin('grades', function ($join) use ($schoolId) {
+                    ->leftJoin('grades', function ($join) use ($schoolId, $hasGradesBranchId) {
                         $join->on('grades.value', '=', 'students.grade');
-                        if ($schoolId) {
+                        if ($hasGradesBranchId) {
+                            // Grades are branch-specific; prevent duplicate matches across branches.
+                            $join->where('grades.branch_id', '=', 'students.branch_id');
+                        } elseif ($schoolId) {
+                            // Legacy fallback (before grades became branch-specific).
                             $join->where('grades.school_id', '=', $schoolId);
                         }
                     });
             }
 
-            $query = $query
-                ->select(
-                    'students.*',  // ✅ Select all student columns
-                    'users.first_name',
-                    'users.last_name',
-                    'users.email',
-                    'users.phone',
-                    'users.is_active',
-                    'branches.id as branch_id_val',
-                    'branches.name as branch_name',
-                    'branches.code as branch_code',
-                    DB::raw('COALESCE(' . ($hasEnrollments && $academicYearId ? 'se.grade' : 'NULL') . ', students.grade) as current_grade'),
-                    DB::raw('COALESCE(' . ($hasEnrollments && $academicYearId ? 'se.section' : 'NULL') . ', students.section) as current_section'),
-                    DB::raw('COALESCE(' . ($hasEnrollments && $academicYearId ? 'se.academic_year_id' : 'NULL') . ', students.academic_year_id) as current_academic_year_id'),
-                    DB::raw('COALESCE(ay.name, students.academic_year) as current_academic_year'),
-                    'grades.label as grade_label'
-                );
+            // For list performance: select only columns needed by the Students list screen.
+            $query = $query->select(
+                'students.id',
+                'students.user_id',
+                'students.branch_id',
+                'students.admission_number',
+                'students.roll_number',
+                'students.gender',
+                'students.student_status',
+                'students.deleted_at',
+                'students.created_at',
+                'students.updated_at',
+                'users.first_name',
+                'users.last_name',
+                'users.email',
+                'users.phone',
+                DB::raw('CASE WHEN users.deleted_at IS NULL AND users.is_active = 1 THEN 1 ELSE 0 END as account_is_active'),
+                DB::raw('CASE WHEN users.deleted_at IS NULL AND users.is_active = 1 THEN "Active" ELSE "Deactive" END as account_status_label'),
+                'branches.id as branch_id_val',
+                'branches.name as branch_name',
+                'branches.code as branch_code',
+                DB::raw('COALESCE(' . ($hasEnrollments && $academicYearId ? 'se.grade' : 'NULL') . ', students.grade) as current_grade'),
+                DB::raw('COALESCE(grades.label, CONCAT("Grade ", COALESCE(' . ($hasEnrollments && $academicYearId ? 'se.grade' : 'NULL') . ', students.grade))) as current_grade_label'),
+                DB::raw('COALESCE(' . ($hasEnrollments && $academicYearId ? 'se.section' : 'NULL') . ', students.section) as current_section'),
+                DB::raw('COALESCE(' . ($hasEnrollments && $academicYearId ? 'se.academic_year_id' : 'NULL') . ', students.academic_year_id) as current_academic_year_id'),
+                DB::raw('COALESCE(ay.name, students.academic_year) as current_academic_year'),
+                'grades.label as grade_label'
+            );
 
             // Include students with school_id = current school OR null school_id but branch belongs to current school (e.g. converted from admission)
             if ($schoolId) {
-                $branchIdsForSchool = Branch::where('school_id', $schoolId)->pluck('id');
-                $query->where(function ($q) use ($schoolId, $branchIdsForSchool) {
+                $query->where(function ($q) use ($schoolId) {
                     $q->where('students.school_id', $schoolId)
-                        ->orWhere(function ($q2) use ($branchIdsForSchool) {
+                        ->orWhere(function ($q2) use ($schoolId) {
                             $q2->whereNull('students.school_id')
-                                ->whereIn('students.branch_id', $branchIdsForSchool);
+                                ->whereIn('students.branch_id', function ($sq) use ($schoolId) {
+                                    $sq->select('id')
+                                        ->from('branches')
+                                        ->where('school_id', (int) $schoolId)
+                                        ->whereNull('deleted_at');
+                                });
                         });
                 });
             }
@@ -138,6 +162,16 @@ class StudentController extends Controller
 
             if ($request->has('branch_id')) {
                 $query->where('students.branch_id', $request->branch_id);
+            }
+
+            // Account active filter (User table)
+            if ($request->has('is_active')) {
+                $raw = $request->get('is_active');
+                $isActive = filter_var($raw, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+                if ($isActive !== null) {
+                    $query->whereNull('users.deleted_at')
+                        ->where('users.is_active', $isActive ? 1 : 0);
+                }
             }
 
             // Academic year is always resolved via AcademicYearContext (query/header/body).
@@ -233,6 +267,7 @@ class StudentController extends Controller
     public function show(Request $request, $id)
     {
         try {
+            $hasGradesBranchId = Schema::hasColumn('grades', 'branch_id');
             // Build query
             $query = DB::table('students')
                 ->join('users', 'students.user_id', '=', 'users.id')
@@ -240,7 +275,10 @@ class StudentController extends Controller
                 ->leftJoin('grades', function ($join) use ($request) {
                     $schoolId = $this->getCurrentSchoolId($request);
                     $join->on('grades.value', '=', 'students.grade');
-                    if ($schoolId) {
+                    $hasGradesBranchId = Schema::hasColumn('grades', 'branch_id');
+                    if ($hasGradesBranchId) {
+                        $join->where('grades.branch_id', '=', 'students.branch_id');
+                    } elseif ($schoolId) {
                         $join->where('grades.school_id', '=', $schoolId);
                     }
                 })
@@ -702,6 +740,21 @@ class StudentController extends Controller
 
             // Restore the student
             $student->restore();
+            $student->update([
+                'student_status' => 'Active',
+                'updated_at' => now(),
+            ]);
+
+            // Also reactivate the linked user account (destroy() deactivates it)
+            if ($student->user_id) {
+                User::withTrashed()
+                    ->where('id', $student->user_id)
+                    ->update([
+                        'deleted_at' => null,
+                        'is_active' => true,
+                        'updated_at' => now(),
+                    ]);
+            }
 
             return response()->json([
                 'success' => true,
@@ -1067,12 +1120,15 @@ class StudentController extends Controller
     protected function buildStudentQuery(Request $request)
     {
         $schoolId = $this->getCurrentSchoolId($request);
+        $hasGradesBranchId = Schema::hasColumn('grades', 'branch_id');
         $query = DB::table('students')
             ->join('users', 'students.user_id', '=', 'users.id')
             ->leftJoin('branches', 'students.branch_id', '=', 'branches.id')
-            ->leftJoin('grades', function ($join) use ($schoolId) {
+            ->leftJoin('grades', function ($join) use ($schoolId, $hasGradesBranchId) {
                 $join->on('grades.value', '=', 'students.grade');
-                if ($schoolId) {
+                if ($hasGradesBranchId) {
+                    $join->where('grades.branch_id', '=', 'students.branch_id');
+                } elseif ($schoolId) {
                     $join->where('grades.school_id', '=', $schoolId);
                 }
             })
