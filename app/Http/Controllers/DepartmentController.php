@@ -20,11 +20,20 @@ class DepartmentController extends Controller
     public function index(Request $request)
     {
         try {
+            $user = $request->user();
             $query = Department::with(['branch', 'headOfDepartment']);
+
+            // SuperAdmin with company_id: filter via joins (avoids large whereIn lists).
+            if ($user && $user->role === 'SuperAdmin' && !empty($user->company_id) && !$request->filled('branch_id')) {
+                $query->join('branches', 'branches.id', '=', 'departments.branch_id')
+                    ->join('schools', 'schools.id', '=', 'branches.school_id')
+                    ->where('schools.company_id', (int) $user->company_id)
+                    ->select('departments.*');
+            }
 
             // 🔥 APPLY SCHOOL FILTERING - School-level isolation
             $schoolId = $this->getCurrentSchoolId($request);
-            if ($schoolId) {
+            if ($schoolId && !($user && $user->role === 'SuperAdmin' && !empty($user->company_id) && !$request->filled('branch_id'))) {
                 $query->where('school_id', $schoolId);
             }
 
@@ -32,7 +41,10 @@ class DepartmentController extends Controller
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
             if ($accessibleBranchIds !== 'all') {
                 if (!empty($accessibleBranchIds)) {
-                    $query->whereIn('branch_id', $accessibleBranchIds);
+                    // In company-join mode we already restricted by company_id.
+                    if (!($user && $user->role === 'SuperAdmin' && !empty($user->company_id) && !$request->filled('branch_id'))) {
+                        $query->whereIn('branch_id', $accessibleBranchIds);
+                    }
                 } else {
                     $query->whereRaw('1 = 0');
                 }
@@ -52,9 +64,9 @@ class DepartmentController extends Controller
             if ($request->has('search')) {
                 $search = strip_tags($request->search);
                 $query->where(function($q) use ($search) {
-                    $q->where('name', 'like', '%' . $search . '%')
-                      ->orWhere('head', 'like', '%' . $search . '%')
-                      ->orWhere('description', 'like', '%' . $search . '%');
+                    $q->where('departments.name', 'like', '%' . $search . '%')
+                      ->orWhere('departments.head', 'like', '%' . $search . '%')
+                      ->orWhere('departments.description', 'like', '%' . $search . '%');
                 });
             }
 
@@ -72,8 +84,8 @@ class DepartmentController extends Controller
                 'updated_at'
             ];
 
-            // Apply pagination and sorting (default: 25 per page, sorted by name asc)
-            $departments = $this->paginateAndSort($query, $request, $sortableColumns, 'name', 'asc');
+            // Apply pagination and sorting (default: 25 per page, sorted by branch_id asc)
+            $departments = $this->paginateAndSort($query, $request, $sortableColumns, 'branch_id', 'asc');
 
             // Return standardized paginated response
             return response()->json([

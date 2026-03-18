@@ -79,8 +79,21 @@ class BranchController extends Controller
                 $query->where('school_id', $schoolId);
             }
 
-            // Apply branch access filtering (use 'id' column for branches table)
-            $this->applyBranchFilter($query, $request, 'id');
+            // Apply branch access filtering (use 'id' column for branches table).
+            // IMPORTANT: For SuperAdmin with company_id (company context), include inactive branches too.
+            // The generic accessible-branch logic may return only active branches; branch management list must show all.
+            $user = $request->user();
+            if ($user && $user->role === 'SuperAdmin' && !empty($user->company_id)) {
+                // Filter by company via SQL subquery (fast, avoids plucking IDs into PHP memory).
+                $query->whereIn('school_id', function ($q) use ($user) {
+                    $q->select('id')
+                        ->from('schools')
+                        ->where('company_id', (int) $user->company_id)
+                        ->whereNull('deleted_at');
+                });
+            } else {
+                $this->applyBranchFilter($query, $request, 'id');
+            }
 
             // Search functionality
             if ($request->has('search')) {

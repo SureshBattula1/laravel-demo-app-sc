@@ -156,6 +156,17 @@ class GradeController extends Controller
                     }
                 }
             }
+
+            // Search (grade value/label/category/branch name)
+            if ($request->filled('search')) {
+                $search = strip_tags((string) $request->search);
+                $query->where(function ($q) use ($search) {
+                    $q->where('grades.value', 'like', '%' . $search . '%')
+                        ->orWhere('grades.label', 'like', '%' . $search . '%')
+                        ->orWhere('grades.category', 'like', '%' . $search . '%')
+                        ->orWhere('branches.name', 'like', '%' . $search . '%');
+                });
+            }
             
             // Filter by active status if requested (common for dropdowns)
             if ($request->has('is_active')) {
