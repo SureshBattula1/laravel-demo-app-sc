@@ -27,6 +27,7 @@ class FeePayment extends Model
         'total_amount',
         'payment_status',
         'academic_year',
+        'academic_year_id',
         'remarks',
         'created_by',
         'updated_by'

@@ -24,6 +24,7 @@ class FeeController extends Controller
     {
         try {
             $query = FeeStructure::with(['branch', 'creator']);
+            $academicYearId = $this->academicYearContext->id(false);
 
             // 🔥 APPLY SCHOOL FILTERING - School-level isolation
             $schoolId = $this->getCurrentSchoolId($request);
@@ -49,8 +50,8 @@ class FeeController extends Controller
                 $query->where('grade', $request->grade);
             }
 
-            if ($request->has('academic_year')) {
-                $query->where('academic_year', $request->academic_year);
+            if ($academicYearId) {
+                $query->where('academic_year_id', (int) $academicYearId);
             }
 
             if ($request->has('fee_type')) {
@@ -119,12 +120,16 @@ class FeeController extends Controller
 
         DB::beginTransaction();
         try {
+            $academicYearId = $this->academicYearContext->id(false);
+            $academicYearName = $academicYearId
+                ? (\App\Models\AcademicYear::query()->where('id', (int) $academicYearId)->value('name') ?? null)
+                : null;
+
             $validator = Validator::make($request->all(), [
                 'branch_id' => 'required|exists:branches,id',
                 'grade' => 'required|string|max:50',
                 'fee_type' => 'required|string|max:255',
                 'amount' => 'required|numeric|min:0',
-                'academic_year' => 'required|string|max:20',
                 'due_date' => 'nullable|date',
                 'description' => 'nullable|string',
                 'is_recurring' => 'boolean',
@@ -155,6 +160,8 @@ class FeeController extends Controller
                 ...$request->all(),
                 'school_id' => $branch ? $branch->school_id : null,
                 'created_by' => $request->user()->id,
+                'academic_year_id' => $academicYearId ? (int) $academicYearId : null,
+                'academic_year' => $academicYearName,
                 'is_active' => $request->has('is_active') ? $request->boolean('is_active') : true
             ]);
 
@@ -181,12 +188,15 @@ class FeeController extends Controller
         DB::beginTransaction();
         try {
             $structure = FeeStructure::findOrFail($id);
+            $academicYearId = $this->academicYearContext->id(false);
+            $academicYearName = $academicYearId
+                ? (\App\Models\AcademicYear::query()->where('id', (int) $academicYearId)->value('name') ?? null)
+                : null;
 
             $validator = Validator::make($request->all(), [
                 'grade' => 'string|max:50',
                 'fee_type' => 'string|max:255',
                 'amount' => 'numeric|min:0',
-                'academic_year' => 'string|max:20',
                 'due_date' => 'nullable|date',
                 'description' => 'nullable|string',
                 'is_recurring' => 'boolean',
@@ -214,6 +224,8 @@ class FeeController extends Controller
 
             $structure->update([
                 ...$request->all(),
+                'academic_year_id' => $academicYearId ? (int) $academicYearId : $structure->academic_year_id,
+                'academic_year' => $academicYearName ?? $structure->academic_year,
                 'updated_by' => $request->user()->id
             ]);
 
@@ -707,6 +719,11 @@ class FeeController extends Controller
     {
         DB::beginTransaction();
         try {
+            $academicYearId = $this->academicYearContext->id(false);
+            $academicYearName = $academicYearId
+                ? (\App\Models\AcademicYear::query()->where('id', (int) $academicYearId)->value('name') ?? null)
+                : null;
+
             $validator = Validator::make($request->all(), [
                 'fee_structure_id' => 'required|exists:fee_structures,id',
                 'student_id' => 'required|exists:users,id',
@@ -773,7 +790,8 @@ class FeeController extends Controller
                 'total_amount' => $totalAmount,
                 'payment_status' => $request->payment_status,
                 'remarks' => $request->remarks,
-                'academic_year' => $request->academic_year,
+                'academic_year_id' => $academicYearId ? (int) $academicYearId : null,
+                'academic_year' => $academicYearName,
                 'created_by' => $request->user()->id
             ];
 

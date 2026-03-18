@@ -288,7 +288,7 @@ class ImportService
                 }
 
                 // Validate grade exists
-                if ($record->grade && !DB::table('grades')->where('value', $record->grade)->exists()) {
+                if ($record->grade && !DB::table('grades')->where('school_id', $branch?->school_id)->where('value', $record->grade)->exists()) {
                     $errors[] = "Invalid grade '{$record->grade}'";
                 }
 

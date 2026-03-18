@@ -16,6 +16,9 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use App\Services\SchoolGradeService;
+use App\Services\BranchClassSeedService;
+use App\Services\BranchGradeService;
 
 class BranchController extends Controller
 {
@@ -358,6 +361,13 @@ class BranchController extends Controller
             }
 
             $branch = Branch::create($branchData);
+
+            // Ensure branch default grades exist (idempotent).
+            app(BranchGradeService::class)->ensureDefaults((int) $branch->id);
+
+            // Seed default classes for this branch (one per grade, section = NULL) for current academic year.
+            // Idempotent and safe: will skip if no current academic year is configured.
+            app(BranchClassSeedService::class)->ensureDefaultsForBranch((int) $branch->id);
 
             // Create Branch Admin user with principal name/email when password is provided
             $adminUser = null;

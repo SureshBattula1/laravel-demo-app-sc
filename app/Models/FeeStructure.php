@@ -19,6 +19,7 @@ class FeeStructure extends Model
         'fee_type',
         'amount',
         'academic_year',
+        'academic_year_id',
         'due_date',
         'description',
         'is_recurring',

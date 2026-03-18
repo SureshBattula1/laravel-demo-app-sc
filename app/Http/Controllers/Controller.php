@@ -26,6 +26,16 @@ abstract class Controller
             return $branch ? $branch->school_id : null;
         }
 
+        // SuperAdmin in company context: default to a school in that company
+        if ($user->role === 'SuperAdmin' && !empty($user->company_id)) {
+            $schoolId = \Illuminate\Support\Facades\DB::table('schools')
+                ->where('company_id', $user->company_id)
+                ->whereNull('deleted_at')
+                ->orderBy('id', 'asc')
+                ->value('id');
+            return $schoolId ? (int) $schoolId : null;
+        }
+
         return null;
     }
 

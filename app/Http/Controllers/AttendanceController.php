@@ -28,6 +28,7 @@ class AttendanceController extends Controller
     {
         try {
             $type = $request->get('type', 'student'); // student or teacher
+            $academicYearId = $request->attributes->get('academic_year_id');
             
             if ($type === 'student') {
                 $query = DB::table('student_attendance')
@@ -76,6 +77,11 @@ class AttendanceController extends Controller
             // Filters (only allow if SuperAdmin/cross-branch user)
             if ($request->has('branch_id') && $accessibleBranchIds === 'all') {
                 $query->where($type . '_attendance.branch_id', $request->branch_id);
+            }
+
+            // Academic year scoping (Option A)
+            if ($academicYearId) {
+                $query->where($type . '_attendance.academic_year_id', (int) $academicYearId);
             }
 
             if ($request->has('date')) {
@@ -182,6 +188,10 @@ class AttendanceController extends Controller
         DB::beginTransaction();
         try {
             $type = $request->get('type', 'student');
+            $academicYearId = $request->attributes->get('academic_year_id');
+            $academicYearName = $academicYearId
+                ? (\App\Models\AcademicYear::query()->where('id', (int) $academicYearId)->value('name') ?? null)
+                : null;
             
             if ($type === 'student') {
                 $validator = Validator::make($request->all(), [
@@ -191,7 +201,6 @@ class AttendanceController extends Controller
                     'section' => 'required|string',
                     'date' => 'required|date',
                     'status' => 'required|in:Present,Absent,Late,Half-Day,Sick Leave,Leave',
-                    'academic_year' => 'required|string',
                     'remarks' => 'nullable|string'
                 ]);
 
@@ -228,7 +237,8 @@ class AttendanceController extends Controller
                     'status' => $request->status,
                     'remarks' => $request->remarks,
                     'marked_by' => auth()->user()->email ?? null,
-                    'academic_year' => $request->academic_year,
+                    'academic_year_id' => $academicYearId ? (int) $academicYearId : null,
+                    'academic_year' => $academicYearName,
                     'created_at' => now(),
                     'updated_at' => now()
                 ]);
@@ -267,6 +277,7 @@ class AttendanceController extends Controller
                     'teacher_id' => $request->teacher_id,
                     'branch_id' => $request->branch_id,
                     'school_id' => $schoolId,
+                    'academic_year_id' => $academicYearId ? (int) $academicYearId : null,
                     'date' => $request->date,
                     'status' => $request->status,
                     'remarks' => $request->remarks,
@@ -321,6 +332,11 @@ class AttendanceController extends Controller
             $marked = 0;
             $errors = [];
 
+            $academicYearId = $request->attributes->get('academic_year_id');
+            $academicYearName = $academicYearId
+                ? (\App\Models\AcademicYear::query()->where('id', (int) $academicYearId)->value('name') ?? null)
+                : null;
+
             $branch = Branch::find($request->branch_id);
             $schoolId = $branch ? $branch->school_id : null;
 
@@ -346,7 +362,8 @@ class AttendanceController extends Controller
                                 'status' => $item['status'],
                                 'remarks' => $item['remarks'] ?? null,
                                 'marked_by' => auth()->user()->email ?? null,
-                                'academic_year' => $request->academic_year ?? date('Y') . '-' . (date('Y') + 1),
+                                'academic_year_id' => $academicYearId ? (int) $academicYearId : null,
+                                'academic_year' => $academicYearName,
                                 'updated_at' => now(),
                                 'created_at' => now()
                             ]
@@ -360,6 +377,7 @@ class AttendanceController extends Controller
                             [
                                 'branch_id' => $request->branch_id,
                                 'school_id' => $schoolId,
+                                'academic_year_id' => $academicYearId ? (int) $academicYearId : null,
                                 'status' => $item['status'],
                                 'remarks' => $item['remarks'] ?? null,
                                 'updated_at' => now(),
@@ -987,6 +1005,8 @@ class AttendanceController extends Controller
      */
     protected function buildAttendanceQuery(Request $request, string $type)
     {
+        $academicYearId = $request->attributes->get('academic_year_id');
+
         if ($type === 'student') {
             $query = DB::table('student_attendance')
                 ->join('students', 'student_attendance.student_id', '=', 'students.user_id')
@@ -1015,6 +1035,10 @@ class AttendanceController extends Controller
                     'users.email',
                     'teachers.employee_id'
                 );
+        }
+
+        if ($academicYearId) {
+            $query->where($type . '_attendance.academic_year_id', (int) $academicYearId);
         }
 
         // Apply branch filtering

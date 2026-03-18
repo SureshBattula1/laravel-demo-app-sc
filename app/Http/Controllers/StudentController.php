@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Schema;
 use App\Models\Branch;
 use App\Models\Student;
 use App\Exports\StudentsExport;
@@ -32,11 +33,42 @@ class StudentController extends Controller
     public function index(Request $request)
     {
         try {
+            $academicYearId = $this->academicYearContext->id(false);
+            $hasEnrollments = Schema::hasTable('student_enrollments');
+
             // 🚀 OPTIMIZED: Select all necessary columns for complete student view
             $query = DB::table('students')
                 ->join('users', 'students.user_id', '=', 'users.id')
-                ->leftJoin('branches', 'students.branch_id', '=', 'branches.id')
-                ->leftJoin('grades', 'students.grade', '=', 'grades.value')
+                ->leftJoin('branches', 'students.branch_id', '=', 'branches.id');
+
+            // 🔥 APPLY SCHOOL FILTERING - School-level isolation (needed for grade join scoping too)
+            $schoolId = $this->getCurrentSchoolId($request);
+
+            if ($hasEnrollments && $academicYearId) {
+                $query
+                    ->leftJoin('student_enrollments as se', function ($join) use ($academicYearId) {
+                        $join->on('se.student_id', '=', 'students.id')
+                            ->where('se.academic_year_id', '=', $academicYearId);
+                    })
+                    ->leftJoin('academic_years as ay', 'se.academic_year_id', '=', 'ay.id')
+                    ->leftJoin('grades', function ($join) use ($schoolId) {
+                        $join->on('grades.value', '=', DB::raw('COALESCE(se.grade, students.grade)'));
+                        if ($schoolId) {
+                            $join->where('grades.school_id', '=', $schoolId);
+                        }
+                    });
+            } else {
+                $query
+                    ->leftJoin('academic_years as ay', 'students.academic_year_id', '=', 'ay.id')
+                    ->leftJoin('grades', function ($join) use ($schoolId) {
+                        $join->on('grades.value', '=', 'students.grade');
+                        if ($schoolId) {
+                            $join->where('grades.school_id', '=', $schoolId);
+                        }
+                    });
+            }
+
+            $query = $query
                 ->select(
                     'students.*',  // ✅ Select all student columns
                     'users.first_name',
@@ -47,12 +79,14 @@ class StudentController extends Controller
                     'branches.id as branch_id_val',
                     'branches.name as branch_name',
                     'branches.code as branch_code',
+                    DB::raw('COALESCE(' . ($hasEnrollments && $academicYearId ? 'se.grade' : 'NULL') . ', students.grade) as current_grade'),
+                    DB::raw('COALESCE(' . ($hasEnrollments && $academicYearId ? 'se.section' : 'NULL') . ', students.section) as current_section'),
+                    DB::raw('COALESCE(' . ($hasEnrollments && $academicYearId ? 'se.academic_year_id' : 'NULL') . ', students.academic_year_id) as current_academic_year_id'),
+                    DB::raw('COALESCE(ay.name, students.academic_year) as current_academic_year'),
                     'grades.label as grade_label'
                 );
 
-            // 🔥 APPLY SCHOOL FILTERING - School-level isolation
             // Include students with school_id = current school OR null school_id but branch belongs to current school (e.g. converted from admission)
-            $schoolId = $this->getCurrentSchoolId($request);
             if ($schoolId) {
                 $branchIdsForSchool = Branch::where('school_id', $schoolId)->pluck('id');
                 $query->where(function ($q) use ($schoolId, $branchIdsForSchool) {
@@ -79,11 +113,19 @@ class StudentController extends Controller
 
             // Apply filters
             if ($request->has('grade')) {
-                $query->where('students.grade', $request->grade);
+                if ($hasEnrollments && $academicYearId) {
+                    $query->whereRaw('COALESCE(se.grade, students.grade) = ?', [$request->grade]);
+                } else {
+                    $query->where('students.grade', $request->grade);
+                }
             }
 
             if ($request->has('section')) {
-                $query->where('students.section', $request->section);
+                if ($hasEnrollments && $academicYearId) {
+                    $query->whereRaw('COALESCE(se.section, students.section) = ?', [$request->section]);
+                } else {
+                    $query->where('students.section', $request->section);
+                }
             }
 
             if ($request->has('status')) {
@@ -98,8 +140,13 @@ class StudentController extends Controller
                 $query->where('students.branch_id', $request->branch_id);
             }
 
-            if ($request->has('academic_year') && $request->academic_year !== '') {
-                $query->where('students.academic_year', $request->academic_year);
+            // Academic year is always resolved via AcademicYearContext (query/header/body).
+            if ($academicYearId) {
+                if ($hasEnrollments) {
+                    $query->whereRaw('COALESCE(se.academic_year_id, students.academic_year_id) = ?', [$academicYearId]);
+                } else {
+                    $query->where('students.academic_year_id', $academicYearId);
+                }
             }
 
             if ($request->has('search')) {
@@ -164,7 +211,8 @@ class StudentController extends Controller
                     'last_page' => $students->lastPage(),
                     'from' => $students->firstItem(),
                     'to' => $students->lastItem(),
-                    'has_more_pages' => $students->hasMorePages()
+                    'has_more_pages' => $students->hasMorePages(),
+                    'academic_year_id' => $academicYearId
                 ]
             ]);
 
@@ -189,7 +237,13 @@ class StudentController extends Controller
             $query = DB::table('students')
                 ->join('users', 'students.user_id', '=', 'users.id')
                 ->leftJoin('branches', 'students.branch_id', '=', 'branches.id')
-                ->leftJoin('grades', 'students.grade', '=', 'grades.value')
+                ->leftJoin('grades', function ($join) use ($request) {
+                    $schoolId = $this->getCurrentSchoolId($request);
+                    $join->on('grades.value', '=', 'students.grade');
+                    if ($schoolId) {
+                        $join->where('grades.school_id', '=', $schoolId);
+                    }
+                })
                 ->where('students.id', $id);
             
             // 🔥 APPLY BRANCH FILTERING - Prevent access to other branches
@@ -272,7 +326,13 @@ class StudentController extends Controller
             $student = DB::table('students')
                 ->join('users', 'students.user_id', '=', 'users.id')
                 ->leftJoin('branches', 'students.branch_id', '=', 'branches.id')
-                ->leftJoin('grades', 'students.grade', '=', 'grades.value')
+                ->leftJoin('grades', function ($join) use ($request) {
+                    $schoolId = $this->getCurrentSchoolId($request);
+                    $join->on('grades.value', '=', 'students.grade');
+                    if ($schoolId) {
+                        $join->where('grades.school_id', '=', $schoolId);
+                    }
+                })
                 ->where('students.user_id', $userId)
                 ->select(
                     'students.id',
@@ -388,7 +448,7 @@ class StudentController extends Controller
                 'admission_date' => 'required|date',
                 'grade' => 'required|string',
                 'section' => 'nullable|string',
-                'academic_year' => 'required|string',
+                'academic_year_id' => 'required|integer|exists:academic_years,id',
                 'date_of_birth' => 'required|date',
                 'gender' => 'required|in:Male,Female,Other',
                 'current_address' => 'required|string',
@@ -440,6 +500,30 @@ class StudentController extends Controller
             
             // Create student record
             $studentId = DB::table('students')->insertGetId($studentData);
+
+            // Create enrollment row for the selected academic year (source of truth for year history)
+            try {
+                $ayModel = $this->academicYearContext->model(false);
+                $academicYearId = (int) $request->academic_year_id;
+                $academicYearName = \App\Models\AcademicYear::query()->where('id', $academicYearId)->value('name');
+                DB::table('student_enrollments')->insert([
+                    'student_id' => $studentId,
+                    'school_id' => $studentData['school_id'] ?? null,
+                    'branch_id' => $request->branch_id,
+                    'academic_year_id' => $academicYearId,
+                    'grade' => (string) $request->grade,
+                    'section' => $request->section ?? null,
+                    'roll_number' => $request->roll_number !== null && $request->roll_number !== '' ? (string) $request->roll_number : null,
+                    'status' => 'Active',
+                    'created_by' => $request->user()->id,
+                    'updated_by' => $request->user()->id,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            } catch (\Throwable $e) {
+                // Enrollment creation must not block student creation (legacy compatibility).
+                Log::warning('Failed creating student enrollment during store', ['error' => $e->getMessage()]);
+            }
 
             // Update user with student ID
             $user->update(['user_type_id' => $studentId]);
@@ -649,7 +733,7 @@ class StudentController extends Controller
                 'student_ids.*' => 'exists:students,id',
                 'from_grade' => 'required|string',
                 'to_grade' => 'required|string',
-                'academic_year' => 'required|string'
+                'to_academic_year_id' => 'required|integer|exists:academic_years,id'
             ]);
 
             if ($validator->fails()) {
@@ -661,15 +745,62 @@ class StudentController extends Controller
 
             DB::beginTransaction();
 
-            $promoted = DB::table('students')
-                ->whereIn('id', $request->student_ids)
-                ->where('grade', $request->from_grade)
-                ->update([
-                    'grade' => $request->to_grade,
-                    'academic_year' => $request->academic_year,
-                    'section' => null, // Reset section for new grade
-                    'updated_at' => now()
+            $fromAcademicYearId = $this->academicYearContext->id(false);
+            $toAcademicYearId = (int) $request->to_academic_year_id;
+            $toAcademicYearName = \App\Models\AcademicYear::query()->where('id', $toAcademicYearId)->value('name');
+
+            $promoted = 0;
+            foreach ($request->student_ids as $studentId) {
+                $student = \App\Models\Student::find($studentId);
+                if (!$student || (string) $student->grade !== (string) $request->from_grade) {
+                    continue;
+                }
+
+                // Create enrollment for target year (history-safe)
+                DB::table('student_enrollments')->updateOrInsert(
+                    [
+                        'student_id' => $student->id,
+                        'academic_year_id' => $toAcademicYearId,
+                    ],
+                    [
+                        'school_id' => $student->school_id,
+                        'branch_id' => $student->branch_id,
+                        'grade' => (string) $request->to_grade,
+                        'section' => null,
+                        'roll_number' => $student->roll_number ? (string) $student->roll_number : null,
+                        'status' => 'Active',
+                        'created_by' => $request->user()->id,
+                        'updated_by' => $request->user()->id,
+                        'updated_at' => now(),
+                        'created_at' => now(),
+                    ]
+                );
+
+                // Legacy update for current-year screens
+                $student->update([
+                    'grade' => (string) $request->to_grade,
+                    'academic_year_id' => $toAcademicYearId,
+                    'academic_year' => $toAcademicYearName,
+                    'section' => null,
                 ]);
+
+                // Promotion history (works for both old + new schema)
+                \App\Models\ClassUpgrade::create([
+                    'student_id' => $student->id,
+                    'academic_year_from' => $fromAcademicYearId ? (\App\Models\AcademicYear::query()->where('id', $fromAcademicYearId)->value('name') ?? $student->academic_year) : ($student->academic_year ?? null),
+                    'academic_year_to' => $toAcademicYearName,
+                    'from_academic_year_id' => $fromAcademicYearId,
+                    'to_academic_year_id' => $toAcademicYearId,
+                    'from_grade' => (string) $request->from_grade,
+                    'to_grade' => (string) $request->to_grade,
+                    'promotion_status' => 'Promoted',
+                    'approved_by' => $request->user()->id,
+                    'fee_carry_forward_status' => 'None',
+                    'fee_carry_forward_amount' => 0,
+                ]);
+
+                $promoted++;
+            }
 
             DB::commit();
 
@@ -679,7 +810,7 @@ class StudentController extends Controller
                 'data' => [
                     'promoted_count' => $promoted,
                     'to_grade' => $request->to_grade,
-                    'academic_year' => $request->academic_year
+                    'to_academic_year_id' => $request->to_academic_year_id
                 ]
             ]);
 
@@ -708,7 +839,7 @@ class StudentController extends Controller
                 'student_ids.*' => 'exists:students,id',
                 'from_grade' => 'required|string',
                 'to_grade' => 'required|string',
-                'academic_year' => 'required|string',
+                'to_academic_year_id' => 'required|integer|exists:academic_years,id',
                 'check_eligibility' => 'boolean'
             ]);
 
@@ -730,7 +861,7 @@ class StudentController extends Controller
                 $request->student_ids,
                 $request->from_grade,
                 $request->to_grade,
-                $request->academic_year,
+                (int) $request->to_academic_year_id,
                 $request->user()->id,
                 $request->boolean('check_eligibility', false)
             );
@@ -935,10 +1066,16 @@ class StudentController extends Controller
      */
     protected function buildStudentQuery(Request $request)
     {
+        $schoolId = $this->getCurrentSchoolId($request);
         $query = DB::table('students')
             ->join('users', 'students.user_id', '=', 'users.id')
             ->leftJoin('branches', 'students.branch_id', '=', 'branches.id')
-            ->leftJoin('grades', 'students.grade', '=', 'grades.value')
+            ->leftJoin('grades', function ($join) use ($schoolId) {
+                $join->on('grades.value', '=', 'students.grade');
+                if ($schoolId) {
+                    $join->where('grades.school_id', '=', $schoolId);
+                }
+            })
             ->select(
                 'students.id',
                 'students.user_id',
@@ -1193,7 +1330,8 @@ class StudentController extends Controller
         $data['roll_number'] = $request->roll_number !== null && $request->roll_number !== '' ? (string) $request->roll_number : null;
         $data['grade'] = $request->grade;
         $data['section'] = $request->section ?? null;
-        $data['academic_year'] = $request->academic_year;
+        $data['academic_year_id'] = (int) $request->academic_year_id;
+        $data['academic_year'] = \App\Models\AcademicYear::query()->where('id', $data['academic_year_id'])->value('name') ?? null;
         $data['stream'] = $request->stream ?? null;
         $data['elective_subjects'] = $request->elective_subjects ?? null;
         $data['registration_number'] = $request->registration_number ?? null;

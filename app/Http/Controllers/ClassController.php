@@ -340,9 +340,15 @@ class ClassController extends Controller
     {
         try {
             $branchId = $request->query('branch_id');
+            $schoolId = $this->getCurrentSchoolId($request);
             
             // Get grades from the grades table
             $gradesFromDb = DB::table('grades')
+                ->when($branchId, function ($q) use ($branchId) {
+                    $q->where('branch_id', (int) $branchId);
+                }, function ($q) use ($schoolId) {
+                    $q->where('school_id', $schoolId)->whereNull('branch_id');
+                })
                 ->where('is_active', true)
                 ->orderBy('value', 'asc')
                 ->get();

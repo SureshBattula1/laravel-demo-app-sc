@@ -23,6 +23,7 @@ class Holiday extends Model
         'color',
         'is_recurring',
         'academic_year',
+        'academic_year_id',
         'is_active',
         'created_by'
     ];

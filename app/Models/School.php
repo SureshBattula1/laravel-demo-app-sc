@@ -10,6 +10,10 @@ class School extends Model
 {
     use HasFactory, SoftDeletes;
 
+    protected $appends = [
+        'branch_id',
+    ];
+
     protected $fillable = [
         'company_id',
         'name',
@@ -24,6 +28,11 @@ class School extends Model
         return [
             'settings' => 'array',
         ];
+    }
+
+    public function getBranchIdAttribute(): ?int
+    {
+        return $this->main_branch_id ? (int) $this->main_branch_id : null;
     }
 
     // Relationships

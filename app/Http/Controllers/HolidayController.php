@@ -7,6 +7,7 @@ use App\Exports\HolidaysExport;
 use App\Services\PdfExportService;
 use App\Services\CsvExportService;
 use App\Services\ExportService;
+use App\Services\AcademicYearContext;
 use Maatwebsite\Excel\Facades\Excel;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -16,6 +17,10 @@ use Illuminate\Support\Facades\Log;
 
 class HolidayController extends Controller
 {
+    public function __construct(
+        protected AcademicYearContext $academicYearContext
+    ) {}
+
     /**
      * Get all holidays with role-based filtering
      */
@@ -24,6 +29,7 @@ class HolidayController extends Controller
         try {
             $user = Auth::user();
             $query = Holiday::with(['branch', 'createdBy']);
+            $academicYearId = $this->academicYearContext->id(false);
 
             // Restrict to company holidays only: holidays in user's accessible branches (no National/State or branch-null)
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
@@ -40,8 +46,8 @@ class HolidayController extends Controller
                 $query->where('type', $request->type);
             }
 
-            if ($request->has('academic_year')) {
-                $query->where('academic_year', $request->academic_year);
+            if ($academicYearId) {
+                $query->where('academic_year_id', (int) $academicYearId);
             }
 
             if ($request->has('is_active')) {
@@ -112,6 +118,10 @@ class HolidayController extends Controller
     {
         try {
             $user = Auth::user();
+            $academicYearId = $this->academicYearContext->id(false);
+            $academicYearName = $academicYearId
+                ? (\App\Models\AcademicYear::query()->where('id', (int) $academicYearId)->value('name') ?? null)
+                : null;
 
             // Check role permissions
             if (!in_array($user->role, ['SuperAdmin', 'BranchAdmin'])) {
@@ -130,7 +140,6 @@ class HolidayController extends Controller
                 'color' => 'nullable|string|max:20',
                 'branch_id' => 'nullable|exists:branches,id',
                 'is_recurring' => 'boolean',
-                'academic_year' => 'nullable|string|max:20'
             ]);
 
             if ($validator->fails()) {
@@ -150,7 +159,6 @@ class HolidayController extends Controller
 
             $title = strip_tags($request->title);
             $startDate = $request->start_date;
-            $academicYear = $request->academic_year ?: $this->getCurrentAcademicYear();
             
             $branch = $branchId ? \App\Models\Branch::find($branchId) : null;
             $holiday = Holiday::create([
@@ -165,7 +173,8 @@ class HolidayController extends Controller
                 'type' => $request->type,
                 'color' => $request->color ?: $this->getDefaultColor($request->type),
                 'is_recurring' => $request->boolean('is_recurring', false),
-                'academic_year' => $academicYear, // Required field, always has value
+                'academic_year_id' => $academicYearId ? (int) $academicYearId : null,
+                'academic_year' => $academicYearName,
                 'is_active' => $request->boolean('is_active', true),
                 'created_by' => $user->id
             ]);
@@ -417,16 +426,7 @@ class HolidayController extends Controller
         };
     }
 
-    /**
-     * Get current academic year
-     */
-    private function getCurrentAcademicYear(): string
-    {
-        $year = date('Y');
-        $month = date('n');
-        
-        return $month < 4 ? ($year - 1) . '-' . $year : $year . '-' . ($year + 1);
-    }
+    // Academic year context is resolved centrally via AcademicYearContext (Option A)
 
     /**
      * Export holidays data
@@ -507,6 +507,7 @@ class HolidayController extends Controller
     protected function buildHolidayQuery(Request $request)
     {
         $query = Holiday::with(['branch', 'createdBy']);
+        $academicYearId = $this->academicYearContext->id(false);
 
         // Restrict to company holidays only (branches accessible to user)
         $accessibleBranchIds = $this->getAccessibleBranchIds($request);
@@ -523,9 +524,8 @@ class HolidayController extends Controller
             $query->where('type', $request->type);
         }
 
-        // Filter by academic year
-        if ($request->has('academic_year') && $request->academic_year !== '') {
-            $query->where('academic_year', $request->academic_year);
+        if ($academicYearId) {
+            $query->where('academic_year_id', (int) $academicYearId);
         }
 
         // Filter by active status

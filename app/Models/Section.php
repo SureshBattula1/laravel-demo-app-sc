@@ -46,7 +46,10 @@ class Section extends Model
     {
         if ($this->grade_level) {
             // Get grade details from grades table
-            $grade = DB::table('grades')->where('value', $this->grade_level)->first();
+            $grade = DB::table('grades')
+                ->where('school_id', $this->school_id)
+                ->where('value', $this->grade_level)
+                ->first();
             if ($grade) {
                 return $grade->label;
             }
@@ -61,7 +64,10 @@ class Section extends Model
     public function getGradeDetailsAttribute(): ?array
     {
         if ($this->grade_level) {
-            $grade = DB::table('grades')->where('value', $this->grade_level)->first();
+            $grade = DB::table('grades')
+                ->where('school_id', $this->school_id)
+                ->where('value', $this->grade_level)
+                ->first();
             if ($grade) {
                 return [
                     'value' => $grade->value,

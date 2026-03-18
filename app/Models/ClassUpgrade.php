@@ -13,6 +13,8 @@ class ClassUpgrade extends Model
         'student_id',
         'academic_year_from',
         'academic_year_to',
+        'from_academic_year_id',
+        'to_academic_year_id',
         'from_grade',
         'to_grade',
         'promotion_status',

@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Exam;
 use App\Models\Student;
+use App\Services\AcademicYearContext;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -12,6 +13,10 @@ use Carbon\Carbon;
 
 class ExamController extends Controller
 {
+    public function __construct(
+        protected AcademicYearContext $academicYearContext
+    ) {}
+
     /**
      * Display a listing of exams - OPTIMIZED with pagination
      */
@@ -19,6 +24,7 @@ class ExamController extends Controller
     {
         try {
             $query = Exam::with(['branch', 'examTerm', 'creator']);
+            $academicYearId = $this->academicYearContext->id(false);
 
             // 🔥 APPLY SCHOOL FILTERING - School-level isolation
             $schoolId = $this->getCurrentSchoolId($request);
@@ -39,9 +45,9 @@ class ExamController extends Controller
                 $query->where('exam_term_id', $request->exam_term_id);
             }
 
-            // Filter by academic year
-            if ($request->has('academic_year')) {
-                $query->where('academic_year', $request->academic_year);
+            // Academic year scoping (Option A)
+            if ($academicYearId) {
+                $query->where('academic_year_id', (int) $academicYearId);
             }
 
             // Filter by exam type
@@ -110,12 +116,16 @@ class ExamController extends Controller
     {
         DB::beginTransaction();
         try {
+            $academicYearId = $this->academicYearContext->id(false);
+            $academicYearName = $academicYearId
+                ? (\App\Models\AcademicYear::query()->where('id', (int) $academicYearId)->value('name') ?? null)
+                : null;
+
             $validator = Validator::make($request->all(), [
                 'branch_id' => 'required|integer|exists:branches,id',
                 'name' => 'required|string|max:255',
                 'exam_term_id' => 'nullable|integer|exists:exam_terms,id',
                 'exam_type' => 'nullable|string|in:Midterm,Final,Quiz,Assignment,Practical,Other',
-                'academic_year' => 'required|string|max:20',
                 'start_date' => 'nullable|date',
                 'end_date' => 'nullable|date|after_or_equal:start_date',
                 'description' => 'nullable|string',
@@ -132,7 +142,7 @@ class ExamController extends Controller
 
             // Prepare data with proper date formatting
             $examData = $request->only([
-                'exam_term_id', 'branch_id', 'name', 'exam_type', 'academic_year', 'description'
+                'exam_term_id', 'branch_id', 'name', 'exam_type', 'description'
             ]);
 
             // Set school_id from branch
@@ -153,6 +163,8 @@ class ExamController extends Controller
             
             $exam = Exam::create([
                 ...$examData,
+                'academic_year_id' => $academicYearId ? (int) $academicYearId : null,
+                'academic_year' => $academicYearName,
                 'created_by' => $request->user()->id,
                 'is_active' => $request->has('is_active') ? $request->boolean('is_active') : true
             ]);
@@ -208,13 +220,16 @@ class ExamController extends Controller
         DB::beginTransaction();
         try {
             $exam = Exam::findOrFail($id);
+            $academicYearId = $this->academicYearContext->id(false);
+            $academicYearName = $academicYearId
+                ? (\App\Models\AcademicYear::query()->where('id', (int) $academicYearId)->value('name') ?? null)
+                : null;
 
             $validator = Validator::make($request->all(), [
                 'branch_id' => 'integer|exists:branches,id',
                 'name' => 'string|max:255',
                 'exam_term_id' => 'nullable|integer|exists:exam_terms,id',
                 'exam_type' => 'nullable|string|in:Midterm,Final,Quiz,Assignment,Practical,Other',
-                'academic_year' => 'string|max:20',
                 'start_date' => 'nullable|date',
                 'end_date' => 'nullable|date|after_or_equal:start_date',
                 'description' => 'nullable|string',
@@ -231,7 +246,7 @@ class ExamController extends Controller
 
             // Prepare update data with proper date formatting
             $updateData = $request->only([
-                'exam_term_id', 'branch_id', 'name', 'exam_type', 'academic_year', 'description', 'is_active'
+                'exam_term_id', 'branch_id', 'name', 'exam_type', 'description', 'is_active'
             ]);
             
             // Format dates properly
@@ -244,6 +259,8 @@ class ExamController extends Controller
             
             $exam->update([
                 ...$updateData,
+                'academic_year_id' => $academicYearId ? (int) $academicYearId : $exam->academic_year_id,
+                'academic_year' => $academicYearName ?? $exam->academic_year,
                 'updated_by' => $request->user()->id
             ]);
 

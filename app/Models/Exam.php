@@ -19,6 +19,7 @@ class Exam extends Model
         'name',
         'exam_type',
         'academic_year',
+        'academic_year_id',
         'start_date',
         'end_date',
         'total_marks',

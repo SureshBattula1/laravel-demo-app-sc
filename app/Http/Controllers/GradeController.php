@@ -17,6 +17,83 @@ class GradeController extends Controller
 {
     use PaginatesAndSorts;
 
+    private function resolveBranchIdForValue(Request $request, string $value): ?int
+    {
+        $branchId = $this->resolveRequestedBranchId($request);
+        if ($branchId) {
+            return $branchId;
+        }
+
+        // SuperAdmin without branch_id: try to find a unique match across accessible branches.
+        $user = $request->user();
+        if (!$user || $user->role !== 'SuperAdmin') {
+            return null;
+        }
+
+        $accessible = $this->getAccessibleBranchIds($request);
+        if ($accessible === 'all') {
+            $schoolId = $this->getCurrentSchoolId($request);
+            if (!$schoolId) return null;
+            $accessible = DB::table('branches')
+                ->where('school_id', $schoolId)
+                ->whereNull('deleted_at')
+                ->pluck('id')
+                ->toArray();
+        }
+
+        if (empty($accessible)) {
+            return null;
+        }
+
+        $matches = DB::table('grades')
+            ->select('branch_id')
+            ->where('value', $value)
+            ->whereIn('branch_id', $accessible)
+            ->distinct()
+            ->pluck('branch_id')
+            ->toArray();
+
+        if (count($matches) === 1) {
+            return (int) $matches[0];
+        }
+
+        return null;
+    }
+
+    private function resolveRequestedBranchId(Request $request): ?int
+    {
+        $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+
+        $requested = $request->query('branch_id') ?? $request->input('branch_id');
+        if ($requested !== null && $requested !== '') {
+            $requested = (int) $requested;
+        } else {
+            $requested = null;
+        }
+
+        // SuperAdmin: only filter to one branch when explicitly requested; otherwise show all accessible (all company branches).
+        if ($request->user() && $request->user()->role === 'SuperAdmin') {
+            if ($requested !== null) {
+                $ids = $accessibleBranchIds === 'all' ? [] : $accessibleBranchIds;
+                if ($accessibleBranchIds === 'all' || in_array($requested, $ids, true)) {
+                    return $requested;
+                }
+            }
+            return null;
+        }
+
+        if ($accessibleBranchIds === 'all') {
+            return $requested;
+        }
+
+        if ($requested && in_array($requested, $accessibleBranchIds, true)) {
+            return $requested;
+        }
+
+        $primary = (int) ($request->user()->branch_id ?? 0);
+        return $primary && in_array($primary, $accessibleBranchIds, true) ? $primary : null;
+    }
+
     /**
      * Get all grades with server-side pagination and sorting
      * OPTIMIZED: Added filtering for active grades in dropdown scenarios
@@ -24,24 +101,84 @@ class GradeController extends Controller
     public function index(Request $request)
     {
         try {
-            // 🚀 OPTIMIZED: Select only needed columns
+            $user = $request->user();
+            $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+            $branchId = $this->resolveRequestedBranchId($request);
+
+            // 🚀 OPTIMIZED: Select only needed columns (+ branch name for UI)
             $query = DB::table('grades')
-                ->select('id', 'value', 'label', 'description', 'order', 'category', 'is_active', 'created_at', 'updated_at');
+                ->leftJoin('branches', 'branches.id', '=', 'grades.branch_id')
+                ->leftJoin('schools', 'schools.id', '=', 'branches.school_id')
+                ->select(
+                    'grades.id',
+                    'grades.school_id',
+                    'grades.branch_id',
+                    'grades.value',
+                    'grades.label',
+                    'grades.description',
+                    'grades.order',
+                    'grades.category',
+                    'grades.is_active',
+                    'grades.created_at',
+                    'grades.updated_at',
+                    'branches.name as branch_name'
+                );
+
+            if ($branchId) {
+                $query->where('grades.branch_id', $branchId);
+            } else {
+                // SuperAdmin in company context: filter by company via join (fast, avoids huge whereIn lists).
+                if ($user && $user->role === 'SuperAdmin' && !empty($user->company_id)) {
+                    $query->where('schools.company_id', (int) $user->company_id);
+                } elseif ($accessibleBranchIds === 'all') {
+                    // SuperAdmin: show all branches within the current school by default.
+                    $schoolId = $this->getCurrentSchoolId($request);
+                    if ($schoolId) {
+                        $branchIds = DB::table('branches')
+                            ->where('school_id', $schoolId)
+                            ->whereNull('deleted_at')
+                            ->pluck('id')
+                            ->toArray();
+                        if (!empty($branchIds)) {
+                            $query->whereIn('grades.branch_id', $branchIds);
+                        } else {
+                            $query->whereRaw('1 = 0');
+                        }
+                    } else {
+                        $query->whereRaw('1 = 0');
+                    }
+                } else {
+                    // Other users: show all branches they can access.
+                    if (!empty($accessibleBranchIds)) {
+                        $query->whereIn('grades.branch_id', $accessibleBranchIds);
+                    } else {
+                        $query->whereRaw('1 = 0');
+                    }
+                }
+            }
             
             // Filter by active status if requested (common for dropdowns)
             if ($request->has('is_active')) {
                 $query->where('is_active', $request->boolean('is_active'));
             }
 
-            // Define sortable columns
-            $sortableColumns = ['value', 'label', 'order', 'category', 'is_active', 'created_at', 'updated_at'];
+            // Default sorting: group by branch, then grade order.
+            // If UI explicitly requests sort_by, paginateAndSort will apply it.
+            if (!$request->has('sort_by') && !$request->has('sort_direction') && !$request->has('sort_order')) {
+                $query->orderBy('grades.branch_id', 'asc')->orderBy('grades.order', 'asc');
+            }
 
-            // Apply pagination and sorting (default: 25 per page, sorted by order asc)
-            $grades = $this->paginateAndSort($query, $request, $sortableColumns, 'order', 'asc');
+            // Define sortable columns
+            $sortableColumns = ['branch_id', 'value', 'label', 'order', 'category', 'is_active', 'created_at', 'updated_at'];
+
+            // Apply pagination and sorting (default: 25 per page, sorted by branch_id asc)
+            $grades = $this->paginateAndSort($query, $request, $sortableColumns, 'branch_id', 'asc');
 
             // Transform the paginated data
             $transformedData = collect($grades->items())->map(function ($grade) {
                 return [
+                    'branch_id' => $grade->branch_id ? (int) $grade->branch_id : null,
+                    'branch_name' => $grade->branch_name ?? null,
                     'value' => $grade->value,
                     'label' => $grade->label,
                     'description' => $grade->description ?? null,
@@ -86,11 +223,21 @@ class GradeController extends Controller
     public function show($value)
     {
         try {
+            $request = request();
+            $branchId = $this->resolveBranchIdForValue($request, (string) $value);
             $grade = DB::table('grades')
+                ->where('branch_id', $branchId)
                 ->where('value', $value)
                 ->first();
 
             if (!$grade) {
+                // If SuperAdmin and multiple branches may have same value, return a clearer message.
+                if ($request->user() && $request->user()->role === 'SuperAdmin') {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Grade not found. Please specify branch_id.'
+                    ], 404);
+                }
                 return response()->json([
                     'success' => false,
                     'message' => 'Grade not found'
@@ -126,8 +273,16 @@ class GradeController extends Controller
     public function store(Request $request)
     {
         try {
+            $branchId = $this->resolveRequestedBranchId($request);
+            if (!$branchId) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No branch context available'
+                ], 422);
+            }
+
             $validator = Validator::make($request->all(), [
-                'value' => 'required|string|max:20|unique:grades,value',
+                'value' => 'required|string|max:20',
                 'label' => 'required|string|max:100',
                 'description' => 'nullable|string|max:500',
                 'order' => 'nullable|integer|min:0',
@@ -144,7 +299,17 @@ class GradeController extends Controller
 
             DB::beginTransaction();
 
+            $exists = DB::table('grades')->where('branch_id', $branchId)->where('value', $request->value)->exists();
+            if ($exists) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Grade value already exists for this branch'
+                ], 422);
+            }
+
             $gradeId = DB::table('grades')->insertGetId([
+                'school_id' => $this->getCurrentSchoolId($request),
+                'branch_id' => $branchId,
                 'value' => strip_tags($request->value),
                 'label' => strip_tags($request->label),
                 'description' => $request->description ? strip_tags($request->description) : null,
@@ -192,12 +357,13 @@ class GradeController extends Controller
     public function update(Request $request, $value)
     {
         try {
-            $grade = DB::table('grades')->where('value', $value)->first();
+            $branchId = $this->resolveBranchIdForValue($request, (string) $value);
+            $grade = DB::table('grades')->where('branch_id', $branchId)->where('value', $value)->first();
 
             if (!$grade) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Grade not found'
+                    'message' => 'Grade not found. Please specify branch_id.'
                 ], 404);
             }
 
@@ -237,10 +403,14 @@ class GradeController extends Controller
             $updateData['updated_at'] = now();
 
             DB::table('grades')
+                ->where('branch_id', $branchId)
                 ->where('value', $value)
                 ->update($updateData);
 
-            $updatedGrade = DB::table('grades')->where('value', $value)->first();
+            $updatedGrade = DB::table('grades')
+                ->where('branch_id', $branchId)
+                ->where('value', $value)
+                ->first();
 
             DB::commit();
 
@@ -279,18 +449,21 @@ class GradeController extends Controller
         try {
             DB::beginTransaction();
 
-            $grade = DB::table('grades')->where('value', $value)->first();
+            $request = request();
+            $branchId = $this->resolveBranchIdForValue($request, (string) $value);
+            $schoolId = $this->getCurrentSchoolId($request);
+            $grade = DB::table('grades')->where('branch_id', $branchId)->where('value', $value)->first();
             
             if (!$grade) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Grade not found'
+                    'message' => 'Grade not found. Please specify branch_id.'
                 ], 404);
             }
 
             // Check if grade has students or classes
-            $studentsCount = DB::table('students')->where('grade', $value)->count();
-            $classesCount = DB::table('classes')->where('grade', $value)->count();
+            $studentsCount = DB::table('students')->where('grade', $value)->where('branch_id', $branchId)->count();
+            $classesCount = DB::table('classes')->where('grade', $value)->where('branch_id', $branchId)->count();
 
             if ($studentsCount > 0 || $classesCount > 0) {
                 return response()->json([
@@ -299,7 +472,7 @@ class GradeController extends Controller
                 ], 400);
             }
 
-            DB::table('grades')->where('value', $value)->delete();
+            DB::table('grades')->where('branch_id', $branchId)->where('value', $value)->delete();
 
             DB::commit();
 
@@ -342,7 +515,8 @@ class GradeController extends Controller
             }
 
             // Get all grades (simple query, no complex filtering needed)
-            $grades = DB::table('grades')->get();
+            $branchId = $this->resolveRequestedBranchId($request);
+            $grades = DB::table('grades')->where('branch_id', $branchId)->get();
 
             // Transform data for export
             $exportData = collect($grades)->map(function($grade) {
