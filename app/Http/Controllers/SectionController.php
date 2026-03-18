@@ -26,6 +26,7 @@ class SectionController extends Controller
     public function index(Request $request)
     {
         try {
+            $user = $request->user();
             // 🚀 OPTIMIZED: Select specific columns and limit eager loading
             $query = Section::select([
                 'id', 'branch_id', 'name', 'code', 'grade_level', 'capacity',
@@ -48,7 +49,17 @@ class SectionController extends Controller
 
             // 🔥 APPLY BRANCH FILTERING - Restrict to accessible branches
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
-            if ($accessibleBranchIds !== 'all') {
+            if ($user && $user->role === 'SuperAdmin' && !empty($user->company_id) && !$request->filled('branch_id')) {
+                // SuperAdmin company context: filter by company via SQL subquery (fast, avoids big whereIn lists).
+                $query->whereIn('branch_id', function ($q) use ($user) {
+                    $q->select('branches.id')
+                        ->from('branches')
+                        ->join('schools', 'branches.school_id', '=', 'schools.id')
+                        ->where('schools.company_id', (int) $user->company_id)
+                        ->whereNull('schools.deleted_at')
+                        ->whereNull('branches.deleted_at');
+                });
+            } elseif ($accessibleBranchIds !== 'all') {
                 if (!empty($accessibleBranchIds)) {
                     $query->whereIn('branch_id', $accessibleBranchIds);
                 } else {
