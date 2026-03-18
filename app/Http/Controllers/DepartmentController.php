@@ -51,13 +51,18 @@ class DepartmentController extends Controller
             }
 
             // Branch filter (only allow if SuperAdmin/cross-branch user)
-            if ($request->has('branch_id') && $accessibleBranchIds === 'all') {
-                $query->where('branch_id', $request->branch_id);
+            if ($request->has('branch_id') && $request->branch_id !== '') {
+                $requestedBranchId = (int) $request->branch_id;
+                if ($accessibleBranchIds === 'all' || (is_array($accessibleBranchIds) && in_array($requestedBranchId, $accessibleBranchIds, true))) {
+                    $query->where('departments.branch_id', $requestedBranchId);
+                } else {
+                    $query->whereRaw('1 = 0');
+                }
             }
 
             // Status filter
             if ($request->has('is_active')) {
-                $query->where('is_active', filter_var($request->is_active, FILTER_VALIDATE_BOOLEAN));
+                $query->where('departments.is_active', filter_var($request->is_active, FILTER_VALIDATE_BOOLEAN));
             }
 
             // Secure search

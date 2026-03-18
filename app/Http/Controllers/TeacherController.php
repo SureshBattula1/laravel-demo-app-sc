@@ -28,21 +28,33 @@ class TeacherController extends Controller
     public function index(Request $request)
     {
         try {
-            // 🚀 OPTIMIZED: Select all necessary columns for list view
-            $query = Teacher::select([
-                'id', 'user_id', 'branch_id', 'department_id', 'reporting_manager_id',
-                'employee_id', 'category_type', 'designation', 'employee_type',
-                'gender', 'date_of_birth', 'joining_date', 'leaving_date',
-                'teacher_status', 'created_at', 'updated_at',
-                // ✅ Added essential display fields
-                'blood_group', 'religion', 'nationality', 'qualification', 'experience_years',
-                'current_address', 'permanent_address', 'city', 'state', 'pincode',
-                'emergency_contact_name', 'emergency_contact_phone', 'emergency_contact_relation',
-                'basic_salary', 'salary_grade', 'specialization', 'registration_number',
-                'bank_name', 'bank_account_number', 'bank_ifsc_code', 'pan_number', 'aadhar_number',
-                'subjects', 'classes_assigned', 'is_class_teacher',
-                'class_teacher_of_grade', 'class_teacher_of_section',
-                'extended_profile', 'documents', 'remarks'
+            // 🚀 OPTIMIZED: Select only columns needed for teacher list view
+            $query = Teacher::withTrashed()->select([
+                'id',
+                'user_id',
+                'branch_id',
+                'department_id',
+                'employee_id',
+                'category_type',
+                'designation',
+                'gender',
+                'joining_date',
+                'teacher_status',
+                'blood_group',
+                'religion',
+                'nationality',
+                'qualification',
+                'experience_years',
+                'aadhar_number',
+                'pan_number',
+                'city',
+                'state',
+                'emergency_contact_name',
+                'emergency_contact_phone',
+                'basic_salary',
+                'created_at',
+                'updated_at',
+                'deleted_at',
             ])
             ->with([
                 'user:id,first_name,last_name,email,phone,is_active',
@@ -58,7 +70,18 @@ class TeacherController extends Controller
 
             // 🔥 APPLY BRANCH FILTERING - Restrict to accessible branches
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
-            if ($accessibleBranchIds !== 'all') {
+            $user = $request->user();
+            if ($user && $user->role === 'SuperAdmin' && !empty($user->company_id) && !$request->filled('branch_id')) {
+                // SuperAdmin company context: filter by company via SQL subquery (fast, avoids big whereIn lists).
+                $query->whereIn('branch_id', function ($q) use ($user) {
+                    $q->select('branches.id')
+                        ->from('branches')
+                        ->join('schools', 'branches.school_id', '=', 'schools.id')
+                        ->where('schools.company_id', (int) $user->company_id)
+                        ->whereNull('schools.deleted_at')
+                        ->whereNull('branches.deleted_at');
+                });
+            } elseif ($accessibleBranchIds !== 'all') {
                 if (!empty($accessibleBranchIds)) {
                     $query->whereIn('branch_id', $accessibleBranchIds);
                 } else {
