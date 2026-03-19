@@ -45,14 +45,18 @@ class ExamController extends Controller
                 $query->where('exam_term_id', $request->exam_term_id);
             }
 
-            // Academic year scoping (Option A)
-            if ($academicYearId) {
+            // Academic year: prefer request (e.g. advanced search), else toolbar context
+            if ($request->filled('academic_year_id')) {
+                $query->where('academic_year_id', (int) $request->academic_year_id);
+            } elseif ($request->filled('academic_year')) {
+                $query->where('academic_year', $request->academic_year);
+            } elseif ($academicYearId) {
                 $query->where('academic_year_id', (int) $academicYearId);
             }
 
-            // Filter by exam type
+            // Filter by exam type (DB column is 'type')
             if ($request->has('exam_type')) {
-                $query->where('exam_type', $request->exam_type);
+                $query->where('type', $request->exam_type);
             }
 
             // OPTIMIZED Search by name - prefix search for better index usage
@@ -60,7 +64,7 @@ class ExamController extends Controller
                 $search = strip_tags($request->search);
                 $query->where(function($q) use ($search) {
                     $q->where('name', 'like', "{$search}%")  // ✅ Can use index
-                      ->orWhere('exam_type', 'like', "{$search}%")
+                      ->orWhere('type', 'like', "{$search}%")
                       ->orWhere('academic_year', 'like', "{$search}%")
                       ->orWhereHas('branch', function($q) use ($search) {
                           $q->where('name', 'like', "{$search}%")
@@ -78,12 +82,34 @@ class ExamController extends Controller
                 $query->where('is_active', $request->boolean('is_active'));
             }
 
+            // Sorting
+            $sortBy = $request->get('sort_by', 'created_at');
+            $sortDir = strtolower($request->get('sort_direction', 'desc')) === 'asc' ? 'asc' : 'desc';
+            $sortableColumns = ['name', 'branch.name', 'exam_term_name', 'academic_year', 'status_display', 'created_at'];
+            if (!in_array($sortBy, $sortableColumns)) {
+                $sortBy = 'created_at';
+            }
+            if ($sortBy === 'branch.name') {
+                $query->orderBy(
+                    DB::raw('(SELECT name FROM branches WHERE branches.id = exams.branch_id)'),
+                    $sortDir
+                );
+            } elseif ($sortBy === 'exam_term_name') {
+                $query->orderBy(
+                    DB::raw('(SELECT name FROM exam_terms WHERE exam_terms.id = exams.exam_term_id)'),
+                    $sortDir
+                );
+            } elseif ($sortBy === 'status_display') {
+                $query->orderBy('is_active', $sortDir);
+            } else {
+                $query->orderBy($sortBy, $sortDir);
+            }
+
             // OPTIMIZED: Add pagination to prevent loading all exams
-            $perPage = $request->get('per_page', 25);
-            $page = $request->get('page', 1);
-            
-            $exams = $query->orderBy('created_at', 'desc')
-                ->paginate($perPage, ['*'], 'page', $page);
+            $perPage = (int) $request->get('per_page', 25);
+            $perPage = max(1, min(100, $perPage));
+            $page = (int) $request->get('page', 1);
+            $exams = $query->paginate($perPage, ['*'], 'page', $page);
 
             return response()->json([
                 'success' => true,

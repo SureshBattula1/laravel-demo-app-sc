@@ -23,7 +23,7 @@ class ExamScheduleController extends Controller
                 'exam_date', 'start_time', 'end_time', 'duration', 
                 'total_marks', 'passing_marks', 'room_number', 'invigilator_id', 'instructions', 'created_at'
             ])->with([
-                'exam:id,name,exam_term_id,branch_id,school_id',
+                'exam:id,name,exam_term_id,branch_id,school_id,academic_year,academic_year_id',
                 'exam.examTerm:id,name',
                 'exam.branch:id,name,code',
                 'subject:id,name,code',
@@ -86,8 +86,23 @@ class ExamScheduleController extends Controller
                 $query->where('exam_id', $request->exam_id);
             }
 
+            // Filter by academic year (schedules belong to exams; scope by exam's academic year)
+            if ($request->filled('academic_year_id')) {
+                $query->whereHas('exam', function ($q) use ($request) {
+                    $q->where('academic_year_id', (int) $request->academic_year_id);
+                });
+            } elseif ($request->filled('academic_year')) {
+                $query->whereHas('exam', function ($q) use ($request) {
+                    $q->where('academic_year', $request->academic_year);
+                });
+            }
+
             if ($request->has('grade')) {
                 $query->where('grade', $request->grade);
+            }
+
+            if ($request->filled('section')) {
+                $query->where('section', $request->section);
             }
 
             if ($request->has('exam_date')) {
@@ -214,7 +229,13 @@ class ExamScheduleController extends Controller
             if (!$this->canAccessSchedule($request, $schedule)) {
                 return response()->json(['success' => false, 'message' => 'Schedule not found'], 404);
             }
-            $schedule->update($request->all());
+            $data = $request->all();
+            // Map grade_level to grade (form sends grade_level; DB column is grade)
+            if (array_key_exists('grade_level', $data)) {
+                $data['grade'] = $data['grade_level'];
+                unset($data['grade_level']);
+            }
+            $schedule->update($data);
             return response()->json(['success' => true, 'data' => $schedule->fresh(['exam', 'subject']), 'message' => 'Schedule updated']);
         } catch (\Exception $e) {
             return response()->json(['success' => false, 'message' => 'Failed to update schedule'], 500);
