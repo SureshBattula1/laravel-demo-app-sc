@@ -7,6 +7,7 @@ use App\Models\Student;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 use Carbon\Carbon;
 
@@ -21,24 +22,36 @@ class LeaveController extends Controller
     {
         try {
             $type = $request->get('type', 'student'); // student or teacher
+            $studentHasAcademicYear = $this->tableHasAcademicYearId('student_leaves');
+            $teacherHasAcademicYear = $this->tableHasAcademicYearId('teacher_leaves');
             
             if ($type === 'student') {
                 $query = DB::table('student_leaves')
                     ->join('users', 'student_leaves.student_id', '=', 'users.id')
                     ->leftJoin('students', 'users.id', '=', 'students.user_id')
-                    ->leftJoin('grades', 'students.grade', '=', 'grades.value')
+                    ->leftJoin('grades', function ($join) {
+                        $join->on('students.grade', '=', 'grades.value')
+                            ->whereColumn('grades.branch_id', '=', 'student_leaves.branch_id');
+                    })
                     ->leftJoin('branches', 'student_leaves.branch_id', '=', 'branches.id')
                     ->select(
                         'student_leaves.*',
                         'users.first_name',
                         'users.last_name',
                         'users.email',
+                        'users.phone as mobile_number',
                         'students.admission_number',
                         'students.grade',
                         'grades.label as grade_label',
                         'students.section',
                         'branches.name as branch_name'
                     );
+                if ($studentHasAcademicYear) {
+                    $query->leftJoin('academic_years as leave_academic_years', 'student_leaves.academic_year_id', '=', 'leave_academic_years.id')
+                        ->addSelect('leave_academic_years.name as academic_year_name');
+                } else {
+                    $query->addSelect(DB::raw('NULL as academic_year_name'));
+                }
             } else {
                 $query = DB::table('teacher_leaves')
                     ->join('users', 'teacher_leaves.teacher_id', '=', 'users.id')
@@ -49,10 +62,17 @@ class LeaveController extends Controller
                         'users.first_name',
                         'users.last_name',
                         'users.email',
+                        'users.phone as mobile_number',
                         'teachers.employee_id',
                         'teachers.designation',
                         'branches.name as branch_name'
                     );
+                if ($teacherHasAcademicYear) {
+                    $query->leftJoin('academic_years as leave_academic_years', 'teacher_leaves.academic_year_id', '=', 'leave_academic_years.id')
+                        ->addSelect('leave_academic_years.name as academic_year_name');
+                } else {
+                    $query->addSelect(DB::raw('NULL as academic_year_name'));
+                }
             }
 
             // Apply branch filtering
@@ -65,9 +85,14 @@ class LeaveController extends Controller
                 }
             }
 
-            // Filters
-            if ($request->has('branch_id') && $accessibleBranchIds === 'all') {
-                $query->where($type . '_leaves.branch_id', $request->branch_id);
+            // Advanced search: branch filter (apply when request has branch_id and user is allowed to filter by it)
+            if ($request->filled('branch_id')) {
+                $requestBranchId = (int) $request->branch_id;
+                if ($accessibleBranchIds === 'all') {
+                    $query->where($type . '_leaves.branch_id', $requestBranchId);
+                } elseif (is_array($accessibleBranchIds) && in_array($requestBranchId, $accessibleBranchIds, false)) {
+                    $query->where($type . '_leaves.branch_id', $requestBranchId);
+                }
             }
 
             if ($request->has('from_date')) {
@@ -84,6 +109,9 @@ class LeaveController extends Controller
 
             if ($request->has('leave_type')) {
                 $query->where($type . '_leaves.leave_type', $request->leave_type);
+            }
+            if ($request->has('academic_year_id') && (($type === 'student' && $studentHasAcademicYear) || ($type === 'teacher' && $teacherHasAcademicYear))) {
+                $query->where($type . '_leaves.academic_year_id', $request->academic_year_id);
             }
 
             if ($type === 'student') {
@@ -138,6 +166,12 @@ class LeaveController extends Controller
                     'branches.name',
                     'teachers.employee_id'
                 ];
+            if ($type === 'student' && $studentHasAcademicYear) {
+                $sortableColumns[] = 'student_leaves.academic_year_id';
+            }
+            if ($type === 'teacher' && $teacherHasAcademicYear) {
+                $sortableColumns[] = 'teacher_leaves.academic_year_id';
+            }
 
             // Apply pagination and sorting
             $leaves = $this->paginateAndSort(
@@ -148,10 +182,20 @@ class LeaveController extends Controller
                 'desc'
             );
 
+            $items = collect($leaves->items())->map(function ($row) {
+                $row = (array) $row;
+                $from = $row['from_date'] ?? null;
+                $to = $row['to_date'] ?? null;
+                if ($from && $to) {
+                    $row['total_days'] = $this->calculateTotalDays($from, $to);
+                }
+                return $row;
+            })->all();
+
             return response()->json([
                 'success' => true,
                 'message' => 'Leave records retrieved successfully',
-                'data' => $leaves->items(),
+                'data' => $items,
                 'meta' => [
                     'current_page' => $leaves->currentPage(),
                     'per_page' => $leaves->perPage(),
@@ -180,9 +224,11 @@ class LeaveController extends Controller
         DB::beginTransaction();
         try {
             $type = $request->get('type', 'student');
+            $studentHasAcademicYear = $this->tableHasAcademicYearId('student_leaves');
+            $teacherHasAcademicYear = $this->tableHasAcademicYearId('teacher_leaves');
             
             if ($type === 'student') {
-                $validator = Validator::make($request->all(), [
+                $rules = [
                     'student_id' => 'required|exists:users,id',
                     'branch_id' => 'nullable|exists:branches,id',
                     'from_date' => 'required|date',
@@ -190,7 +236,11 @@ class LeaveController extends Controller
                     'leave_type' => 'required|in:Sick Leave,Casual Leave,Medical Leave,Family Emergency,Other',
                     'reason' => 'required|string',
                     'remarks' => 'nullable|string'
-                ]);
+                ];
+                if ($studentHasAcademicYear) {
+                    $rules['academic_year_id'] = 'nullable|exists:academic_years,id';
+                }
+                $validator = Validator::make($request->all(), $rules);
 
                 if ($validator->fails()) {
                     return response()->json([
@@ -199,11 +249,14 @@ class LeaveController extends Controller
                     ], 422);
                 }
 
-                DB::table('student_leaves')->insert([
+                $totalDays = $this->calculateTotalDays($request->from_date, $request->to_date);
+
+                $insertData = [
                     'student_id' => $request->student_id,
                     'branch_id' => $request->branch_id,
                     'from_date' => $request->from_date,
                     'to_date' => $request->to_date,
+                    'total_days' => $totalDays,
                     'leave_type' => $request->leave_type,
                     'status' => 'Pending',
                     'reason' => $request->reason,
@@ -211,9 +264,19 @@ class LeaveController extends Controller
                     'created_by' => auth()->id() ?? null,
                     'created_at' => now(),
                     'updated_at' => now()
-                ]);
+                ];
+                if ($studentHasAcademicYear) {
+                    $insertData['academic_year_id'] = $request->academic_year_id;
+                }
+                if (Schema::hasColumn('student_leaves', 'school_id')) {
+                    $schoolId = $request->branch_id
+                        ? DB::table('branches')->where('id', $request->branch_id)->value('school_id')
+                        : null;
+                    $insertData['school_id'] = $schoolId;
+                }
+                DB::table('student_leaves')->insert($insertData);
             } else {
-                $validator = Validator::make($request->all(), [
+                $rules = [
                     'teacher_id' => 'required|exists:users,id',
                     'branch_id' => 'nullable|exists:branches,id',
                     'from_date' => 'required|date',
@@ -222,7 +285,11 @@ class LeaveController extends Controller
                     'reason' => 'required|string',
                     'remarks' => 'nullable|string',
                     'substitute_teacher_id' => 'nullable|exists:users,id'
-                ]);
+                ];
+                if ($teacherHasAcademicYear) {
+                    $rules['academic_year_id'] = 'nullable|exists:academic_years,id';
+                }
+                $validator = Validator::make($request->all(), $rules);
 
                 if ($validator->fails()) {
                     return response()->json([
@@ -231,11 +298,14 @@ class LeaveController extends Controller
                     ], 422);
                 }
 
-                DB::table('teacher_leaves')->insert([
+                $totalDays = $this->calculateTotalDays($request->from_date, $request->to_date);
+
+                $insertData = [
                     'teacher_id' => $request->teacher_id,
                     'branch_id' => $request->branch_id,
                     'from_date' => $request->from_date,
                     'to_date' => $request->to_date,
+                    'total_days' => $totalDays,
                     'leave_type' => $request->leave_type,
                     'status' => 'Pending',
                     'reason' => $request->reason,
@@ -244,7 +314,11 @@ class LeaveController extends Controller
                     'created_by' => auth()->id() ?? null,
                     'created_at' => now(),
                     'updated_at' => now()
-                ]);
+                ];
+                if ($teacherHasAcademicYear) {
+                    $insertData['academic_year_id'] = $request->academic_year_id;
+                }
+                DB::table('teacher_leaves')->insert($insertData);
             }
 
             DB::commit();
@@ -272,12 +346,18 @@ class LeaveController extends Controller
     {
         try {
             $type = request()->get('type', 'student');
+            $studentHasAcademicYear = $this->tableHasAcademicYearId('student_leaves');
+            $teacherHasAcademicYear = $this->tableHasAcademicYearId('teacher_leaves');
             
             if ($type === 'student') {
                 $leave = DB::table('student_leaves')
                     ->join('users', 'student_leaves.student_id', '=', 'users.id')
+                    ->leftJoin('users as approver_users', 'student_leaves.approved_by', '=', 'approver_users.id')
                     ->leftJoin('students', 'users.id', '=', 'students.user_id')
-                    ->leftJoin('grades', 'students.grade', '=', 'grades.value')
+                    ->leftJoin('grades', function ($join) {
+                        $join->on('students.grade', '=', 'grades.value')
+                            ->whereColumn('grades.branch_id', '=', 'student_leaves.branch_id');
+                    })
                     ->leftJoin('branches', 'student_leaves.branch_id', '=', 'branches.id')
                     ->where('student_leaves.id', $id)
                     ->select(
@@ -285,17 +365,26 @@ class LeaveController extends Controller
                         'users.first_name',
                         'users.last_name',
                         'users.email',
+                        DB::raw('COALESCE(users.mobile, users.phone) as mobile_number'),
                         'students.admission_number',
                         'students.grade',
                         'grades.label as grade_label',
                         'students.section',
                         'branches.name as branch_name',
+                        DB::raw("TRIM(CONCAT(COALESCE(approver_users.first_name, ''), ' ', COALESCE(approver_users.last_name, ''))) as approved_by_name"),
                         DB::raw("'student' as leave_for")
-                    )
-                    ->first();
+                    );
+                if ($studentHasAcademicYear) {
+                    $leave->leftJoin('academic_years as leave_academic_years', 'student_leaves.academic_year_id', '=', 'leave_academic_years.id')
+                        ->addSelect('leave_academic_years.name as academic_year_name');
+                } else {
+                    $leave->addSelect(DB::raw('NULL as academic_year_name'));
+                }
+                $leave = $leave->first();
             } else {
                 $leave = DB::table('teacher_leaves')
                     ->join('users', 'teacher_leaves.teacher_id', '=', 'users.id')
+                    ->leftJoin('users as approver_users', 'teacher_leaves.approved_by', '=', 'approver_users.id')
                     ->leftJoin('teachers', 'users.id', '=', 'teachers.user_id')
                     ->leftJoin('branches', 'teacher_leaves.branch_id', '=', 'branches.id')
                     ->where('teacher_leaves.id', $id)
@@ -304,12 +393,20 @@ class LeaveController extends Controller
                         'users.first_name',
                         'users.last_name',
                         'users.email',
+                        DB::raw('COALESCE(users.mobile, users.phone) as mobile_number'),
                         'teachers.employee_id',
                         'teachers.designation',
                         'branches.name as branch_name',
+                        DB::raw("TRIM(CONCAT(COALESCE(approver_users.first_name, ''), ' ', COALESCE(approver_users.last_name, ''))) as approved_by_name"),
                         DB::raw("'teacher' as leave_for")
-                    )
-                    ->first();
+                    );
+                if ($teacherHasAcademicYear) {
+                    $leave->leftJoin('academic_years as leave_academic_years', 'teacher_leaves.academic_year_id', '=', 'leave_academic_years.id')
+                        ->addSelect('leave_academic_years.name as academic_year_name');
+                } else {
+                    $leave->addSelect(DB::raw('NULL as academic_year_name'));
+                }
+                $leave = $leave->first();
             }
             
             if (!$leave) {
@@ -317,6 +414,13 @@ class LeaveController extends Controller
                     'success' => false,
                     'message' => 'Leave record not found'
                 ], 404);
+            }
+
+            $leave = (array) $leave;
+            $from = $leave['from_date'] ?? null;
+            $to = $leave['to_date'] ?? null;
+            if ($from && $to) {
+                $leave['total_days'] = $this->calculateTotalDays($from, $to);
             }
             
             return response()->json([
@@ -341,15 +445,20 @@ class LeaveController extends Controller
         try {
             $type = $request->get('type', 'student');
             $table = $type === 'student' ? 'student_leaves' : 'teacher_leaves';
+            $hasAcademicYear = $this->tableHasAcademicYearId($table);
 
-            $validator = Validator::make($request->all(), [
+            $rules = [
                 'status' => 'nullable|in:Pending,Approved,Rejected,Cancelled',
                 'from_date' => 'nullable|date',
                 'to_date' => 'nullable|date|after_or_equal:from_date',
                 'leave_type' => 'nullable|string',
                 'reason' => 'nullable|string',
                 'remarks' => 'nullable|string'
-            ]);
+            ];
+            if ($hasAcademicYear) {
+                $rules['academic_year_id'] = 'nullable|exists:academic_years,id';
+            }
+            $validator = Validator::make($request->all(), $rules);
 
             if ($validator->fails()) {
                 return response()->json([
@@ -379,6 +488,12 @@ class LeaveController extends Controller
 
             if ($request->has('from_date')) $updateData['from_date'] = $request->from_date;
             if ($request->has('to_date')) $updateData['to_date'] = $request->to_date;
+            if ($hasAcademicYear && $request->has('academic_year_id')) $updateData['academic_year_id'] = $request->academic_year_id;
+            if ($request->has('from_date') || $request->has('to_date')) {
+                $from = $request->has('from_date') ? $request->from_date : $leave->from_date;
+                $to = $request->has('to_date') ? $request->to_date : $leave->to_date;
+                $updateData['total_days'] = $this->calculateTotalDays($from, $to);
+            }
             if ($request->has('leave_type')) $updateData['leave_type'] = $request->leave_type;
             if ($request->has('reason')) $updateData['reason'] = $request->reason;
             if ($request->has('remarks')) $updateData['remarks'] = $request->remarks;
@@ -432,6 +547,7 @@ class LeaveController extends Controller
     public function getStudentLeaves($studentId)
     {
         try {
+            $hasAcademicYear = $this->tableHasAcademicYearId('student_leaves');
             // Do NOT filter by academic_year - leaves may fall outside the student's
             // academic year range (e.g. leave in March when year is July-June), causing
             // them to not show. Use student_id + optional from_date/to_date only.
@@ -446,7 +562,14 @@ class LeaveController extends Controller
                 $baseQuery->whereDate('to_date', '<=', request('to_date'));
             }
             
-            $leaves = (clone $baseQuery)->orderBy('created_at', 'desc')->get();
+            $leavesQuery = (clone $baseQuery)->orderBy('student_leaves.created_at', 'desc');
+            if ($hasAcademicYear) {
+                $leavesQuery->leftJoin('academic_years as leave_academic_years', 'student_leaves.academic_year_id', '=', 'leave_academic_years.id')
+                    ->select('student_leaves.*', 'leave_academic_years.name as academic_year_name');
+            } else {
+                $leavesQuery->select('student_leaves.*', DB::raw('NULL as academic_year_name'));
+            }
+            $leaves = $leavesQuery->get();
 
             // Calculate summary
             $summaryQuery = (clone $baseQuery)
@@ -488,6 +611,7 @@ class LeaveController extends Controller
     public function getTeacherLeaves($teacherId)
     {
         try {
+            $hasAcademicYear = $this->tableHasAcademicYearId('teacher_leaves');
             $baseQuery = DB::table('teacher_leaves')
                 ->where('teacher_id', $teacherId);
             
@@ -499,7 +623,14 @@ class LeaveController extends Controller
                 $baseQuery->whereDate('to_date', '<=', request('to_date'));
             }
             
-            $leaves = (clone $baseQuery)->orderBy('created_at', 'desc')->get();
+            $leavesQuery = (clone $baseQuery)->orderBy('teacher_leaves.created_at', 'desc');
+            if ($hasAcademicYear) {
+                $leavesQuery->leftJoin('academic_years as leave_academic_years', 'teacher_leaves.academic_year_id', '=', 'leave_academic_years.id')
+                    ->select('teacher_leaves.*', 'leave_academic_years.name as academic_year_name');
+            } else {
+                $leavesQuery->select('teacher_leaves.*', DB::raw('NULL as academic_year_name'));
+            }
+            $leaves = $leavesQuery->get();
 
             // Calculate summary
             $summaryQuery = (clone $baseQuery)
@@ -558,6 +689,31 @@ class LeaveController extends Controller
             'start' => $startDate->format('Y-m-d'),
             'end' => $endDate->format('Y-m-d')
         ];
+    }
+
+    /**
+     * Calculate total days between from_date and to_date (inclusive).
+     */
+    private function calculateTotalDays(?string $fromDate, ?string $toDate): int
+    {
+        if (!$fromDate || !$toDate) {
+            return 1;
+        }
+        $from = Carbon::parse($fromDate)->startOfDay();
+        $to = Carbon::parse($toDate)->startOfDay();
+        return max(1, $from->diffInDays($to) + 1);
+    }
+
+    /**
+     * Backward compatibility for environments not migrated yet.
+     */
+    private function tableHasAcademicYearId(string $table): bool
+    {
+        try {
+            return Schema::hasTable($table) && Schema::hasColumn($table, 'academic_year_id');
+        } catch (\Throwable $e) {
+            return false;
+        }
     }
 }
 
