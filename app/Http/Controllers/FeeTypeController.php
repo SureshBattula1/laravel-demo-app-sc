@@ -250,7 +250,8 @@ class FeeTypeController extends Controller
     {
         try {
             $feeType = FeeType::findOrFail($id);
-            $feeType->is_active = !$feeType->is_active;
+            // Use deterministic 0/1 toggle to avoid truthy string edge-cases.
+            $feeType->is_active = ((int) $feeType->is_active) === 1 ? 0 : 1;
             $feeType->save();
             $feeType->load('branch');
 

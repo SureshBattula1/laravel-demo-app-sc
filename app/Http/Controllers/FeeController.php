@@ -24,7 +24,10 @@ class FeeController extends Controller
     {
         try {
             $query = FeeStructure::with(['branch', 'creator']);
-            $academicYearId = $this->academicYearContext->id(false);
+            // Use academic_year_id from request if provided, otherwise from context
+            $academicYearId = $request->filled('academic_year_id')
+                ? (int) $request->academic_year_id
+                : $this->academicYearContext->id(false);
 
             // 🔥 APPLY SCHOOL FILTERING - School-level isolation
             $schoolId = $this->getCurrentSchoolId($request);
@@ -42,8 +45,14 @@ class FeeController extends Controller
                 }
             }
 
-            if ($request->has('branch_id') && $accessibleBranchIds === 'all') {
-                $query->where('branch_id', $request->branch_id);
+            // Apply branch filter from advanced search when provided
+            if ($request->filled('branch_id')) {
+                $requestedBranchId = (int) $request->branch_id;
+                if ($accessibleBranchIds === 'all') {
+                    $query->where('branch_id', $requestedBranchId);
+                } elseif (is_array($accessibleBranchIds) && in_array($requestedBranchId, $accessibleBranchIds)) {
+                    $query->where('branch_id', $requestedBranchId);
+                }
             }
 
             if ($request->has('grade')) {
@@ -56,6 +65,10 @@ class FeeController extends Controller
 
             if ($request->has('fee_type')) {
                 $query->where('fee_type', $request->fee_type);
+            }
+
+            if ($request->has('is_active')) {
+                $query->where('is_active', $request->boolean('is_active'));
             }
 
             // OPTIMIZED Search filter - prefix search for better index usage
@@ -120,13 +133,17 @@ class FeeController extends Controller
 
         DB::beginTransaction();
         try {
-            $academicYearId = $this->academicYearContext->id(false);
+            // Use academic_year_id from request if provided, otherwise from context
+            $academicYearId = $request->filled('academic_year_id')
+                ? (int) $request->academic_year_id
+                : $this->academicYearContext->id(false);
             $academicYearName = $academicYearId
                 ? (\App\Models\AcademicYear::query()->where('id', (int) $academicYearId)->value('name') ?? null)
                 : null;
 
             $validator = Validator::make($request->all(), [
                 'branch_id' => 'required|exists:branches,id',
+                'academic_year_id' => 'nullable|exists:academic_years,id',
                 'grade' => 'required|string|max:50',
                 'fee_type' => 'required|string|max:255',
                 'amount' => 'required|numeric|min:0',
@@ -188,13 +205,17 @@ class FeeController extends Controller
         DB::beginTransaction();
         try {
             $structure = FeeStructure::findOrFail($id);
-            $academicYearId = $this->academicYearContext->id(false);
+            // Use academic_year_id from request if provided, otherwise keep existing
+            $academicYearId = $request->filled('academic_year_id')
+                ? (int) $request->academic_year_id
+                : ($structure->academic_year_id ?? $this->academicYearContext->id(false));
             $academicYearName = $academicYearId
                 ? (\App\Models\AcademicYear::query()->where('id', (int) $academicYearId)->value('name') ?? null)
-                : null;
+                : $structure->academic_year;
 
             $validator = Validator::make($request->all(), [
                 'grade' => 'string|max:50',
+                'academic_year_id' => 'nullable|exists:academic_years,id',
                 'fee_type' => 'string|max:255',
                 'amount' => 'numeric|min:0',
                 'due_date' => 'nullable|date',
