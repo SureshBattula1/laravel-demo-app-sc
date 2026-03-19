@@ -349,7 +349,10 @@ class FeeController extends Controller
                 ->leftJoin('students as s', 'u.id', '=', 's.user_id')
                 ->leftJoin('fee_structures as fs', 'fp.fee_structure_id', '=', 'fs.id')
                 ->leftJoin('branches as b', 'fs.branch_id', '=', 'b.id') // Get branch from fee_structure
-                ->leftJoin('grades as g', 's.grade', '=', 'g.value')
+                ->leftJoin('grades as g', function ($join) {
+                    $join->on('s.grade', '=', 'g.value');
+                    $join->on('s.branch_id', '=', 'g.branch_id'); // grades are branch-specific: one row per (grade, section)
+                })
                 ->whereBetween('fp.payment_date', [$fromDate, $toDate])
                 ->whereIn('fp.payment_status', ['Completed', 'Partial']);
 
