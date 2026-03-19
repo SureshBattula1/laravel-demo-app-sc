@@ -13,6 +13,7 @@ class SectionSubject extends Model
         'teacher_id',
         'branch_id',
         'school_id',
+        'academic_year_id',
         'academic_year',
         'is_active'
     ];
@@ -43,6 +44,11 @@ class SectionSubject extends Model
     public function branch(): BelongsTo
     {
         return $this->belongsTo(Branch::class);
+    }
+
+    public function academicYear(): BelongsTo
+    {
+        return $this->belongsTo(AcademicYear::class);
     }
 }
 

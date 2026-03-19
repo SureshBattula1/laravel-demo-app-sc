@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Traits\PaginatesAndSorts;
 use App\Models\Branch;
 use App\Models\Student;
+use App\Models\AcademicYear;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -34,7 +35,14 @@ class AttendanceController extends Controller
                 $query = DB::table('student_attendance')
                     ->join('students', 'student_attendance.student_id', '=', 'students.user_id')
                     ->join('users', 'students.user_id', '=', 'users.id')
-                    ->leftJoin('grades', 'students.grade', '=', 'grades.value')
+                    ->leftJoin('branches', 'student_attendance.branch_id', '=', 'branches.id')
+                    ->leftJoin('grades', function ($join) {
+                        $join->on('grades.value', '=', 'students.grade');
+                        // Prevent duplicate rows when grades are branch-specific
+                        if (\Illuminate\Support\Facades\Schema::hasColumn('grades', 'branch_id')) {
+                            $join->on('grades.branch_id', '=', 'students.branch_id');
+                        }
+                    })
                     ->select(
                         'student_attendance.*',
                         'users.first_name',
@@ -43,7 +51,8 @@ class AttendanceController extends Controller
                         'students.admission_number',
                         'students.grade',
                         'grades.label as grade_label',
-                        'students.section'
+                        'students.section',
+                        'branches.name as branch_name'
                     );
             } else {
                 $query = DB::table('teacher_attendance')
@@ -74,9 +83,18 @@ class AttendanceController extends Controller
                 }
             }
 
-            // Filters (only allow if SuperAdmin/cross-branch user)
-            if ($request->has('branch_id') && $accessibleBranchIds === 'all') {
-                $query->where($type . '_attendance.branch_id', $request->branch_id);
+            // Filters: always respect requested branch_id if it is within accessible scope
+            if ($request->has('branch_id') && $request->filled('branch_id')) {
+                $requestedBranchId = (int) $request->input('branch_id');
+
+                if ($accessibleBranchIds === 'all') {
+                    $query->where($type . '_attendance.branch_id', $requestedBranchId);
+                } elseif (is_array($accessibleBranchIds) && in_array($requestedBranchId, $accessibleBranchIds, true)) {
+                    $query->where($type . '_attendance.branch_id', $requestedBranchId);
+                } else {
+                    // Requested branch is outside accessible scope -> return no rows
+                    $query->whereRaw('1 = 0');
+                }
             }
 
             // Academic year scoping (Option A)
@@ -188,10 +206,14 @@ class AttendanceController extends Controller
         DB::beginTransaction();
         try {
             $type = $request->get('type', 'student');
-            $academicYearId = $request->attributes->get('academic_year_id');
+            // Resolve academic year (body > middleware attribute > by name > current)
+            $academicYearId = $request->attributes->get('academic_year_id')
+                ?? $request->input('academic_year_id')
+                ?? ($request->filled('academic_year') ? AcademicYear::query()->where('name', $request->input('academic_year'))->value('id') : null)
+                ?? AcademicYear::current()->value('id');
             $academicYearName = $academicYearId
-                ? (\App\Models\AcademicYear::query()->where('id', (int) $academicYearId)->value('name') ?? null)
-                : null;
+                ? (AcademicYear::query()->where('id', (int) $academicYearId)->value('name') ?? $request->input('academic_year'))
+                : $request->input('academic_year');
             
             if ($type === 'student') {
                 $validator = Validator::make($request->all(), [
@@ -332,10 +354,14 @@ class AttendanceController extends Controller
             $marked = 0;
             $errors = [];
 
-            $academicYearId = $request->attributes->get('academic_year_id');
+            // Resolve academic year (body > middleware attribute > by name > current)
+            $academicYearId = $request->attributes->get('academic_year_id')
+                ?? $request->input('academic_year_id')
+                ?? ($request->filled('academic_year') ? AcademicYear::query()->where('name', $request->input('academic_year'))->value('id') : null)
+                ?? AcademicYear::current()->value('id');
             $academicYearName = $academicYearId
-                ? (\App\Models\AcademicYear::query()->where('id', (int) $academicYearId)->value('name') ?? null)
-                : null;
+                ? (AcademicYear::query()->where('id', (int) $academicYearId)->value('name') ?? $request->input('academic_year'))
+                : $request->input('academic_year');
 
             $branch = Branch::find($request->branch_id);
             $schoolId = $branch ? $branch->school_id : null;
@@ -393,11 +419,24 @@ class AttendanceController extends Controller
 
             DB::commit();
 
+            // If nothing was marked, treat as failure so UI doesn't show false success
+            if ($marked === 0) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No attendance records were saved. Please check errors and payload (grade/section, IDs, academic year).',
+                    'errors' => $errors,
+                ], 422);
+            }
+
             return response()->json([
                 'success' => true,
                 'message' => "Bulk attendance marked successfully",
-                'marked' => $marked,
-                'errors' => $errors
+                'data' => [
+                    'marked' => $marked,
+                    'errors' => $errors,
+                    'academic_year_id' => $academicYearId ? (int) $academicYearId : null,
+                    'academic_year' => $academicYearName,
+                ]
             ]);
 
         } catch (\Exception $e) {
@@ -1196,6 +1235,14 @@ class AttendanceController extends Controller
         $baseQuery = DB::table('student_attendance as sa')
             ->whereBetween('sa.date', [$fromDate, $toDate]);
 
+        // Academic year scoping (from toolbar dropdown via middleware)
+        $academicYearId = $request->attributes->get('academic_year_id');
+        if ($academicYearId) {
+            $baseQuery->where('sa.academic_year_id', (int) $academicYearId);
+        } elseif ($request->filled('academic_year')) {
+            $baseQuery->where('sa.academic_year', $request->input('academic_year'));
+        }
+
         // Apply school filtering (only if school_id is set and not null)
         $schoolId = $this->getCurrentSchoolId($request);
         if ($schoolId) {
@@ -1220,13 +1267,24 @@ class AttendanceController extends Controller
             $baseQuery->where('sa.branch_id', $request->branch_id);
         }
 
-        // For breakdown queries, we need joins
+        // For breakdown queries, we need joins (grades join must be branch-specific to avoid duplicate rows)
         $breakdownQuery = DB::table('student_attendance as sa')
             ->join('students as s', 'sa.student_id', '=', 's.user_id')
             ->join('users as u', 's.user_id', '=', 'u.id')
-            ->leftJoin('grades as g', 's.grade', '=', 'g.value')
+            ->leftJoin('grades as g', function ($join) {
+                $join->on('g.value', '=', 's.grade');
+                if (\Illuminate\Support\Facades\Schema::hasColumn('grades', 'branch_id')) {
+                    $join->on('g.branch_id', '=', 's.branch_id');
+                }
+            })
             ->whereBetween('sa.date', [$fromDate, $toDate])
             ->whereNull('s.deleted_at');
+
+        if ($academicYearId) {
+            $breakdownQuery->where('sa.academic_year_id', (int) $academicYearId);
+        } elseif ($request->filled('academic_year')) {
+            $breakdownQuery->where('sa.academic_year', $request->input('academic_year'));
+        }
 
         // Apply same filters to breakdown query
         if ($schoolId) {
@@ -1306,18 +1364,18 @@ class AttendanceController extends Controller
                 ];
             });
 
-        // Get breakdown by grade (use breakdownQuery for joins)
+        // Get breakdown by grade (one row per grade; label from any matching grade row)
         $byGrade = (clone $breakdownQuery)
             ->select(
                 's.grade',
-                DB::raw('COALESCE(g.label, CONCAT("Grade ", s.grade)) as grade_label'),
+                DB::raw('COALESCE(MAX(g.label), CONCAT("Grade ", s.grade)) as grade_label'),
                 DB::raw('COUNT(*) as total'),
                 DB::raw('SUM(CASE WHEN sa.status = "Present" THEN 1 ELSE 0 END) as present'),
                 DB::raw('SUM(CASE WHEN sa.status = "Absent" THEN 1 ELSE 0 END) as absent'),
                 DB::raw('COUNT(DISTINCT sa.student_id) as student_count')
             )
             ->whereNotNull('s.grade')
-            ->groupBy('s.grade', 'g.label')
+            ->groupBy('s.grade')
             ->orderBy('s.grade')
             ->get()
             ->map(function($item) {
@@ -1336,11 +1394,11 @@ class AttendanceController extends Controller
                 ];
             });
 
-        // Get breakdown by section (use breakdownQuery for joins)
+        // Get breakdown by section (one row per grade+section; label from any matching grade row)
         $bySection = (clone $breakdownQuery)
             ->select(
                 's.grade',
-                DB::raw('COALESCE(g.label, CONCAT("Grade ", s.grade)) as grade_label'),
+                DB::raw('COALESCE(MAX(g.label), CONCAT("Grade ", s.grade)) as grade_label'),
                 's.section',
                 DB::raw('COUNT(*) as total'),
                 DB::raw('SUM(CASE WHEN sa.status = "Present" THEN 1 ELSE 0 END) as present'),
@@ -1349,7 +1407,7 @@ class AttendanceController extends Controller
             )
             ->whereNotNull('s.grade')
             ->whereNotNull('s.section')
-            ->groupBy('s.grade', 'g.label', 's.section')
+            ->groupBy('s.grade', 's.section')
             ->orderBy('s.grade')
             ->orderBy('s.section')
             ->get()
@@ -1422,6 +1480,14 @@ class AttendanceController extends Controller
         $baseQuery = DB::table('teacher_attendance as ta')
             ->whereBetween('ta.date', [$fromDate, $toDate]);
 
+        // Academic year scoping (from toolbar dropdown via middleware)
+        $academicYearId = $request->attributes->get('academic_year_id');
+        if ($academicYearId) {
+            $baseQuery->where('ta.academic_year_id', (int) $academicYearId);
+        } elseif ($request->filled('academic_year')) {
+            $baseQuery->where('ta.academic_year', $request->input('academic_year'));
+        }
+
         // Apply school filtering (only if school_id is set and not null)
         $schoolId = $this->getCurrentSchoolId($request);
         if ($schoolId) {
@@ -1452,6 +1518,12 @@ class AttendanceController extends Controller
             ->leftJoin('teachers as t', 'u.id', '=', 't.user_id')
             ->leftJoin('departments as d', 't.department_id', '=', 'd.id')
             ->whereBetween('ta.date', [$fromDate, $toDate]);
+
+        if ($academicYearId) {
+            $breakdownQuery->where('ta.academic_year_id', (int) $academicYearId);
+        } elseif ($request->filled('academic_year')) {
+            $breakdownQuery->where('ta.academic_year', $request->input('academic_year'));
+        }
 
         // Apply same filters to breakdown query
         if ($schoolId) {
@@ -1543,15 +1615,30 @@ class AttendanceController extends Controller
                 ];
             });
 
-        // If branch_id is specified and we want teacher list, return detailed teacher list
-        if ($request->has('branch_id') && $request->branch_id && $request->get('return_teachers', false)) {
-            // Get ALL teachers from the branch first, then LEFT JOIN with attendance
+        // If return_teachers is requested, return detailed teacher list
+        // NOTE: branch_id is optional (when omitted, we return teachers across all accessible branches).
+        if ($request->get('return_teachers', false)) {
+            $requestedBranchId = $request->input('branch_id');
+            $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+
+            // Get ALL teachers for the selected branch(s), then LEFT JOIN/aggregate with attendance
             $teacherListQuery = DB::table('teachers as t')
                 ->join('users as u', 't.user_id', '=', 'u.id')
                 ->leftJoin('departments as d', 't.department_id', '=', 'd.id')
-                ->where('t.branch_id', $request->branch_id)
                 ->whereNull('t.deleted_at')
                 ->whereNull('u.deleted_at');
+
+            // Apply branch filter
+            if ($requestedBranchId) {
+                $teacherListQuery->where('t.branch_id', (int) $requestedBranchId);
+            } elseif ($accessibleBranchIds !== 'all') {
+                if (!empty($accessibleBranchIds)) {
+                    $teacherListQuery->whereIn('t.branch_id', $accessibleBranchIds);
+                } else {
+                    // No accessible branches -> return empty
+                    $teacherListQuery->whereRaw('1 = 0');
+                }
+            }
 
             // Apply school filtering if needed
             $schoolId = $this->getCurrentSchoolId($request);
@@ -1591,8 +1678,12 @@ class AttendanceController extends Controller
                 });
             }
 
-            // Apply branch filter
-            $allAttendanceQuery->where('ta.branch_id', $request->branch_id);
+            // Apply branch filter when a branch_id is explicitly provided
+            if ($requestedBranchId) {
+                $allAttendanceQuery->where('ta.branch_id', (int) $requestedBranchId);
+            } elseif ($accessibleBranchIds !== 'all' && !empty($accessibleBranchIds)) {
+                $allAttendanceQuery->whereIn('ta.branch_id', $accessibleBranchIds);
+            }
 
             // Get all attendance records for stats calculation
             $allAttendanceRecords = $allAttendanceQuery

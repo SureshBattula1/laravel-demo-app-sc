@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Traits\PaginatesAndSorts;
 use App\Models\SectionSubject;
 use App\Models\Section;
+use App\Models\AcademicYear;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -20,12 +21,27 @@ class SectionSubjectController extends Controller
     public function getSectionSubjects(Request $request, $sectionId)
     {
         try {
-            $academicYear = $request->get('academic_year', date('Y') . '-' . (date('Y') + 1));
+            // Prefer explicit inputs; otherwise use academic year context from middleware/header.
+            $academicYearId = $request->input('academic_year_id') ?? $request->attributes->get('academic_year_id');
+            $academicYearName = $request->input('academic_year') ?? null;
+
+            if (!$academicYearId && !$academicYearName) {
+                $academicYearId = AcademicYear::current()->value('id');
+                $academicYearName = $academicYearId
+                    ? AcademicYear::whereKey($academicYearId)->value('name')
+                    : (date('Y') . '-' . (date('Y') + 1));
+            } elseif ($academicYearId && !$academicYearName) {
+                $academicYearName = AcademicYear::whereKey($academicYearId)->value('name');
+            }
             
             $section = Section::with([
-                'sectionSubjects' => function($query) use ($academicYear) {
-                    $query->where('academic_year', $academicYear)
-                          ->where('is_active', true);
+                'sectionSubjects' => function($query) use ($academicYearId, $academicYearName) {
+                    if ($academicYearId) {
+                        $query->where('academic_year_id', $academicYearId);
+                    } else {
+                        $query->where('academic_year', $academicYearName);
+                    }
+                    $query->where('is_active', true);
                 },
                 'sectionSubjects.subject',
                 'sectionSubjects.teacher'
@@ -62,6 +78,7 @@ class SectionSubjectController extends Controller
                     'subject_id',
                     'teacher_id',
                     'branch_id',
+                    'academic_year_id',
                     'academic_year',
                     'is_active',
                     'created_at',
@@ -101,6 +118,18 @@ class SectionSubjectController extends Controller
                 $query->where('academic_year', $request->academic_year);
             }
 
+            if ($request->filled('academic_year_id')) {
+                $query->where('academic_year_id', $request->academic_year_id);
+            }
+
+            // Default academic year scoping (from middleware/header) when client doesn't provide any year.
+            if (!$request->filled('academic_year') && !$request->filled('academic_year_id')) {
+                $academicYearIdFromContext = $request->attributes->get('academic_year_id');
+                if ($academicYearIdFromContext) {
+                    $query->where('academic_year_id', (int) $academicYearIdFromContext);
+                }
+            }
+
             if ($request->has('is_active')) {
                 $query->where('is_active', $request->boolean('is_active'));
             }
@@ -133,6 +162,7 @@ class SectionSubjectController extends Controller
                 'subject_id',
                 'teacher_id',
                 'branch_id',
+                'academic_year_id',
                 'academic_year',
                 'is_active',
                 'created_at'
@@ -182,7 +212,8 @@ class SectionSubjectController extends Controller
                 'subject_id' => 'required|exists:subjects,id',
                 'teacher_id' => 'nullable|exists:users,id',
                 'branch_id' => 'required|exists:branches,id',
-                'academic_year' => 'required|string|max:20'
+                'academic_year_id' => 'required_without:academic_year|nullable|exists:academic_years,id',
+                'academic_year' => 'required_without:academic_year_id|nullable|string|max:50',
             ]);
 
             if ($validator->fails()) {
@@ -194,10 +225,17 @@ class SectionSubjectController extends Controller
 
             DB::beginTransaction();
 
+            $academicYearId = $request->input('academic_year_id');
+            $academicYearName = $request->input('academic_year');
+            if ($academicYearId) {
+                $academicYearName = AcademicYear::whereKey($academicYearId)->value('name') ?? $academicYearName;
+            }
+
             // Check if already assigned
             $exists = SectionSubject::where('section_id', $request->section_id)
                 ->where('subject_id', $request->subject_id)
-                ->where('academic_year', $request->academic_year)
+                ->when($academicYearId, fn($q) => $q->where('academic_year_id', $academicYearId))
+                ->when(!$academicYearId, fn($q) => $q->where('academic_year', $academicYearName))
                 ->first();
 
             if ($exists) {
@@ -214,7 +252,8 @@ class SectionSubjectController extends Controller
                 'teacher_id' => $request->teacher_id,
                 'branch_id' => $request->branch_id,
                 'school_id' => $branch ? $branch->school_id : null,
-                'academic_year' => $request->academic_year,
+                'academic_year_id' => $academicYearId,
+                'academic_year' => $academicYearName,
                 'is_active' => true
             ]);
 
@@ -254,7 +293,8 @@ class SectionSubjectController extends Controller
                 'subjects.*.subject_id' => 'required|exists:subjects,id',
                 'subjects.*.teacher_id' => 'nullable|exists:users,id',
                 'branch_id' => 'required|exists:branches,id',
-                'academic_year' => 'required|string|max:20'
+                'academic_year_id' => 'required_without:academic_year|nullable|exists:academic_years,id',
+                'academic_year' => 'required_without:academic_year_id|nullable|string|max:50',
             ]);
 
             if ($validator->fails()) {
@@ -266,12 +306,19 @@ class SectionSubjectController extends Controller
 
             DB::beginTransaction();
 
+            $academicYearId = $request->input('academic_year_id');
+            $academicYearName = $request->input('academic_year');
+            if ($academicYearId) {
+                $academicYearName = AcademicYear::whereKey($academicYearId)->value('name') ?? $academicYearName;
+            }
+
             $assigned = [];
             $skipped = [];
 
             // OPTIMIZED: Get all existing assignments once
             $existingSubjectIds = SectionSubject::where('section_id', $request->section_id)
-                ->where('academic_year', $request->academic_year)
+                ->when($academicYearId, fn($q) => $q->where('academic_year_id', $academicYearId))
+                ->when(!$academicYearId, fn($q) => $q->where('academic_year', $academicYearName))
                 ->pluck('subject_id')
                 ->toArray();
 
@@ -291,7 +338,8 @@ class SectionSubjectController extends Controller
                     'teacher_id' => $subjectData['teacher_id'] ?? null,
                     'branch_id' => $request->branch_id,
                     'school_id' => $schoolId,
-                    'academic_year' => $request->academic_year,
+                    'academic_year_id' => $academicYearId,
+                    'academic_year' => $academicYearName,
                     'is_active' => true
                 ]);
 
@@ -338,7 +386,8 @@ class SectionSubjectController extends Controller
                 'from_section_id' => 'required|exists:sections,id',
                 'to_section_ids' => 'required|array|min:1',
                 'to_section_ids.*' => 'required|exists:sections,id',
-                'academic_year' => 'required|string|max:20',
+                'academic_year_id' => 'required_without:academic_year|nullable|exists:academic_years,id',
+                'academic_year' => 'required_without:academic_year_id|nullable|string|max:50',
                 'copy_teachers' => 'boolean'
             ]);
 
@@ -351,9 +400,16 @@ class SectionSubjectController extends Controller
 
             DB::beginTransaction();
 
+            $academicYearId = $request->input('academic_year_id');
+            $academicYearName = $request->input('academic_year');
+            if ($academicYearId) {
+                $academicYearName = AcademicYear::whereKey($academicYearId)->value('name') ?? $academicYearName;
+            }
+
             // Get source section's subjects
             $sourceSubjects = SectionSubject::where('section_id', $request->from_section_id)
-                ->where('academic_year', $request->academic_year)
+                ->when($academicYearId, fn($q) => $q->where('academic_year_id', $academicYearId))
+                ->when(!$academicYearId, fn($q) => $q->where('academic_year', $academicYearName))
                 ->where('is_active', true)
                 ->get();
 
@@ -374,7 +430,8 @@ class SectionSubjectController extends Controller
                     // Check if already exists
                     $exists = SectionSubject::where('section_id', $toSectionId)
                         ->where('subject_id', $sourceSubject->subject_id)
-                        ->where('academic_year', $request->academic_year)
+                        ->when($academicYearId, fn($q) => $q->where('academic_year_id', $academicYearId))
+                        ->when(!$academicYearId, fn($q) => $q->where('academic_year', $academicYearName))
                         ->exists();
 
                     if (!$exists) {
@@ -384,7 +441,8 @@ class SectionSubjectController extends Controller
                             'teacher_id' => $copyTeachers ? $sourceSubject->teacher_id : null,
                             'branch_id' => $targetSection->branch_id,
                             'school_id' => $targetSection->school_id,
-                            'academic_year' => $request->academic_year,
+                            'academic_year_id' => $academicYearId,
+                            'academic_year' => $academicYearName,
                             'is_active' => true
                         ]);
                         $totalCopied++;
