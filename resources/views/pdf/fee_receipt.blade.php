@@ -102,6 +102,18 @@
                     <td>{{ $payment->student->admission_number }}</td>
                 </tr>
             @endif
+            @if(!empty($studentGradeLabel))
+                <tr>
+                    <td class="label">Grade</td>
+                    <td>{{ $studentGradeLabel }}</td>
+                </tr>
+            @endif
+            @if(!empty($studentSection))
+                <tr>
+                    <td class="label">Section</td>
+                    <td>{{ $studentSection }}</td>
+                </tr>
+            @endif
         </table>
 
         @php
@@ -121,7 +133,7 @@
             @if(optional($payment->feeStructure)->grade)
                 <tr>
                     <td class="label">Grade</td>
-                    <td>{{ $payment->feeStructure->grade }}</td>
+                    <td>{{ $studentGradeLabel ?? $payment->feeStructure->grade }}</td>
                 </tr>
             @endif
             @if(optional($payment->feeStructure)->academic_year)

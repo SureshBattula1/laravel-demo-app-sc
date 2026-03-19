@@ -40,16 +40,27 @@ class Section extends Model
     protected $appends = ['grade_label', 'actual_strength'];
 
     /**
-     * Get grade label (e.g., "Grade 5" instead of "5")
+     * Resolve grade from grades table (branch-specific join by branch_id + value).
+     */
+    private function resolveGradeFromGradesTable(): ?object
+    {
+        if (!$this->grade_level) {
+            return null;
+        }
+        return DB::table('grades')
+            ->where('branch_id', $this->branch_id)
+            ->where('value', $this->grade_level)
+            ->first();
+    }
+
+    /**
+     * Get grade label (e.g., "International Grade 10" instead of "10")
+     * Joins grades by branch_id + value so branch-specific labels (e.g. "International Grade 10") display correctly.
      */
     public function getGradeLabelAttribute(): ?string
     {
         if ($this->grade_level) {
-            // Get grade details from grades table
-            $grade = DB::table('grades')
-                ->where('school_id', $this->school_id)
-                ->where('value', $this->grade_level)
-                ->first();
+            $grade = $this->resolveGradeFromGradesTable();
             if ($grade) {
                 return $grade->label;
             }
@@ -64,10 +75,7 @@ class Section extends Model
     public function getGradeDetailsAttribute(): ?array
     {
         if ($this->grade_level) {
-            $grade = DB::table('grades')
-                ->where('school_id', $this->school_id)
-                ->where('value', $this->grade_level)
-                ->first();
+            $grade = $this->resolveGradeFromGradesTable();
             if ($grade) {
                 return [
                     'value' => $grade->value,

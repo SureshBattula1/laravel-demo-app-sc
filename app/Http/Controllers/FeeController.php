@@ -87,11 +87,32 @@ class FeeController extends Controller
             // Apply pagination and sorting (default: 25 per page)
             $structures = $this->paginateAndSort($query, $request, $sortableColumns, 'grade', 'asc');
 
-            // Map data to ensure fee_type is never empty
-            $data = collect($structures->items())->map(function($fee) {
+            // Resolve branch-specific grade labels in one query (grades are per branch)
+            $items = collect($structures->items());
+            $pairs = $items->filter(fn ($f) => $f->branch_id !== null && $f->grade !== null && $f->grade !== '')
+                ->map(fn ($f) => ['branch_id' => $f->branch_id, 'value' => (string) $f->grade])
+                ->unique(fn ($p) => $p['branch_id'] . '|' . $p['value'])
+                ->values();
+            $gradeLabels = [];
+            if ($pairs->isNotEmpty()) {
+                $gradeQuery = DB::table('grades')->select('branch_id', 'value', 'label');
+                $gradeQuery->where(function ($q) use ($pairs) {
+                    foreach ($pairs as $p) {
+                        $q->orWhere(function ($q2) use ($p) {
+                            $q2->where('branch_id', $p['branch_id'])->where('value', $p['value']);
+                        });
+                    }
+                });
+                $gradeLabels = $gradeQuery->get()->keyBy(fn ($g) => $g->branch_id . '|' . $g->value)->map(fn ($g) => $g->label)->toArray();
+            }
+
+            // Map data: fee_type fallback and branch-specific grade_label
+            $data = $items->map(function ($fee) use ($gradeLabels) {
                 if (empty($fee->fee_type)) {
                     $fee->fee_type = 'General Fee';
                 }
+                $key = $fee->branch_id . '|' . $fee->grade;
+                $fee->grade_label = $gradeLabels[$key] ?? ('Grade ' . $fee->grade);
                 return $fee;
             });
 
@@ -651,7 +672,7 @@ class FeeController extends Controller
     public function indexPayments(Request $request)
     {
         try {
-            $query = FeePayment::with(['feeStructure', 'student', 'creator']);
+            $query = FeePayment::with(['feeStructure.branch', 'student', 'creator']);
 
             // 🔥 APPLY SCHOOL FILTERING - School-level isolation
             $schoolId = $this->getCurrentSchoolId($request);
@@ -704,11 +725,14 @@ class FeeController extends Controller
             // Apply pagination and sorting (default: created_at desc)
             $payments = $this->paginateAndSort($query, $request, $sortableColumns, 'created_at', 'desc');
 
-            // Map data to ensure fee_type is never empty in feeStructure relationship
+            // Map data: ensure fee_type and add branch_name for list display
             $data = collect($payments->items())->map(function($payment) {
                 if ($payment->feeStructure && empty($payment->feeStructure->fee_type)) {
                     $payment->feeStructure->fee_type = 'General Fee';
                 }
+                $payment->branch_name = $payment->feeStructure && $payment->feeStructure->branch
+                    ? $payment->feeStructure->branch->name
+                    : null;
                 return $payment;
             });
 
@@ -1016,6 +1040,25 @@ class FeeController extends Controller
                 ->toArray();
 
             $payment->past_transactions = $pastTransactions;
+
+            // Add student grade name and section for receipt display
+            $studentRecord = \App\Models\Student::where('user_id', $payment->student_id)->first();
+            if ($studentRecord) {
+                $payment->student_grade_label = null;
+                $payment->student_section = $studentRecord->section ?? null;
+                if (!empty($studentRecord->grade) && !empty($studentRecord->branch_id)) {
+                    $gradeRow = DB::table('grades')
+                        ->where('branch_id', $studentRecord->branch_id)
+                        ->where('value', $studentRecord->grade)
+                        ->first();
+                    $payment->student_grade_label = $gradeRow ? $gradeRow->label : ('Grade ' . $studentRecord->grade);
+                } elseif (!empty($studentRecord->grade)) {
+                    $payment->student_grade_label = 'Grade ' . $studentRecord->grade;
+                }
+            } else {
+                $payment->student_grade_label = $payment->feeStructure ? ('Grade ' . ($payment->feeStructure->grade ?? '')) : null;
+                $payment->student_section = null;
+            }
             
             return response()->json([
                 'success' => true,
@@ -1049,6 +1092,25 @@ class FeeController extends Controller
 
             $receiptNumber = $payment->receipt_number ?? ('PAYMENT-' . $payment->id);
 
+            // Student grade/section for receipt (use branch-specific grade label when available)
+            $studentGradeLabel = null;
+            $studentSection = null;
+            $studentRecord = \App\Models\Student::where('user_id', $payment->student_id)->first();
+            if ($studentRecord) {
+                $studentSection = $studentRecord->section ?? null;
+                if (!empty($studentRecord->grade) && !empty($studentRecord->branch_id)) {
+                    $gradeRow = DB::table('grades')
+                        ->where('branch_id', $studentRecord->branch_id)
+                        ->where('value', (string) $studentRecord->grade)
+                        ->first();
+                    $studentGradeLabel = $gradeRow ? $gradeRow->label : ('Grade ' . $studentRecord->grade);
+                } elseif (!empty($studentRecord->grade)) {
+                    $studentGradeLabel = 'Grade ' . $studentRecord->grade;
+                }
+            } elseif ($payment->feeStructure && !empty($payment->feeStructure->grade)) {
+                $studentGradeLabel = 'Grade ' . $payment->feeStructure->grade;
+            }
+
             // Load all payments for this student & fee structure to show history
             $paymentHistory = FeePayment::where('student_id', $payment->student_id)
                 ->where('fee_structure_id', $payment->fee_structure_id)
@@ -1064,6 +1126,8 @@ class FeeController extends Controller
             $html = view('pdf.fee_receipt', [
                 'payment' => $payment,
                 'studentName' => $studentName,
+                'studentGradeLabel' => $studentGradeLabel,
+                'studentSection' => $studentSection,
                 'receiptNumber' => $receiptNumber,
                 'previousPayments' => $previousPayments,
                 'paymentHistory' => $paymentHistory,
