@@ -365,6 +365,9 @@ class FeeController extends Controller
                 ->whereBetween('fp.payment_date', [$fromDate, $toDate])
                 ->whereIn('fp.payment_status', ['Completed', 'Partial']);
 
+            // Exclude soft-deleted fee structures from dashboard calculations
+            $baseQuery->whereNull('fs.deleted_at');
+
             // 🔥 APPLY SCHOOL FILTERING - Only current school's data
             $schoolId = $this->getCurrentSchoolId($request);
             if ($schoolId) {
@@ -388,6 +391,17 @@ class FeeController extends Controller
             // Filter by branch
             if ($request->has('branch_id') && $request->branch_id) {
                 $baseQuery->where('fs.branch_id', $request->branch_id);
+            }
+
+            // Filter by academic year (string name) to keep paid aggregation consistent
+            if ($request->has('academic_year') && $request->academic_year) {
+                $ay = $request->academic_year;
+                $baseQuery->where('fs.academic_year', $ay)
+                    ->where(function ($q) use ($ay) {
+                        $q->where('s.academic_year', $ay)
+                            ->orWhereNull('s.academic_year')
+                            ->orWhere('s.academic_year', '');
+                    });
             }
 
             // Filter by grade/class
@@ -464,7 +478,9 @@ class FeeController extends Controller
             // double-counting expected_amount when students have multiple (partial) payments
             // Pending = (fee_amount - total_discount) - amount_paid (late fee not counted)
             $paidAggregateSubquery = DB::table('fee_payments')
-                ->whereIn('payment_status', ['Completed', 'Partial'])
+                // Include Pending amounts as paid against due.
+                // The dashboard "pending_amount" represents remaining due, not approval status.
+                ->whereIn('payment_status', ['Completed', 'Partial', 'Pending'])
                 ->select(
                     'fee_structure_id',
                     'student_id',
@@ -504,6 +520,7 @@ class FeeController extends Controller
                 })
                 ->leftJoin('grades as g', 's.grade', '=', 'g.value')
                 ->where('fs.is_active', true)
+                ->whereNull('fs.deleted_at')
                 ->select(
                     's.grade',
                     DB::raw('COALESCE(g.label, CONCAT("Grade ", s.grade)) as grade_label'),
