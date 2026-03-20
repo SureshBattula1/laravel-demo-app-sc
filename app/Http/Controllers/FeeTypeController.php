@@ -18,7 +18,7 @@ class FeeTypeController extends Controller
     public function index(Request $request): JsonResponse
     {
         try {
-            $query = FeeType::with('branch');
+            $query = FeeType::with(['branch', 'academicYear']);
 
             // Apply school filtering - show only fee types for the current school
             $schoolId = $this->getCurrentSchoolId($request);
@@ -39,6 +39,11 @@ class FeeTypeController extends Controller
             // Filter by specific branch when provided
             if ($request->has('branch_id') && $request->branch_id) {
                 $query->where('branch_id', $request->branch_id);
+            }
+
+            // Filter by academic year when provided
+            if ($request->has('academic_year_id') && $request->academic_year_id) {
+                $query->where('academic_year_id', $request->academic_year_id);
             }
 
             // Filter by active status
@@ -101,6 +106,7 @@ class FeeTypeController extends Controller
                 'code' => 'required|string|max:50|unique:fee_types,code',
                 'description' => 'nullable|string',
                 'branch_id' => 'required|exists:branches,id',
+                'academic_year_id' => 'required|exists:academic_years,id',
                 'is_mandatory' => 'boolean',
                 'is_refundable' => 'boolean',
                 'is_active' => 'boolean',
@@ -109,7 +115,7 @@ class FeeTypeController extends Controller
             $branch = \App\Models\Branch::find($validated['branch_id']);
             $validated['school_id'] = $branch ? $branch->school_id : null;
             $feeType = FeeType::create($validated);
-            $feeType->load('branch');
+            $feeType->load(['branch', 'academicYear']);
 
             return response()->json([
                 'success' => true,
@@ -136,7 +142,7 @@ class FeeTypeController extends Controller
     public function show(string $id): JsonResponse
     {
         try {
-            $feeType = FeeType::with('branch')->findOrFail($id);
+            $feeType = FeeType::with(['branch', 'academicYear'])->findOrFail($id);
 
             return response()->json([
                 'success' => true,
@@ -175,13 +181,14 @@ class FeeTypeController extends Controller
                 ],
                 'description' => 'nullable|string',
                 'branch_id' => 'sometimes|required|exists:branches,id',
+                'academic_year_id' => 'sometimes|required|exists:academic_years,id',
                 'is_mandatory' => 'boolean',
                 'is_refundable' => 'boolean',
                 'is_active' => 'boolean',
             ]);
 
             $feeType->update($validated);
-            $feeType->load('branch');
+            $feeType->load(['branch', 'academicYear']);
 
             return response()->json([
                 'success' => true,
@@ -253,7 +260,7 @@ class FeeTypeController extends Controller
             // Use deterministic 0/1 toggle to avoid truthy string edge-cases.
             $feeType->is_active = ((int) $feeType->is_active) === 1 ? 0 : 1;
             $feeType->save();
-            $feeType->load('branch');
+            $feeType->load(['branch', 'academicYear']);
 
             return response()->json([
                 'success' => true,

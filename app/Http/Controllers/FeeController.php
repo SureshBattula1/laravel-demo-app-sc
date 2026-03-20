@@ -226,6 +226,15 @@ class FeeController extends Controller
         DB::beginTransaction();
         try {
             $structure = FeeStructure::findOrFail($id);
+
+            // Prevent editing a fee structure once any payments exist for it.
+            if ($structure->payments()->count() > 0) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Cannot edit fee structure with existing payments'
+                ], 422);
+            }
+
             // Use academic_year_id from request if provided, otherwise keep existing
             $academicYearId = $request->filled('academic_year_id')
                 ? (int) $request->academic_year_id
@@ -703,6 +712,10 @@ class FeeController extends Controller
 
             if ($request->has('payment_method')) {
                 $query->where('payment_method', $request->payment_method);
+            }
+
+            if ($request->filled('academic_year_id')) {
+                $query->where('academic_year_id', (int) $request->academic_year_id);
             }
 
             if ($request->has('from_date')) {
