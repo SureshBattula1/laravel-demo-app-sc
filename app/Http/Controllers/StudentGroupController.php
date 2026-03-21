@@ -19,7 +19,8 @@ class StudentGroupController extends Controller
     public function index(Request $request)
     {
         try {
-            $query = StudentGroup::with(['branch', 'members']);
+            $query = StudentGroup::with(['branch'])
+                ->withCount(['members as member_count' => fn($q) => $q->where('is_active', true)]);
 
             // 🔥 APPLY BRANCH FILTERING - Restrict to accessible branches
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
@@ -31,16 +32,36 @@ class StudentGroupController extends Controller
                 }
             }
 
-            // Filters (only allow if SuperAdmin/cross-branch user)
-            if ($request->has('branch_id') && $accessibleBranchIds === 'all') {
-                $query->where('branch_id', $request->branch_id);
+            // Branch filter: apply when user has access to that branch
+            if ($request->filled('branch_id')) {
+                $requestedBranchId = (int) $request->branch_id;
+                if ($accessibleBranchIds === 'all' || (is_array($accessibleBranchIds) && in_array($requestedBranchId, $accessibleBranchIds, true))) {
+                    $query->where('branch_id', $requestedBranchId);
+                }
             }
 
-            if ($request->has('type')) {
+            // Group code filter (exact or partial match)
+            if ($request->filled('code')) {
+                $code = strip_tags((string) $request->code);
+                $query->where('code', 'like', '%' . $code . '%');
+            }
+
+            // Group name filter (partial match)
+            if ($request->filled('name')) {
+                $name = strip_tags((string) $request->name);
+                $query->where('name', 'like', '%' . $name . '%');
+            }
+
+            if ($request->has('type') && $request->filled('type')) {
                 $query->where('type', $request->type);
             }
 
-            if ($request->has('academic_year')) {
+            // Filter by academic year: prefer academic_year_id (from query or X-Academic-Year-Id header)
+            $academicYearId = $request->query('academic_year_id')
+                ?? $request->header('X-Academic-Year-Id');
+            if ($academicYearId !== null && $academicYearId !== '') {
+                $query->where('academic_year_id', (int) $academicYearId);
+            } elseif ($request->has('academic_year')) {
                 $query->where('academic_year', $request->academic_year);
             }
 
@@ -70,12 +91,6 @@ class StudentGroupController extends Controller
 
             // Apply pagination and sorting (default: 25 per page, sorted by name asc)
             $groups = $this->paginateAndSort($query, $request, $sortableColumns, 'name', 'asc');
-
-            // Add member count to each group
-            $groups->getCollection()->transform(function($group) {
-                $group->member_count = $group->members()->where('is_active', true)->count();
-                return $group;
-            });
 
             // Return standardized paginated response
             return response()->json([
@@ -115,7 +130,8 @@ class StudentGroupController extends Controller
                 'name' => 'required|string|max:255',
                 'code' => 'required|string|max:50|unique:student_groups',
                 'type' => 'required|in:Academic,Sports,Cultural,Club',
-                'academic_year' => 'required|string|max:20',
+                'academic_year' => 'required_without:academic_year_id|nullable|string|max:20',
+                'academic_year_id' => 'required_without:academic_year|nullable|exists:academic_years,id',
                 'description' => 'nullable|string',
                 'is_active' => 'boolean'
             ]);
@@ -130,13 +146,16 @@ class StudentGroupController extends Controller
             DB::beginTransaction();
 
             $branch = \App\Models\Branch::find($request->branch_id);
+            [$academicYearId, $academicYearName] = $this->resolveAcademicYear($request->academic_year, $request->academic_year_id);
+
             $group = StudentGroup::create([
                 'branch_id' => $request->branch_id,
                 'school_id' => $branch ? $branch->school_id : null,
                 'name' => strip_tags($request->name),
                 'code' => strtoupper($request->code),
                 'type' => $request->type,
-                'academic_year' => $request->academic_year,
+                'academic_year' => $academicYearName ?? $request->academic_year,
+                'academic_year_id' => $academicYearId,
                 'description' => strip_tags($request->description),
                 'is_active' => $request->boolean('is_active', true)
             ]);
@@ -166,13 +185,101 @@ class StudentGroupController extends Controller
     /**
      * Get single student group
      */
-    public function show($id)
+    public function show(Request $request, $id)
     {
         try {
-            $group = StudentGroup::with(['branch', 'members.student'])
+            $group = StudentGroup::with(['branch', 'members.student', 'members.studentRecord'])
                 ->findOrFail($id);
 
-            $group->member_count = $group->members()->where('is_active', true)->count();
+            $group->member_count = $group->members->where('is_active', true)->count();
+
+            $branchId = $group->branch_id;
+            $academicYearId = $group->academic_year_id
+                ?? $request->header('X-Academic-Year-Id')
+                ?? ($group->academic_year ? \App\Models\AcademicYear::where('name', $group->academic_year)->value('id') : null)
+                ?? null;
+
+            // Get grade/section from student_enrollments (for group's academic year) or fallback to latest enrollment or students table
+            $studentIds = $group->members->pluck('student_id')->filter()->unique()->values()->toArray();
+            $enrollments = collect();
+            $fallbackEnrollments = collect();
+            $hasEnrollmentsTable = \Illuminate\Support\Facades\Schema::hasTable('student_enrollments');
+
+            if (!empty($studentIds) && $hasEnrollmentsTable) {
+                if ($academicYearId) {
+                    $enrollments = DB::table('student_enrollments')
+                        ->where('academic_year_id', $academicYearId)
+                        ->whereIn('student_id', $studentIds)
+                        ->where('status', 'Active')
+                        ->get()
+                        ->keyBy('student_id');
+                }
+                // Fallback: latest enrollment per student (any academic year) via single efficient query
+                $missingIds = array_diff($studentIds, $enrollments->keys()->toArray());
+                if (!empty($missingIds)) {
+                    $sub = DB::table('student_enrollments')
+                        ->whereIn('student_id', $missingIds)
+                        ->where('status', 'Active')
+                        ->select('student_id', DB::raw('MAX(academic_year_id) as max_ay'))
+                        ->groupBy('student_id');
+                    $fallbackEnrollments = DB::table('student_enrollments as se')
+                        ->joinSub($sub, 'latest', 'se.student_id', '=', 'latest.student_id')
+                        ->whereColumn('se.academic_year_id', 'latest.max_ay')
+                        ->where('se.status', 'Active')
+                        ->select('se.*')
+                        ->get()
+                        ->keyBy('student_id');
+                }
+            }
+
+            // Collect all grade values for label lookup (normalize to string for grades table match)
+            $gradeValues = collect();
+            foreach ($group->members as $member) {
+                $enr = $enrollments[$member->student_id] ?? $fallbackEnrollments[$member->student_id] ?? null;
+                $g = $enr?->grade ?? $member->studentRecord?->grade;
+                if ($g !== null && $g !== '') {
+                    $gradeValues->push((string) $g);
+                }
+            }
+            $gradeValues = $gradeValues->unique()->values()->toArray();
+
+            // Resolve grade labels: branch-specific first, then global (branch_id null)
+            $gradeLabels = [];
+            $hasGradesTable = \Illuminate\Support\Facades\Schema::hasTable('grades');
+            if (!empty($gradeValues) && $hasGradesTable) {
+                $gradesQuery = DB::table('grades')
+                    ->whereIn('value', $gradeValues);
+                if ($branchId && \Illuminate\Support\Facades\Schema::hasColumn('grades', 'branch_id')) {
+                    $gradesQuery->where(function ($q) use ($branchId) {
+                        $q->where('branch_id', $branchId)->orWhereNull('branch_id');
+                    })->orderByRaw('branch_id IS NOT NULL DESC'); // prefer branch-specific
+                }
+                $gradeLabels = $gradesQuery->pluck('label', 'value')->toArray();
+            }
+
+            $group->members->transform(function ($member) use ($enrollments, $fallbackEnrollments, $gradeLabels) {
+                $enr = $enrollments[$member->student_id] ?? $fallbackEnrollments[$member->student_id] ?? null;
+                $studentRecord = $member->studentRecord;
+                $grade = $enr?->grade ?? $studentRecord?->grade;
+                $section = $enr?->section ?? $studentRecord?->section;
+                $gradeStr = $grade !== null && $grade !== '' ? (string) $grade : null;
+                $gradeLabel = $gradeStr ? ($gradeLabels[$gradeStr] ?? 'Grade ' . $gradeStr) : null;
+
+                // Add grade/section/grade_label as top-level member attributes for reliable frontend access
+                $member->setAttribute('grade', $grade);
+                $member->setAttribute('section', $section);
+                $member->setAttribute('grade_label', $gradeLabel);
+
+                // Merge into student relation for frontend
+                $student = $member->student;
+                if ($student) {
+                    $student->setAttribute('grade', $grade);
+                    $student->setAttribute('section', $section);
+                    $student->setAttribute('grade_label', $gradeLabel);
+                }
+
+                return $member;
+            });
 
             return response()->json([
                 'success' => true,
@@ -206,7 +313,8 @@ class StudentGroupController extends Controller
                 'name' => 'sometimes|string|max:255',
                 'code' => 'sometimes|string|max:50|unique:student_groups,code,' . $id,
                 'type' => 'sometimes|in:Academic,Sports,Cultural,Club',
-                'academic_year' => 'sometimes|string|max:20',
+                'academic_year' => 'sometimes|nullable|string|max:20',
+                'academic_year_id' => 'sometimes|nullable|exists:academic_years,id',
                 'description' => 'nullable|string',
                 'is_active' => 'sometimes|boolean'
             ]);
@@ -220,8 +328,17 @@ class StudentGroupController extends Controller
 
             DB::beginTransaction();
 
-            $updateData = $request->only(['name', 'code', 'type', 'academic_year', 'description', 'is_active']);
-            
+            $updateData = $request->only(['name', 'code', 'type', 'description', 'is_active']);
+
+            if ($request->has('academic_year') || $request->has('academic_year_id')) {
+                [$academicYearId, $academicYearName] = $this->resolveAcademicYear(
+                    $request->academic_year,
+                    $request->academic_year_id
+                );
+                $updateData['academic_year_id'] = $academicYearId;
+                $updateData['academic_year'] = $academicYearName ?? $updateData['academic_year'] ?? $group->academic_year;
+            }
+
             if (isset($updateData['name'])) $updateData['name'] = strip_tags($updateData['name']);
             if (isset($updateData['code'])) $updateData['code'] = strtoupper($updateData['code']);
             if (isset($updateData['description'])) $updateData['description'] = strip_tags($updateData['description']);
@@ -311,6 +428,15 @@ class StudentGroupController extends Controller
 
             $group = StudentGroup::findOrFail($id);
 
+            // Ensure student belongs to the group's branch
+            $student = \App\Models\Student::find($request->student_id);
+            if (!$student || $student->branch_id != $group->branch_id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Student must belong to the same branch as the group'
+                ], 400);
+            }
+
             // Check if already a member
             $exists = DB::table('student_group_members')
                 ->where('group_id', $id)
@@ -375,6 +501,24 @@ class StudentGroupController extends Controller
                 'message' => 'Failed to remove student from group'
             ], 500);
         }
+    }
+
+    /**
+     * Resolve academic_year_id and academic_year name from either input.
+     * Returns [academic_year_id, academic_year_name].
+     */
+    private function resolveAcademicYear(?string $academicYearName, $academicYearId = null): array
+    {
+        if ($academicYearId !== null && $academicYearId !== '') {
+            $id = (int) $academicYearId;
+            $ay = \App\Models\AcademicYear::find($id);
+            return [$id, $ay?->name];
+        }
+        if ($academicYearName) {
+            $ay = \App\Models\AcademicYear::where('name', $academicYearName)->first();
+            return [$ay?->id, $ay?->name ?? $academicYearName];
+        }
+        return [null, null];
     }
 }
 

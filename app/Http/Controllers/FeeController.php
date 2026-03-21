@@ -719,15 +719,23 @@ class FeeController extends Controller
                 }
             }
 
-            if ($request->has('student_id')) {
+            // Advanced search: filter by specific branch when requested
+            if ($request->filled('branch_id')) {
+                $requestedBranchId = (int) $request->branch_id;
+                if ($accessibleBranchIds === 'all' || (is_array($accessibleBranchIds) && in_array($requestedBranchId, $accessibleBranchIds, true))) {
+                    $query->where('branch_id', $requestedBranchId);
+                }
+            }
+
+            if ($request->filled('student_id')) {
                 $query->where('student_id', $request->student_id);
             }
 
-            if ($request->has('payment_status')) {
+            if ($request->filled('payment_status')) {
                 $query->where('payment_status', $request->payment_status);
             }
 
-            if ($request->has('payment_method')) {
+            if ($request->filled('payment_method')) {
                 $query->where('payment_method', $request->payment_method);
             }
 
@@ -735,11 +743,11 @@ class FeeController extends Controller
                 $query->where('academic_year_id', (int) $request->academic_year_id);
             }
 
-            if ($request->has('from_date')) {
+            if ($request->filled('from_date')) {
                 $query->whereDate('payment_date', '>=', $request->from_date);
             }
 
-            if ($request->has('to_date')) {
+            if ($request->filled('to_date')) {
                 $query->whereDate('payment_date', '<=', $request->to_date);
             }
 

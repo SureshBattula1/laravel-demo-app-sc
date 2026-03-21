@@ -160,8 +160,8 @@ class StudentController extends Controller
                 $query->where('students.gender', $request->gender);
             }
 
-            if ($request->has('branch_id')) {
-                $query->where('students.branch_id', $request->branch_id);
+            if ($request->filled('branch_id')) {
+                $query->where('students.branch_id', (int) $request->branch_id);
             }
 
             // Account active filter (User table)
@@ -174,8 +174,9 @@ class StudentController extends Controller
                 }
             }
 
-            // Academic year is always resolved via AcademicYearContext (query/header/body).
-            if ($academicYearId) {
+            // Academic year filter - skip when for_group_membership (e.g. add member dropdown)
+            // so we show all active students in the branch regardless of enrollment year
+            if ($academicYearId && !$request->boolean('for_group_membership')) {
                 if ($hasEnrollments) {
                     $query->whereRaw('COALESCE(se.academic_year_id, students.academic_year_id) = ?', [$academicYearId]);
                 } else {
