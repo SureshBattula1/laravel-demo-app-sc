@@ -79,12 +79,7 @@ class HolidayController extends Controller
             
             $holidays = $query->orderBy('start_date', 'asc')->paginate($perPage, ['*'], 'page', $page);
 
-            // Calculate duration for each holiday
-            $holidays->each(function ($holiday) {
-                $start = new \DateTime($holiday->start_date);
-                $end = new \DateTime($holiday->end_date);
-                $holiday->duration = $start->diff($end)->days + 1;
-            });
+            // Duration is computed via model accessor; branch_name appended from model
 
             return response()->json([
                 'success' => true,
@@ -118,10 +113,14 @@ class HolidayController extends Controller
     {
         try {
             $user = Auth::user();
-            $academicYearId = $this->academicYearContext->id(false);
-            $academicYearName = $academicYearId
-                ? (\App\Models\AcademicYear::query()->where('id', (int) $academicYearId)->value('name') ?? null)
+            // Use academic_year_id from request body (form selection) or fall back to context/toolbar
+            $academicYearId = $request->filled('academic_year_id')
+                ? (int) $request->academic_year_id
+                : $this->academicYearContext->id(false);
+            $academicYearModel = $academicYearId
+                ? \App\Models\AcademicYear::query()->find($academicYearId)
                 : null;
+            $academicYearName = $academicYearModel?->name;
 
             // Check role permissions
             if (!in_array($user->role, ['SuperAdmin', 'BranchAdmin'])) {
@@ -139,6 +138,7 @@ class HolidayController extends Controller
                 'type' => 'required|in:National,State,School,Optional,Restricted',
                 'color' => 'nullable|string|max:20',
                 'branch_id' => 'nullable|exists:branches,id',
+                'academic_year_id' => 'nullable|exists:academic_years,id',
                 'is_recurring' => 'boolean',
             ]);
 
@@ -252,6 +252,7 @@ class HolidayController extends Controller
                 'start_date' => 'sometimes|date',
                 'end_date' => 'sometimes|date|after_or_equal:start_date',
                 'type' => 'sometimes|in:National,State,School,Optional,Restricted',
+                'academic_year_id' => 'nullable|exists:academic_years,id',
                 'is_active' => 'sometimes|boolean'
             ]);
 
@@ -265,9 +266,17 @@ class HolidayController extends Controller
             DB::beginTransaction();
 
             $updateData = $request->only([
-                'title', 'description', 'start_date', 'end_date', 
-                'type', 'color', 'is_recurring', 'is_active'
+                'title', 'description', 'start_date', 'end_date',
+                'type', 'color', 'is_recurring', 'is_active', 'academic_year_id'
             ]);
+
+            if ($request->has('academic_year_id')) {
+                $ayId = $request->academic_year_id ? (int) $request->academic_year_id : null;
+                $updateData['academic_year_id'] = $ayId;
+                $updateData['academic_year'] = $ayId
+                    ? (\App\Models\AcademicYear::query()->find($ayId)?->name ?? null)
+                    : null;
+            }
 
             foreach (['title', 'description'] as $field) {
                 if (isset($updateData[$field])) {
@@ -345,6 +354,7 @@ class HolidayController extends Controller
             $endDate = date('Y-m-t', strtotime("$year-$month-01"));
 
             $query = Holiday::active()
+                ->with(['branch'])
                 ->inDateRange($startDate, $endDate);
 
             // Company holidays only: restrict to user's accessible branches

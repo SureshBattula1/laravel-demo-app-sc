@@ -28,6 +28,8 @@ class Holiday extends Model
         'created_by'
     ];
 
+    protected $appends = ['branch_name', 'duration'];
+
     protected function casts(): array
     {
         return [
@@ -36,6 +38,14 @@ class Holiday extends Model
             'is_recurring' => 'boolean',
             'is_active' => 'boolean',
         ];
+    }
+
+    /**
+     * Get branch name for display (or "All Branches" when null)
+     */
+    public function getBranchNameAttribute(): string
+    {
+        return $this->branch?->name ?? 'All Branches';
     }
 
     /**
