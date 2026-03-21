@@ -37,7 +37,7 @@ class AccountController extends Controller
                 return response()->json([
                     'success' => true,
                     'data' => [
-                        'summary' => ['total_income' => 0, 'total_expense' => 0, 'net_balance' => 0, 'financial_year' => $financialYear],
+                        'summary' => ['total_income' => 0, 'total_expense' => 0, 'net_balance' => 0, 'financial_year' => $financialYear, 'category_count' => 0],
                         'income_by_category' => [],
                         'expense_by_category' => [],
                         'recent_transactions' => [],
@@ -61,11 +61,12 @@ class AccountController extends Controller
             } elseif ($accessibleBranchIds !== 'all') {
                 $baseQuery->whereIn('branch_id', $accessibleBranchIds);
             }
+            // Use direct date comparison (allows index usage; whereDate prevents it)
             if ($fromDate) {
-                $baseQuery->whereDate('transaction_date', '>=', $fromDate);
+                $baseQuery->where('transaction_date', '>=', $fromDate);
             }
             if ($toDate) {
-                $baseQuery->whereDate('transaction_date', '<=', $toDate);
+                $baseQuery->where('transaction_date', '<=', $toDate);
             }
 
             // Query 1: Get totals (uses index on status, financial_year)
@@ -86,8 +87,8 @@ class AccountController extends Controller
                 ->when($schoolId, fn($q) => $q->where('transactions.school_id', $schoolId))
                 ->when($branchId, fn($q) => $q->where('transactions.branch_id', $branchId))
                 ->when(!$branchId && $accessibleBranchIds !== 'all', fn($q) => $q->whereIn('transactions.branch_id', $accessibleBranchIds))
-                ->when($fromDate, fn($q) => $q->whereDate('transactions.transaction_date', '>=', $fromDate))
-                ->when($toDate, fn($q) => $q->whereDate('transactions.transaction_date', '<=', $toDate))
+                ->when($fromDate, fn($q) => $q->where('transactions.transaction_date', '>=', $fromDate))
+                ->when($toDate, fn($q) => $q->where('transactions.transaction_date', '<=', $toDate))
                 ->selectRaw('transactions.type, account_categories.name as category, SUM(transactions.amount) as amount')
                 ->groupBy('transactions.type', 'account_categories.name')
                 ->get();
@@ -102,8 +103,8 @@ class AccountController extends Controller
                 ->when($schoolId, fn($q) => $q->where('school_id', $schoolId))
                 ->when($branchId, fn($q) => $q->where('branch_id', $branchId))
                 ->when(!$branchId && $accessibleBranchIds !== 'all', fn($q) => $q->whereIn('branch_id', $accessibleBranchIds))
-                ->when($fromDate, fn($q) => $q->whereDate('transaction_date', '>=', $fromDate))
-                ->when($toDate, fn($q) => $q->whereDate('transaction_date', '<=', $toDate))
+                ->when($fromDate, fn($q) => $q->where('transaction_date', '>=', $fromDate))
+                ->when($toDate, fn($q) => $q->where('transaction_date', '<=', $toDate))
                 ->with('category:id,name')
                 ->orderBy('transaction_date', 'desc')
                 ->limit(5)
@@ -117,12 +118,36 @@ class AccountController extends Controller
                 ->when($schoolId, fn($q) => $q->where('school_id', $schoolId))
                 ->when($branchId, fn($q) => $q->where('branch_id', $branchId))
                 ->when(!$branchId && $accessibleBranchIds !== 'all', fn($q) => $q->whereIn('branch_id', $accessibleBranchIds))
-                ->when($fromDate, fn($q) => $q->whereDate('transaction_date', '>=', $fromDate))
-                ->when($toDate, fn($q) => $q->whereDate('transaction_date', '<=', $toDate))
+                ->when($fromDate, fn($q) => $q->where('transaction_date', '>=', $fromDate))
+                ->when($toDate, fn($q) => $q->where('transaction_date', '<=', $toDate))
                 ->selectRaw('MONTH(transaction_date) as month, YEAR(transaction_date) as year, type, SUM(amount) as total')
                 ->groupBy(DB::raw('YEAR(transaction_date), MONTH(transaction_date), type'))
                 ->orderByRaw('year ASC, month ASC')
                 ->get();
+
+            // Query 5: Category count (filtered by branch when selected - matches getCategories logic)
+            $categoryCountQuery = AccountCategory::query()->whereNull('deleted_at');
+            if ($schoolId) {
+                $categoryCountQuery->where('school_id', $schoolId);
+            }
+            if ($accessibleBranchIds !== 'all') {
+                if (empty($accessibleBranchIds)) {
+                    $categoryCountQuery->whereRaw('1 = 0');
+                } else {
+                    $categoryCountQuery->whereIn('branch_id', $accessibleBranchIds);
+                }
+            }
+            if ($branchId) {
+                $categoryCountQuery->where('branch_id', (int) $branchId);
+            }
+            $academicYearId = $request->get('academic_year_id') ?: $request->header('X-Academic-Year-Id');
+            $academicYearId = ($academicYearId !== null && $academicYearId !== '') ? (int) $academicYearId : null;
+            if ($academicYearId != null) {
+                $categoryCountQuery->where(function ($q) use ($academicYearId) {
+                    $q->whereNull('academic_year_id')->orWhere('academic_year_id', $academicYearId);
+                });
+            }
+            $categoryCount = $categoryCountQuery->count();
 
             return response()->json([
                 'success' => true,
@@ -131,7 +156,8 @@ class AccountController extends Controller
                         'total_income' => round($totalIncome, 2),
                         'total_expense' => round($totalExpense, 2),
                         'net_balance' => round($totalIncome - $totalExpense, 2),
-                        'financial_year' => $financialYear
+                        'financial_year' => $financialYear,
+                        'category_count' => $categoryCount
                     ],
                     'income_by_category' => $incomeByCategory,
                     'expense_by_category' => $expenseByCategory,
@@ -157,15 +183,23 @@ class AccountController extends Controller
     public function getCategories(Request $request)
     {
         try {
+            $academicYearId = $request->query('academic_year_id')
+                ?? $request->header('X-Academic-Year-Id');
+            $academicYearId = ($academicYearId !== null && $academicYearId !== '') ? (int) $academicYearId : null;
+
             $query = AccountCategory::select([
                 'id',
                 'branch_id',
+                'academic_year_id',
                 'name',
                 'code',
                 'type',
                 'sub_type',
                 'is_active'
-            ])->with('branch:id,name,code');
+            ])->with([
+                'branch:id,name,code',
+                'academicYear:id,name'
+            ]);
 
             // Restrict to accessible branches: branch-wise for normal users, company's branches for Super Admin with company_id
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
@@ -184,6 +218,14 @@ class AccountController extends Controller
                 }
             }
 
+            // Optional academic year filter (prefer current toolbar selection)
+            if ($academicYearId != null) {
+                $query->where(function ($q) use ($academicYearId) {
+                    $q->whereNull('academic_year_id')
+                        ->orWhere('academic_year_id', $academicYearId);
+                });
+            }
+
             if ($request->has('type')) {
                 $query->where('type', $request->type);
             }
@@ -192,7 +234,7 @@ class AccountController extends Controller
                 $query->where('is_active', $request->boolean('is_active'));
             }
 
-            $categories = $query->orderBy('name', 'asc')->get();
+            $categories = $query->orderBy('created_at', 'desc')->get();
 
             return response()->json([
                 'success' => true,
@@ -219,10 +261,12 @@ class AccountController extends Controller
         try {
             // OPTIMIZED: Load only necessary transaction fields
             $category = AccountCategory::select([
-                'id', 'name', 'code', 'type', 'sub_type', 
+                'id', 'branch_id', 'name', 'code', 'type', 'sub_type', 'academic_year_id',
                 'description', 'is_active', 'created_at', 'updated_at'
             ])
             ->with([
+                'branch:id,name,code',
+                'academicYear:id,name',
                 'transactions' => function ($query) {
                     $query->select('id', 'transaction_number', 'transaction_date', 'type', 'amount', 'status', 'category_id')
                         ->latest('transaction_date')
@@ -259,6 +303,7 @@ class AccountController extends Controller
         try {
             $validated = $request->validate([
                 'branch_id' => 'nullable|exists:branches,id',
+                'academic_year_id' => 'nullable|exists:academic_years,id',
                 'name' => 'required|string|max:255',
                 'code' => 'required|string|max:50',
                 'type' => 'required|in:Income,Expense',
@@ -266,6 +311,10 @@ class AccountController extends Controller
                 'description' => 'nullable|string',
                 'is_active' => 'boolean'
             ]);
+
+            $resolvedAcademicYearId = $request->query('academic_year_id')
+                ?? $request->header('X-Academic-Year-Id');
+            $resolvedAcademicYearId = ($resolvedAcademicYearId !== null && $resolvedAcademicYearId !== '') ? (int) $resolvedAcademicYearId : null;
 
             // Ensure branch_id and school_id are set: from request or current user's branch
             $branchId = $validated['branch_id'] ?? null;
@@ -281,6 +330,11 @@ class AccountController extends Controller
                 $schoolId = $branch ? $branch->school_id : null;
             }
             $validated['school_id'] = $schoolId;
+
+            // Default academic year from current toolbar/header if not explicitly sent
+            if (!array_key_exists('academic_year_id', $validated) || $validated['academic_year_id'] === null) {
+                $validated['academic_year_id'] = $resolvedAcademicYearId;
+            }
 
             // Unique per branch (or global) - scope uniqueness by branch_id for name/code
             $uniqueQuery = AccountCategory::where('name', $validated['name']);
@@ -354,6 +408,7 @@ class AccountController extends Controller
 
             $validated = $request->validate([
                 'branch_id' => 'nullable|exists:branches,id',
+                'academic_year_id' => 'sometimes|nullable|exists:academic_years,id',
                 'name' => 'required|string|max:255',
                 'code' => 'required|string|max:50',
                 'type' => 'required|in:Income,Expense',

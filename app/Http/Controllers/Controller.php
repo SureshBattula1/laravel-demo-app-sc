@@ -196,16 +196,17 @@ abstract class Controller
      * @param \Illuminate\Database\Eloquent\Builder $query
      * @param Request $request
      * @param string $branchColumn Default column name is 'branch_id'
+     * @param string|null $schoolColumn Optional school column for applySchoolFilter when branches='all'
      * @return \Illuminate\Database\Eloquent\Builder
      */
-    protected function applyBranchFilter($query, Request $request, $branchColumn = 'branch_id')
+    protected function applyBranchFilter($query, Request $request, $branchColumn = 'branch_id', $schoolColumn = null)
     {
         $accessibleBranches = $this->getAccessibleBranchIds($request);
         
         // SuperAdmin or users with cross-branch permission: no filter needed
         if ($accessibleBranches === 'all') {
             // But still apply school filter if in school context
-            return $this->applySchoolFilter($query, $request);
+            return $this->applySchoolFilter($query, $request, $schoolColumn ?? 'school_id');
         }
         
         // Apply branch filter

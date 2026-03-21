@@ -28,7 +28,8 @@ trait PaginatesAndSorts
         Request $request,
         array $sortableColumns = [],
         string $defaultSortColumn = 'created_at',
-        string $defaultSortDirection = 'desc'
+        string $defaultSortDirection = 'desc',
+        string $sortColumnPrefix = ''
     ) {
         // Apply sorting
         $sortBy = $request->get('sort_by', $defaultSortColumn);
@@ -44,8 +45,9 @@ trait PaginatesAndSorts
             $sortBy = $defaultSortColumn;
         }
         
-        // Apply sorting to query
-        $query->orderBy($sortBy, $sortDirection);
+        // Apply sorting to query (prefix for ambiguous columns when join present)
+        $orderColumn = $sortColumnPrefix ? $sortColumnPrefix . $sortBy : $sortBy;
+        $query->orderBy($orderColumn, $sortDirection);
         
         // Apply pagination
         $perPage = (int) $request->get('per_page', 25);

@@ -13,6 +13,7 @@ class AccountCategory extends Model
     protected $fillable = [
         'branch_id',
         'school_id',
+        'academic_year_id',
         'name',
         'code',
         'type',
@@ -37,6 +38,14 @@ class AccountCategory extends Model
     public function school()
     {
         return $this->belongsTo(School::class);
+    }
+
+    /**
+     * Academic year that owns this category (optional).
+     */
+    public function academicYear()
+    {
+        return $this->belongsTo(AcademicYear::class, 'academic_year_id');
     }
 
     public function transactions()

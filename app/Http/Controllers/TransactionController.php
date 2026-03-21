@@ -26,72 +26,119 @@ class TransactionController extends Controller
     public function index(Request $request)
     {
         try {
-            $query = Transaction::with(['category', 'branch', 'createdBy', 'approvedBy']);
+            // Only load relations needed for list display (category, branch) - skip createdBy/approvedBy
+            $query = Transaction::with(['category:id,name', 'branch:id,name,code']);
 
             // 🔥 APPLY SCHOOL FILTERING - School-level isolation
+            // Use qualified column names (transactions.*) - join with account_categories adds ambiguous columns
             $schoolId = $this->getCurrentSchoolId($request);
             if ($schoolId) {
-                $query->where('school_id', $schoolId);
+                $query->where('transactions.school_id', $schoolId);
             }
 
-            // Apply branch access filtering
-            $this->applyBranchFilter($query, $request);
+            // Apply branch access filtering (qualified columns for join with account_categories)
+            $this->applyBranchFilter($query, $request, 'transactions.branch_id', 'transactions.school_id');
 
-            // Filters
-            if ($request->has('branch_id')) {
-                $query->where('branch_id', $request->branch_id);
+            // Filters (use transactions.* - join with account_categories adds ambiguous columns)
+            if ($request->filled('branch_id')) {
+                $query->where('transactions.branch_id', $request->branch_id);
             }
 
             if ($request->has('type')) {
-                $query->where('type', $request->type);
+                $query->where('transactions.type', $request->type);
             }
 
-            if ($request->has('category_id')) {
-                $query->where('category_id', $request->category_id);
+            if ($request->filled('category_id')) {
+                $query->where('transactions.category_id', $request->category_id);
             }
 
-            if ($request->has('status')) {
-                $query->where('status', $request->status);
+            if ($request->filled('status')) {
+                $query->where('transactions.status', $request->status);
+            }
+
+            if ($request->filled('payment_method')) {
+                $query->where('transactions.payment_method', $request->payment_method);
             }
 
             if ($request->has('financial_year')) {
-                $query->where('financial_year', $request->financial_year);
+                $query->where('transactions.financial_year', $request->financial_year);
             }
 
-            if ($request->has('from_date')) {
-                $query->where('transaction_date', '>=', $request->from_date);
+            // Filter by academic year (via category) - use join for better performance than whereHas
+            $academicYearId = $request->query('academic_year_id')
+                ?? $request->header('X-Academic-Year-Id');
+            $academicYearId = ($academicYearId !== null && $academicYearId !== '') ? (int) $academicYearId : null;
+            if ($academicYearId != null) {
+                $query->join('account_categories', function ($j) use ($academicYearId) {
+                        $j->on('account_categories.id', '=', 'transactions.category_id')
+                            ->whereNull('account_categories.deleted_at')
+                            ->where(function ($q) use ($academicYearId) {
+                                $q->whereNull('account_categories.academic_year_id')
+                                    ->orWhere('account_categories.academic_year_id', $academicYearId);
+                            });
+                    })
+                    ->select('transactions.*');
             }
 
-            if ($request->has('to_date')) {
-                $query->where('transaction_date', '<=', $request->to_date);
+            if ($request->filled('from_date')) {
+                $query->where('transactions.transaction_date', '>=', $request->from_date);
+            }
+            if ($request->filled('to_date')) {
+                $query->where('transactions.transaction_date', '<=', $request->to_date);
             }
 
-            // OPTIMIZED Search filter - prefix search for better index usage
-            if ($request->has('search') && !empty($request->search)) {
-                $search = strip_tags($request->search);
-                $query->where(function($q) use ($search) {
-                    $q->where('transaction_number', 'like', "{$search}%")
-                      ->orWhere('party_name', 'like', "{$search}%")
-                      ->orWhere('description', 'like', "{$search}%");
-                });
+            // Global text search (basic search box): tx #, party, description, payment method,
+            // branch name/code, category name/code, amount (numeric or substring in string form)
+            if ($request->filled('search')) {
+                $search = trim(strip_tags($request->search));
+                if ($search !== '') {
+                    $like = '%' . addcslashes($search, '%_\\') . '%';
+
+                    $query->where(function ($q) use ($search, $like) {
+                        $q->where('transactions.transaction_number', 'like', $like)
+                            ->orWhere('transactions.party_name', 'like', $like)
+                            ->orWhere('transactions.description', 'like', $like)
+                            ->orWhere('transactions.payment_method', 'like', $like)
+                            ->orWhere('transactions.payment_reference', 'like', $like)
+                            ->orWhereHas('branch', function ($bq) use ($like) {
+                                $bq->where('name', 'like', $like)
+                                    ->orWhere('code', 'like', $like);
+                            })
+                            ->orWhereExists(function ($sub) use ($like) {
+                                $sub->select(DB::raw(1))
+                                    ->from('account_categories')
+                                    ->whereColumn('account_categories.id', 'transactions.category_id')
+                                    ->whereNull('account_categories.deleted_at')
+                                    ->where(function ($cq) use ($like) {
+                                        $cq->where('account_categories.name', 'like', $like)
+                                            ->orWhere('account_categories.code', 'like', $like);
+                                    });
+                            });
+
+                        $normalized = str_replace([',', ' ', "\xc2\xa0"], '', $search);
+                        if (is_numeric($normalized)) {
+                            $num = filter_var($normalized, FILTER_VALIDATE_FLOAT);
+                            if ($num !== false) {
+                                $q->orWhereRaw('ABS(CAST(transactions.amount AS DECIMAL(15,4)) - ?) < 0.00005', [$num]);
+                            }
+                        }
+
+                        $q->orWhereRaw('CAST(transactions.amount AS CHAR(64)) LIKE ?', ['%' . addcslashes($search, '%_\\') . '%']);
+                    });
+                }
             }
 
-            // Define sortable columns
+            // Define sortable columns (use qualified names when join present - avoids ambiguous column)
             $sortableColumns = [
-                'id',
-                'transaction_number',
-                'transaction_date',
-                'type',
-                'category_id',
-                'amount',
-                'status',
-                'payment_method',
-                'financial_year',
-                'created_at'
+                'id', 'transaction_number', 'transaction_date', 'type', 'category_id',
+                'amount', 'status', 'payment_method', 'financial_year', 'created_at'
             ];
+            $sortPrefix = $academicYearId != null ? 'transactions.' : '';
 
-            // Apply pagination and sorting (default: 25 per page, sorted by transaction_date desc)
-            $transactions = $this->paginateAndSort($query, $request, $sortableColumns, 'transaction_date', 'desc');
+            // Apply pagination and sorting (default: 25 per page, sorted by created_at desc - newest first)
+            $transactions = $this->paginateAndSort(
+                $query, $request, $sortableColumns, 'created_at', 'desc', $sortPrefix
+            );
 
             // Return standardized paginated response
             return response()->json([
