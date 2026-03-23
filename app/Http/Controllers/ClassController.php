@@ -575,28 +575,26 @@ class ClassController extends Controller
                         ];
                     });
 
-                // If we found existing sections, return them
+                // When grade and branch are specified: return only existing sections (no generic fallback)
+                if ($grade && $branchId) {
+                    return response()->json([
+                        'success' => true,
+                        'data' => $existingSections->values()->all()
+                    ]);
+                }
+
+                // Grade or branch only: return existing sections if any
                 if ($existingSections->isNotEmpty()) {
                     return response()->json([
                         'success' => true,
-                        'data' => $existingSections
+                        'data' => $existingSections->values()->all()
                     ]);
                 }
             }
 
-            // Default: Return all standard sections (A-F)
-            $sections = [
-                ['value' => 'A', 'label' => 'Section A'],
-                ['value' => 'B', 'label' => 'Section B'],
-                ['value' => 'C', 'label' => 'Section C'],
-                ['value' => 'D', 'label' => 'Section D'],
-                ['value' => 'E', 'label' => 'Section E'],
-                ['value' => 'F', 'label' => 'Section F'],
-            ];
-
             return response()->json([
                 'success' => true,
-                'data' => $sections
+                'data' => []
             ]);
 
         } catch (\Exception $e) {

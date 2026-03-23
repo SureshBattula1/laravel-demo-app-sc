@@ -161,6 +161,7 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
     Route::post('students/promote', [StudentController::class, 'promote']);
     Route::post('students/promote-with-fee-handling', [StudentController::class, 'promoteWithFeeHandling']);
     Route::post('students/preview-promotion', [StudentController::class, 'previewPromotion']);
+    Route::post('students/revert-promotion', [StudentController::class, 'revertPromotion']);
     Route::get('students/{id}/promotion-history', [StudentController::class, 'getPromotionHistory']);
     Route::get('students/{id}/dues', [StudentController::class, 'getStudentDues']);
     

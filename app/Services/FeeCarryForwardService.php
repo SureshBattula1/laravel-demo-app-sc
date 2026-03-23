@@ -174,11 +174,14 @@ class FeeCarryForwardService
 
     /**
      * Carry forward fees for a student
+     * @param bool $useOwnTransaction When false, assume caller has an open transaction (e.g. promotion flow)
      */
-    public function carryForwardFees($studentId, $fromGrade, $toGrade, $fromAcademicYear, $toAcademicYear, $userId): array
+    public function carryForwardFees($studentId, $fromGrade, $toGrade, $fromAcademicYear, $toAcademicYear, $userId, bool $useOwnTransaction = true): array
     {
-        DB::beginTransaction();
-        
+        if ($useOwnTransaction) {
+            DB::beginTransaction();
+        }
+
         try {
             // Accept both user_id and student id
             $student = is_numeric($studentId) 
@@ -198,7 +201,18 @@ class FeeCarryForwardService
                 ->exists();
 
             if ($existingCarriedFees) {
-                throw new \Exception('Fees have already been carried forward for this student');
+                // Fees already carried forward (e.g. re-promotion after revert or retry) – skip and allow promotion to proceed
+                Log::info('Skipping fee carry forward - already done', [
+                    'student_id' => $student->id,
+                    'from_grade' => $fromGrade,
+                    'to_grade' => $toGrade
+                ]);
+                return [
+                    'success' => true,
+                    'carried_fees' => [],
+                    'total_amount' => 0,
+                    'fee_types_count' => 0
+                ];
             }
 
             $pendingFees = $this->identifyPendingFees($student->user_id, $fromGrade, $fromAcademicYear);
@@ -259,7 +273,9 @@ class FeeCarryForwardService
                 }
             }
 
-            DB::commit();
+            if ($useOwnTransaction) {
+                DB::commit();
+            }
 
             Log::info('Fees carried forward', [
                 'student_id' => $student->id,
@@ -277,7 +293,9 @@ class FeeCarryForwardService
             ];
 
         } catch (\Exception $e) {
-            DB::rollBack();
+            if ($useOwnTransaction) {
+                DB::rollBack();
+            }
             Log::error('Error carrying forward fees', [
                 'student_id' => $studentId,
                 'error' => $e->getMessage()

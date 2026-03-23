@@ -815,7 +815,9 @@ class StudentController extends Controller
                 'student_ids.*' => 'exists:students,id',
                 'from_grade' => 'required|string',
                 'to_grade' => 'required|string',
-                'to_academic_year_id' => 'required|integer|exists:academic_years,id'
+                'to_academic_year_id' => 'required|integer|exists:academic_years,id',
+                'from_section' => 'nullable|string|max:50',
+                'to_section' => 'nullable|string|max:50'
             ]);
 
             if ($validator->fails()) {
@@ -833,15 +835,18 @@ class StudentController extends Controller
 
             $promotionService = app(\App\Services\StudentPromotionService::class);
             $promoted = 0;
+            $fromSection = $request->filled('from_section') ? (string) $request->from_section : null;
+            $toSection = $request->filled('to_section') ? (string) $request->to_section : null;
+
             foreach ($request->student_ids as $studentId) {
                 $student = \App\Models\Student::find($studentId);
-                if (!$student || !$promotionService->studentMatchesForPromotion($student, (string) $request->from_grade, $fromAcademicYearId)) {
+                if (!$student || !$promotionService->studentMatchesForPromotion($student, (string) $request->from_grade, $fromAcademicYearId, $fromSection)) {
                     continue;
                 }
 
                 // Ensure source enrollment exists for history completeness
                 if ($fromAcademicYearId) {
-                    $promotionService->ensureSourceEnrollment($student, $fromAcademicYearId, (string) $request->from_grade, $request->user()->id);
+                    $promotionService->ensureSourceEnrollment($student, $fromAcademicYearId, (string) $request->from_grade, $request->user()->id, $fromSection);
                 }
 
                 // Create enrollment for target year (history-safe)
@@ -854,7 +859,7 @@ class StudentController extends Controller
                         'school_id' => $student->school_id,
                         'branch_id' => $student->branch_id,
                         'grade' => (string) $request->to_grade,
-                        'section' => null,
+                        'section' => $toSection,
                         'roll_number' => $student->roll_number ? (string) $student->roll_number : null,
                         'status' => 'Active',
                         'created_by' => $request->user()->id,
@@ -869,7 +874,7 @@ class StudentController extends Controller
                     'grade' => (string) $request->to_grade,
                     'academic_year_id' => $toAcademicYearId,
                     'academic_year' => $toAcademicYearName,
-                    'section' => null,
+                    'section' => $toSection,
                 ]);
 
                 // Promotion history (works for both old + new schema)
@@ -928,7 +933,10 @@ class StudentController extends Controller
                 'from_grade' => 'required|string',
                 'to_grade' => 'required|string',
                 'to_academic_year_id' => 'required|integer|exists:academic_years,id',
-                'check_eligibility' => 'boolean'
+                'from_academic_year_id' => 'nullable|integer|exists:academic_years,id',
+                'check_eligibility' => 'boolean',
+                'from_section' => 'nullable|string|max:50',
+                'to_section' => 'nullable|string|max:50'
             ]);
 
             if ($validator->fails()) {
@@ -945,7 +953,16 @@ class StudentController extends Controller
                 $notificationService
             );
 
-            $fromAcademicYearId = $this->academicYearContext->id(false);
+            $fromAcademicYearId = $request->filled('from_academic_year_id')
+                ? (int) $request->from_academic_year_id
+                : $this->academicYearContext->id(false);
+
+            if (!$fromAcademicYearId) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'From academic year is required. Select it in the toolbar or provide from_academic_year_id.'
+                ], 422);
+            }
 
             $result = $promotionService->promoteStudentsWithFeeHandling(
                 $request->student_ids,
@@ -954,8 +971,18 @@ class StudentController extends Controller
                 (int) $request->to_academic_year_id,
                 $request->user()->id,
                 $request->boolean('check_eligibility', false),
-                $fromAcademicYearId
+                $fromAcademicYearId,
+                $request->filled('from_section') ? (string) $request->from_section : null,
+                $request->filled('to_section') ? (string) $request->to_section : null
             );
+
+            if ($result['promoted_count'] === 0) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No students were promoted. Students may not match the selected grade/section for the from academic year, or may have been skipped.',
+                    'data' => $result
+                ], 422);
+            }
 
             return response()->json([
                 'success' => true,
@@ -986,7 +1013,9 @@ class StudentController extends Controller
                 'from_grade' => 'required|string',
                 'to_grade' => 'required|string',
                 'to_academic_year_id' => 'nullable|integer|exists:academic_years,id',
-                'academic_year' => 'nullable|string'
+                'academic_year' => 'nullable|string',
+                'from_section' => 'nullable|string|max:50',
+                'to_section' => 'nullable|string|max:50'
             ]);
 
             if ($validator->fails()) {
@@ -1017,10 +1046,12 @@ class StudentController extends Controller
             $promotionService = app(\App\Services\StudentPromotionService::class);
             $previews = [];
 
+            $fromSection = $request->filled('from_section') ? (string) $request->from_section : null;
+
             foreach ($request->student_ids as $studentId) {
                 $student = \App\Models\Student::with('user')->find($studentId);
 
-                if (!$student || !$promotionService->studentMatchesForPromotion($student, (string) $request->from_grade, $fromAcademicYearId)) {
+                if (!$student || !$promotionService->studentMatchesForPromotion($student, (string) $request->from_grade, $fromAcademicYearId, $fromSection)) {
                     continue;
                 }
 
@@ -1063,6 +1094,52 @@ class StudentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to preview promotion',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Revert (unpromote) students back to a previous grade/section
+     */
+    public function revertPromotion(Request $request)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'student_ids' => 'required|array',
+                'student_ids.*' => 'exists:students,id',
+                'academic_year_id' => 'required|integer|exists:academic_years,id',
+                'from_grade' => 'required|string',
+                'to_grade' => 'required|string',
+                'from_section' => 'nullable|string|max:50',
+                'to_section' => 'nullable|string|max:50'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
+            }
+
+            $promotionService = app(\App\Services\StudentPromotionService::class);
+            $result = $promotionService->revertPromotion(
+                $request->student_ids,
+                (string) $request->from_grade,
+                (string) $request->to_grade,
+                (int) $request->academic_year_id,
+                $request->user()->id,
+                $request->filled('from_section') ? (string) $request->from_section : null,
+                $request->filled('to_section') ? (string) $request->to_section : null
+            );
+
+            return response()->json([
+                'success' => true,
+                'message' => "Successfully reverted {$result['reverted_count']} student(s) to {$request->to_grade}",
+                'data' => $result
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Revert promotion error', ['error' => $e->getMessage()]);
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to revert promotion',
                 'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
             ], 500);
         }
