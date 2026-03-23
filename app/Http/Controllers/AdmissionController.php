@@ -3,9 +3,9 @@
 namespace App\Http\Controllers;
 
 use App\Http\Traits\PaginatesAndSorts;
+use App\Models\AcademicYear;
 use App\Models\AdmissionApplication;
 use App\Models\Branch;
-use App\Models\Grade;
 use App\Models\User;
 use App\Models\Role;
 use App\Models\Student;
@@ -32,8 +32,12 @@ class AdmissionController extends Controller
     {
         try {
             $query = DB::table('admission_applications')
+                ->whereNull('admission_applications.deleted_at')
                 ->leftJoin('branches', 'admission_applications.branch_id', '=', 'branches.id')
-                ->leftJoin('grades', 'admission_applications.applying_for_grade', '=', 'grades.value')
+                ->leftJoin('grades', function ($join) {
+                    $join->on('admission_applications.applying_for_grade', '=', 'grades.value')
+                        ->on('admission_applications.branch_id', '=', 'grades.branch_id');
+                })
                 ->leftJoin('students', 'admission_applications.student_id', '=', 'students.id')
                 ->select(
                     'admission_applications.*',
@@ -56,20 +60,36 @@ class AdmissionController extends Controller
             }
 
             // Apply filters
-            if ($request->has('status')) {
+            if ($request->filled('status')) {
                 $query->where('admission_applications.application_status', $request->status);
             }
 
-            if ($request->has('grade')) {
+            if ($request->filled('application_status')) {
+                $query->where('admission_applications.application_status', $request->application_status);
+            }
+
+            if ($request->filled('grade')) {
                 $query->where('admission_applications.applying_for_grade', $request->grade);
             }
 
-            if ($request->has('academic_year')) {
+            if ($request->filled('applying_for_grade')) {
+                $query->where('admission_applications.applying_for_grade', $request->applying_for_grade);
+            }
+
+            if ($request->filled('applying_for_section')) {
+                $query->where('admission_applications.applying_for_section', $request->applying_for_section);
+            }
+
+            if ($request->filled('academic_year')) {
                 $query->where('admission_applications.academic_year', $request->academic_year);
             }
 
             if ($request->has('branch_id')) {
                 $query->where('admission_applications.branch_id', $request->branch_id);
+            }
+
+            if ($request->filled('referred_by')) {
+                $query->where('admission_applications.referred_by', 'like', '%' . $request->referred_by . '%');
             }
 
             if ($request->has('search')) {
@@ -82,6 +102,11 @@ class AdmissionController extends Controller
                       ->orWhere('admission_applications.last_name', 'like', "{$search}%")
                       ->orWhere('admission_applications.email', 'like', "{$search}%")
                       ->orWhere('admission_applications.phone', 'like', "{$search}%")
+                      ->orWhere('admission_applications.application_status', 'like', "{$search}%")
+                      ->orWhere('admission_applications.academic_year', 'like', "{$search}%")
+                      ->orWhere('admission_applications.applying_for_grade', 'like', "{$search}%")
+                      ->orWhere('admission_applications.applying_for_section', 'like', "{$search}%")
+                      ->orWhere('admission_applications.referred_by', 'like', "{$search}%")
                       ->orWhereRaw('CONCAT(admission_applications.first_name, " ", admission_applications.last_name) LIKE ?', ["{$search}%"]);
                 });
             }
@@ -89,7 +114,7 @@ class AdmissionController extends Controller
             // Sorting
             $sortableColumns = [
                 'application_number', 'application_date', 'first_name', 'last_name',
-                'application_status', 'applying_for_grade', 'academic_year'
+                'application_status', 'applying_for_grade', 'academic_year', 'referred_by'
             ];
 
             $query = $this->applySorting($query, $request, $sortableColumns, 'application_date', 'desc');
@@ -123,6 +148,82 @@ class AdmissionController extends Controller
     }
 
     /**
+     * Get admission dashboard overview (total, status-wise counts, fee total)
+     */
+    public function getDashboard(Request $request)
+    {
+        try {
+            $branchId = $request->get('branch_id');
+            $fromDate = $request->get('from_date');
+            $toDate = $request->get('to_date');
+            $academicYear = $request->get('academic_year');
+            $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+
+            $query = DB::table('admission_applications')
+                ->whereNull('deleted_at');
+
+            if ($accessibleBranchIds !== 'all') {
+                if (!empty($accessibleBranchIds)) {
+                    $query->whereIn('branch_id', $accessibleBranchIds);
+                } else {
+                    $query->whereRaw('1 = 0');
+                }
+            }
+
+            if ($branchId) {
+                $query->where('branch_id', (int) $branchId);
+            }
+            if ($fromDate) {
+                $query->where('application_date', '>=', $fromDate);
+            }
+            if ($toDate) {
+                $query->where('application_date', '<=', $toDate);
+            }
+            if ($academicYear) {
+                $query->where('academic_year', $academicYear);
+            }
+
+            // Total count
+            $total = (clone $query)->count();
+
+            // Status-wise counts
+            $statusCounts = (clone $query)
+                ->selectRaw('application_status as status, COUNT(*) as count')
+                ->groupBy('application_status')
+                ->pluck('count', 'status')
+                ->toArray();
+
+            $statuses = ['Applied', 'Shortlisted', 'Rejected', 'Admitted', 'Waitlisted'];
+            $byStatus = [];
+            foreach ($statuses as $s) {
+                $byStatus[$s] = (int) ($statusCounts[$s] ?? 0);
+            }
+
+            // Fee total (sum of application_fee_amount where application_fee_paid = true)
+            $feeTotal = (clone $query)
+                ->where('application_fee_paid', true)
+                ->sum('application_fee_amount');
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'total' => $total,
+                    'by_status' => $byStatus,
+                    'fee_total' => round((float) $feeTotal, 2),
+                ],
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Get admission dashboard error', ['error' => $e->getMessage()]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to load admission dashboard',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+            ], 500);
+        }
+    }
+
+    /**
      * Store new admission application
      */
     public function store(Request $request)
@@ -132,7 +233,8 @@ class AdmissionController extends Controller
         try {
             $validator = Validator::make($request->all(), [
                 'branch_id' => 'required|exists:branches,id',
-                'academic_year' => 'required|string',
+                'academic_year_id' => 'required_without:academic_year|nullable|exists:academic_years,id',
+                'academic_year' => 'required_without:academic_year_id|nullable|string',
                 'applying_for_grade' => 'required|string',
                 'first_name' => 'required|string|max:100',
                 'last_name' => 'required|string|max:100',
@@ -165,11 +267,14 @@ class AdmissionController extends Controller
             $sequence = $lastApplication ? (int)substr($lastApplication->application_number, -4) + 1 : 1;
             $applicationNumber = $branch->code . '/ADM/' . $year . '/' . str_pad($sequence, 4, '0', STR_PAD_LEFT);
 
+            [$academicYearId, $academicYearName] = $this->resolveAcademicYearForRequest($request);
+
             $application = AdmissionApplication::create([
                 'branch_id' => $request->branch_id,
                 'application_number' => $applicationNumber,
                 'application_date' => now(),
-                'academic_year' => $request->academic_year,
+                'academic_year_id' => $academicYearId,
+                'academic_year' => $academicYearName,
                 'applying_for_grade' => $request->applying_for_grade,
                 'applying_for_section' => $request->applying_for_section,
                 'first_name' => strip_tags($request->first_name),
@@ -223,6 +328,7 @@ class AdmissionController extends Controller
                 'entrance_test_required' => $request->boolean('entrance_test_required', false),
                 'interview_required' => $request->boolean('interview_required', false),
                 'remarks' => $request->remarks,
+                'referred_by' => $request->referred_by,
                 'documents' => $request->documents ?? [],
                 'created_by' => $request->user()->id,
             ]);
@@ -257,6 +363,17 @@ class AdmissionController extends Controller
         try {
             $application = AdmissionApplication::with(['branch', 'student', 'createdBy', 'updatedBy'])
                 ->findOrFail($id);
+
+            // Resolve grade label (e.g. "Grade 1") from applying_for_grade value
+            $gradeLabel = null;
+            if ($application->applying_for_grade && $application->branch_id) {
+                $grade = DB::table('grades')
+                    ->where('branch_id', $application->branch_id)
+                    ->where('value', $application->applying_for_grade)
+                    ->first();
+                $gradeLabel = $grade?->label ?? null;
+            }
+            $application->setAttribute('grade_label', $gradeLabel ?? ('Grade ' . $application->applying_for_grade));
 
             return response()->json([
                 'success' => true,
@@ -302,7 +419,7 @@ class AdmissionController extends Controller
 
             // Prepare update data
             $updateData = $request->only([
-                'academic_year', 'applying_for_grade', 'applying_for_section',
+                'applying_for_grade', 'applying_for_section',
                 'first_name', 'last_name', 'date_of_birth', 'gender', 'blood_group',
                 'religion', 'nationality', 'category', 'mother_tongue',
                 'email', 'phone', 'alternate_phone',
@@ -318,8 +435,15 @@ class AdmissionController extends Controller
                 'interview_required', 'interview_date', 'interview_result',
                 'admission_decision', 'admission_decision_date', 'admission_offer_letter', 'admission_validity_date',
                 'registration_fee_paid', 'registration_fee_amount', 'registration_fee_payment_date',
-                'admission_confirmed', 'admission_confirmed_date', 'student_id', 'remarks', 'documents'
+                'admission_confirmed', 'admission_confirmed_date', 'student_id', 'remarks', 'referred_by', 'documents'
             ]);
+
+            // Resolve academic_year_id and academic_year when either is provided
+            if ($request->has('academic_year_id') || $request->has('academic_year')) {
+                [$academicYearId, $academicYearName] = $this->resolveAcademicYearForRequest($request);
+                $updateData['academic_year_id'] = $academicYearId;
+                $updateData['academic_year'] = $academicYearName;
+            }
 
             // Validate and sanitize score values
             if ($request->has('entrance_test_score')) {
@@ -385,8 +509,23 @@ class AdmissionController extends Controller
     public function destroy($id)
     {
         try {
-            $application = AdmissionApplication::findOrFail($id);
-            $application->delete();
+            // Include soft-deleted so we can handle already-deleted records
+            $application = AdmissionApplication::withTrashed()->find($id);
+
+            if (!$application) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Admission application not found',
+                    'error' => 'Application with ID ' . $id . ' does not exist'
+                ], 404);
+            }
+
+            if ($application->trashed()) {
+                // Already soft-deleted; permanently remove
+                $application->forceDelete();
+            } else {
+                $application->delete();
+            }
 
             return response()->json([
                 'success' => true,
@@ -395,7 +534,7 @@ class AdmissionController extends Controller
 
         } catch (\Exception $e) {
             Log::error('Delete admission application error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to delete admission application',
@@ -555,6 +694,9 @@ class AdmissionController extends Controller
                 'updated_at' => now()
             ]);
             
+            // Resolve academic_year_id and academic_year name from application
+            [$academicYearId, $academicYearName] = $this->resolveAcademicYearFromApplication($application);
+
             // Step 4: Create Student record (Student is created AFTER User, and linked via user_id)
             $studentData = [
             'user_id' => $user->id,
@@ -565,7 +707,8 @@ class AdmissionController extends Controller
             'admission_type' => 'Regular',
             'grade' => $grade,
             'section' => $section,
-            'academic_year' => $application->academic_year,
+            'academic_year_id' => $academicYearId,
+            'academic_year' => $academicYearName,
             'date_of_birth' => $application->date_of_birth,
             'gender' => $application->gender,
             'blood_group' => $application->blood_group,
@@ -655,6 +798,41 @@ class AdmissionController extends Controller
                 'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
             ], 500);
         }
+    }
+
+    /**
+     * Resolve academic_year_id and academic_year name from request (academic_year_id or academic_year name).
+     * Returns [academic_year_id, academic_year_name].
+     */
+    private function resolveAcademicYearForRequest(Request $request): array
+    {
+        if ($request->filled('academic_year_id')) {
+            $ay = AcademicYear::find((int) $request->academic_year_id);
+            return [(int) $request->academic_year_id, $ay?->name];
+        }
+        if ($request->filled('academic_year')) {
+            $ay = AcademicYear::where('name', $request->academic_year)->first();
+            return [$ay?->id, $ay?->name ?? $request->academic_year];
+        }
+        return [null, null];
+    }
+
+    /**
+     * Resolve academic_year_id and academic_year name from admission application.
+     * Uses academic_year_id if present, otherwise looks up by academic_year name.
+     * Returns [academic_year_id, academic_year_name].
+     */
+    private function resolveAcademicYearFromApplication(AdmissionApplication $application): array
+    {
+        if (!empty($application->academic_year_id)) {
+            $ay = AcademicYear::find($application->academic_year_id);
+            return [$application->academic_year_id, $ay?->name ?? $application->academic_year];
+        }
+        if (!empty($application->academic_year)) {
+            $ay = AcademicYear::where('name', $application->academic_year)->first();
+            return [$ay?->id, $ay?->name ?? $application->academic_year];
+        }
+        return [null, null];
     }
 
     /**

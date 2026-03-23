@@ -508,6 +508,7 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
     // Admission Management Routes
     Route::prefix('admissions')->group(function () {
         Route::get('/', [AdmissionController::class, 'index']);
+        Route::get('/dashboard', [AdmissionController::class, 'getDashboard']);
         Route::post('/', [AdmissionController::class, 'store']);
         Route::get('/export', [AdmissionController::class, 'export']);
         Route::get('/{id}', [AdmissionController::class, 'show']);

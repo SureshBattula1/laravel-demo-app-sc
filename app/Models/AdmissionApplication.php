@@ -15,6 +15,7 @@ class AdmissionApplication extends Model
         'application_number',
         'application_date',
         'academic_year',
+        'academic_year_id',
         'applying_for_grade',
         'applying_for_section',
         'first_name',
@@ -86,6 +87,7 @@ class AdmissionApplication extends Model
         'admission_confirmed_date',
         'student_id',
         'remarks',
+        'referred_by',
         'documents',
         'created_by',
         'updated_by'
