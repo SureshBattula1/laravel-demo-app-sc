@@ -268,21 +268,45 @@ class StudentController extends Controller
     public function show(Request $request, $id)
     {
         try {
+            $academicYearId = $this->academicYearContext->id(false);
+            $hasEnrollments = Schema::hasTable('student_enrollments');
             $hasGradesBranchId = Schema::hasColumn('grades', 'branch_id');
+
             // Build query
             $query = DB::table('students')
                 ->join('users', 'students.user_id', '=', 'users.id')
-                ->leftJoin('branches', 'students.branch_id', '=', 'branches.id')
-                ->leftJoin('grades', function ($join) use ($request) {
-                    $schoolId = $this->getCurrentSchoolId($request);
-                    $join->on('grades.value', '=', 'students.grade');
-                    $hasGradesBranchId = Schema::hasColumn('grades', 'branch_id');
-                    if ($hasGradesBranchId) {
-                        $join->where('grades.branch_id', '=', 'students.branch_id');
-                    } elseif ($schoolId) {
-                        $join->where('grades.school_id', '=', $schoolId);
-                    }
-                })
+                ->leftJoin('branches', 'students.branch_id', '=', 'branches.id');
+
+            $schoolId = $this->getCurrentSchoolId($request);
+            if ($hasEnrollments && $academicYearId) {
+                $query
+                    ->leftJoin('student_enrollments as se', function ($join) use ($academicYearId) {
+                        $join->on('se.student_id', '=', 'students.id')
+                            ->where('se.academic_year_id', '=', $academicYearId);
+                    })
+                    ->leftJoin('academic_years as ay', 'se.academic_year_id', '=', 'ay.id')
+                    ->leftJoin('grades', function ($join) use ($schoolId, $hasGradesBranchId) {
+                        $join->on('grades.value', '=', DB::raw('COALESCE(se.grade, students.grade)'));
+                        if ($hasGradesBranchId) {
+                            $join->where('grades.branch_id', '=', DB::raw('COALESCE(se.branch_id, students.branch_id)'));
+                        } elseif ($schoolId) {
+                            $join->where('grades.school_id', '=', $schoolId);
+                        }
+                    });
+            } else {
+                $query
+                    ->leftJoin('academic_years as ay', 'students.academic_year_id', '=', 'ay.id')
+                    ->leftJoin('grades', function ($join) use ($schoolId, $hasGradesBranchId) {
+                        $join->on('grades.value', '=', 'students.grade');
+                        if ($hasGradesBranchId) {
+                            $join->where('grades.branch_id', '=', 'students.branch_id');
+                        } elseif ($schoolId) {
+                            $join->where('grades.school_id', '=', $schoolId);
+                        }
+                    });
+            }
+
+            $query
                 ->where('students.id', $id);
             
             // 🔥 APPLY BRANCH FILTERING - Prevent access to other branches
@@ -298,7 +322,11 @@ class StudentController extends Controller
             // Select all student fields using students.*
             $student = $query->select(
                     'students.*',
-                    'grades.label as grade_label',
+                    DB::raw('COALESCE(' . ($hasEnrollments && $academicYearId ? 'se.grade' : 'NULL') . ', students.grade) as grade'),
+                    DB::raw('COALESCE(grades.label, CONCAT("Grade ", COALESCE(' . ($hasEnrollments && $academicYearId ? 'se.grade' : 'NULL') . ', students.grade))) as grade_label'),
+                    DB::raw('COALESCE(' . ($hasEnrollments && $academicYearId ? 'se.section' : 'NULL') . ', students.section) as section'),
+                    DB::raw('COALESCE(' . ($hasEnrollments && $academicYearId ? 'se.academic_year_id' : 'NULL') . ', students.academic_year_id) as academic_year_id'),
+                    DB::raw('COALESCE(ay.name, students.academic_year) as academic_year'),
                     'users.first_name',
                     'users.last_name',
                     'users.email',
@@ -803,11 +831,17 @@ class StudentController extends Controller
             $toAcademicYearId = (int) $request->to_academic_year_id;
             $toAcademicYearName = \App\Models\AcademicYear::query()->where('id', $toAcademicYearId)->value('name');
 
+            $promotionService = app(\App\Services\StudentPromotionService::class);
             $promoted = 0;
             foreach ($request->student_ids as $studentId) {
                 $student = \App\Models\Student::find($studentId);
-                if (!$student || (string) $student->grade !== (string) $request->from_grade) {
+                if (!$student || !$promotionService->studentMatchesForPromotion($student, (string) $request->from_grade, $fromAcademicYearId)) {
                     continue;
+                }
+
+                // Ensure source enrollment exists for history completeness
+                if ($fromAcademicYearId) {
+                    $promotionService->ensureSourceEnrollment($student, $fromAcademicYearId, (string) $request->from_grade, $request->user()->id);
                 }
 
                 // Create enrollment for target year (history-safe)
@@ -911,13 +945,16 @@ class StudentController extends Controller
                 $notificationService
             );
 
+            $fromAcademicYearId = $this->academicYearContext->id(false);
+
             $result = $promotionService->promoteStudentsWithFeeHandling(
                 $request->student_ids,
                 $request->from_grade,
                 $request->to_grade,
                 (int) $request->to_academic_year_id,
                 $request->user()->id,
-                $request->boolean('check_eligibility', false)
+                $request->boolean('check_eligibility', false),
+                $fromAcademicYearId
             );
 
             return response()->json([
@@ -948,7 +985,8 @@ class StudentController extends Controller
                 'student_ids.*' => 'exists:students,id',
                 'from_grade' => 'required|string',
                 'to_grade' => 'required|string',
-                'academic_year' => 'required|string'
+                'to_academic_year_id' => 'nullable|integer|exists:academic_years,id',
+                'academic_year' => 'nullable|string'
             ]);
 
             if ($validator->fails()) {
@@ -958,21 +996,39 @@ class StudentController extends Controller
                 ], 422);
             }
 
+            $fromAcademicYearId = $this->academicYearContext->id(false);
+            $fromAcademicYearName = $fromAcademicYearId
+                ? (\App\Models\AcademicYear::query()->where('id', $fromAcademicYearId)->value('name') ?? $request->academic_year)
+                : ($request->academic_year ?? null);
+
+            $toAcademicYearId = $request->filled('to_academic_year_id') ? (int) $request->to_academic_year_id : null;
+            $toAcademicYearName = $toAcademicYearId
+                ? (\App\Models\AcademicYear::query()->where('id', $toAcademicYearId)->value('name') ?? $request->academic_year)
+                : $request->academic_year;
+
+            if (!$fromAcademicYearName) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'From academic year could not be resolved. Ensure X-Academic-Year-Id header is set or academic_year is provided.'
+                ], 422);
+            }
+
             $carryForwardService = new \App\Services\FeeCarryForwardService();
+            $promotionService = app(\App\Services\StudentPromotionService::class);
             $previews = [];
 
             foreach ($request->student_ids as $studentId) {
                 $student = \App\Models\Student::with('user')->find($studentId);
-                
-                if (!$student || $student->grade !== $request->from_grade) {
+
+                if (!$student || !$promotionService->studentMatchesForPromotion($student, (string) $request->from_grade, $fromAcademicYearId)) {
                     continue;
                 }
 
                 $preview = $carryForwardService->getCarryForwardSummary(
-                    $student->id, // Pass student id, service will handle both
+                    $student->id,
                     $request->from_grade,
                     $request->to_grade,
-                    $student->academic_year ?? $request->academic_year
+                    $fromAcademicYearName
                 );
 
                 $preview['student_id'] = $studentId;
@@ -981,13 +1037,22 @@ class StudentController extends Controller
                 $previews[] = $preview;
             }
 
+            $totalFeesCarryForward = array_sum(array_column($previews, 'total_pending_amount'));
+
             return response()->json([
                 'success' => true,
                 'data' => [
                     'previews' => $previews,
+                    'from_grade' => $request->from_grade,
+                    'to_grade' => $request->to_grade,
+                    'from_academic_year' => $fromAcademicYearName,
+                    'to_academic_year' => $toAcademicYearName,
+                    'to_academic_year_id' => $toAcademicYearId,
+                    'total_students' => count($previews),
+                    'total_fees_carry_forward' => $totalFeesCarryForward,
                     'summary' => [
                         'total_students' => count($previews),
-                        'total_pending_amount' => array_sum(array_column($previews, 'total_pending_amount'))
+                        'total_pending_amount' => $totalFeesCarryForward
                     ]
                 ]
             ]);

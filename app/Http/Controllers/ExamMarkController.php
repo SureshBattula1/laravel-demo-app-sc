@@ -103,6 +103,16 @@ class ExamMarkController extends Controller
                 ->join('exams', 'exam_schedules.exam_id', '=', 'exams.id')
                 ->where('exams.branch_id', $student->branch_id);
 
+            $academicYearId = request()->attributes->get('academic_year_id') ?? request()->input('academic_year_id');
+            if ($academicYearId && \Illuminate\Support\Facades\Schema::hasColumn('exams', 'academic_year_id')) {
+                $marksQuery->where('exams.academic_year_id', (int) $academicYearId);
+            } elseif ($academicYearId) {
+                $academicYearName = \App\Models\AcademicYear::query()->where('id', $academicYearId)->value('name');
+                if ($academicYearName) {
+                    $marksQuery->where('exams.academic_year', $academicYearName);
+                }
+            }
+
             // Optional: filter by school if student has school_id
             if (!empty($student->school_id)) {
                 $marksQuery->where('exams.school_id', $student->school_id);

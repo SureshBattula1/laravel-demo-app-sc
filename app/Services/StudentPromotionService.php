@@ -24,9 +24,26 @@ class StudentPromotionService
     }
 
     /**
+     * Check if a student matches for promotion (enrollment-based when from_year available)
+     */
+    public function studentMatchesForPromotion(Student $student, string $fromGrade, ?int $fromAcademicYearId): bool
+    {
+        if ($fromAcademicYearId) {
+            $enrollment = StudentEnrollment::query()
+                ->where('student_id', $student->id)
+                ->where('academic_year_id', $fromAcademicYearId)
+                ->first();
+            if ($enrollment) {
+                return (string) $enrollment->grade === (string) $fromGrade;
+            }
+        }
+        return (string) $student->grade === (string) $fromGrade;
+    }
+
+    /**
      * Promote students with fee handling
      */
-    public function promoteStudentsWithFeeHandling($studentIds, $fromGrade, $toGrade, int $toAcademicYearId, $userId, $checkEligibility = false): array
+    public function promoteStudentsWithFeeHandling($studentIds, $fromGrade, $toGrade, int $toAcademicYearId, $userId, $checkEligibility = false, ?int $fromAcademicYearId = null): array
     {
         DB::beginTransaction();
         
@@ -39,7 +56,12 @@ class StudentPromotionService
             foreach ($studentIds as $studentId) {
                 $student = Student::find($studentId);
                 
-                if (!$student || $student->grade !== $fromGrade) {
+                if (!$student) {
+                    continue;
+                }
+
+                $effectiveFromYearId = $fromAcademicYearId ?? $this->resolveFromAcademicYearId($student);
+                if (!$this->studentMatchesForPromotion($student, $fromGrade, $effectiveFromYearId)) {
                     continue;
                 }
 
@@ -53,10 +75,14 @@ class StudentPromotionService
                     continue;
                 }
 
-                $fromAcademicYearId = $this->resolveFromAcademicYearId($student);
-                $fromAcademicYear = $fromAcademicYearId
-                    ? (AcademicYear::query()->find($fromAcademicYearId)?->name ?? $student->academic_year)
+                $fromAcademicYear = $effectiveFromYearId
+                    ? (AcademicYear::query()->find($effectiveFromYearId)?->name ?? $student->academic_year)
                     : ($student->academic_year ?? null);
+
+                // Ensure source enrollment exists for history completeness
+                if ($effectiveFromYearId) {
+                    $this->ensureSourceEnrollment($student, $effectiveFromYearId, $fromGrade, $userId);
+                }
 
                 // Carry forward pending fees
                 $carryForwardResult = $this->feeCarryForwardService->carryForwardFees(
@@ -80,7 +106,7 @@ class StudentPromotionService
                 ]);
 
                 // Create promotion history
-                $this->createPromotionHistory($student, $fromGrade, $toGrade, $fromAcademicYear, $toAcademicYear->name, $userId, $fromAcademicYearId, $toAcademicYearId);
+                $this->createPromotionHistory($student, $fromGrade, $toGrade, $fromAcademicYear, $toAcademicYear->name, $userId, $effectiveFromYearId, $toAcademicYearId);
 
                 // Send notification
                 if ($carryForwardResult['total_amount'] > 0) {
@@ -189,6 +215,29 @@ class StudentPromotionService
         }
 
         return null;
+    }
+
+    /**
+     * Ensure source enrollment exists for from_year (for history completeness)
+     */
+    public function ensureSourceEnrollment(Student $student, int $academicYearId, string $grade, int $userId): void
+    {
+        StudentEnrollment::query()->firstOrCreate(
+            [
+                'student_id' => $student->id,
+                'academic_year_id' => $academicYearId,
+            ],
+            [
+                'school_id' => $student->school_id,
+                'branch_id' => $student->branch_id,
+                'grade' => $grade,
+                'section' => $student->section,
+                'roll_number' => $student->roll_number ? (string) $student->roll_number : null,
+                'status' => 'Active',
+                'created_by' => $userId,
+                'updated_by' => $userId,
+            ]
+        );
     }
 
     protected function createOrUpdateEnrollment(Student $student, int $academicYearId, string $grade, ?string $section, int $userId): StudentEnrollment

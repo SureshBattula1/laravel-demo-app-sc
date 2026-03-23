@@ -548,11 +548,13 @@ class LeaveController extends Controller
     {
         try {
             $hasAcademicYear = $this->tableHasAcademicYearId('student_leaves');
-            // Do NOT filter by academic_year - leaves may fall outside the student's
-            // academic year range (e.g. leave in March when year is July-June), causing
-            // them to not show. Use student_id + optional from_date/to_date only.
             $baseQuery = DB::table('student_leaves')
                 ->where('student_id', $studentId);
+
+            $academicYearId = request()->attributes->get('academic_year_id');
+            if ($academicYearId && $hasAcademicYear) {
+                $baseQuery->where('student_leaves.academic_year_id', (int) $academicYearId);
+            }
             
             if (request()->has('from_date')) {
                 $baseQuery->whereDate('from_date', '>=', request('from_date'));

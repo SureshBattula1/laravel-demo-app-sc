@@ -87,9 +87,11 @@ class ExamScheduleController extends Controller
             }
 
             // Filter by academic year (schedules belong to exams; scope by exam's academic year)
-            if ($request->filled('academic_year_id')) {
-                $query->whereHas('exam', function ($q) use ($request) {
-                    $q->where('academic_year_id', (int) $request->academic_year_id);
+            // Use toolbar context (X-Academic-Year-Id) when no explicit param provided
+            $academicYearId = $request->attributes->get('academic_year_id') ?? $request->input('academic_year_id');
+            if ($academicYearId) {
+                $query->whereHas('exam', function ($q) use ($academicYearId) {
+                    $q->where('academic_year_id', (int) $academicYearId);
                 });
             } elseif ($request->filled('academic_year')) {
                 $query->whereHas('exam', function ($q) use ($request) {

@@ -571,12 +571,20 @@ class AttendanceController extends Controller
                 ], 404);
             }
             
-            // OPTIMIZED: Build base query with filters
-            // Note: Do NOT filter by academic_year here - attendance may have been marked with
-            // a different academic year (e.g. form default vs student's). Use date range as primary filter
-            // so that marked attendance always shows in the student view.
+            // Build base query with filters
+            // Filter by academic_year_id when toolbar year is set (from X-Academic-Year-Id header)
             $baseQuery = DB::table('student_attendance')
                 ->where('student_id', $studentId);
+
+            $academicYearId = request()->attributes->get('academic_year_id');
+            if ($academicYearId && \Illuminate\Support\Facades\Schema::hasColumn('student_attendance', 'academic_year_id')) {
+                $baseQuery->where('student_attendance.academic_year_id', (int) $academicYearId);
+            } elseif ($academicYearId) {
+                $academicYearName = AcademicYear::query()->where('id', $academicYearId)->value('name');
+                if ($academicYearName) {
+                    $baseQuery->where('student_attendance.academic_year', $academicYearName);
+                }
+            }
             
             if (request()->has('from_date')) {
                 $baseQuery->whereDate('date', '>=', request('from_date'));
