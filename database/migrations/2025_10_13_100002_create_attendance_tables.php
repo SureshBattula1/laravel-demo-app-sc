@@ -37,7 +37,7 @@ return new class extends Migration
             $table->foreignId('teacher_id')->constrained('users')->onDelete('cascade');
             $table->foreignId('branch_id')->constrained('branches')->onDelete('restrict');
             $table->date('date');
-            $table->enum('status', ['Present', 'Absent', 'Late', 'HalfDay', 'OnLeave'])->default('Present');
+            $table->enum('status', ['Present', 'Absent', 'Late', 'Half-Day', 'Sick Leave', 'Leave'])->default('Present');
             $table->time('check_in_time')->nullable();
             $table->time('check_out_time')->nullable();
             $table->string('leave_type', 50)->nullable();

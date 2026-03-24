@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use App\Services\BranchGradeService;
 use App\Services\SchoolGradeService;
 
 class SchoolController extends Controller
@@ -247,6 +248,9 @@ class SchoolController extends Controller
             // Update school with main branch ID
             $school->update(['main_branch_id' => $branch->id]);
             $school->refresh();
+
+            // Ensure branch default grades exist (same as when creating branches via BranchController)
+            app(BranchGradeService::class)->ensureDefaults((int) $branch->id);
 
             // Create admin user for the branch (always SuperAdmin when creating school from company portal)
             $adminData = $request->admin_user;

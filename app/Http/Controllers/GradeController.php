@@ -170,7 +170,7 @@ class GradeController extends Controller
             
             // Filter by active status if requested (common for dropdowns)
             if ($request->has('is_active')) {
-                $query->where('is_active', $request->boolean('is_active'));
+                $query->where('grades.is_active', $request->boolean('is_active'));
             }
 
             // Default sorting: group by branch, then grade order.
@@ -183,7 +183,8 @@ class GradeController extends Controller
             $sortableColumns = ['branch_id', 'value', 'label', 'order', 'category', 'is_active', 'created_at', 'updated_at'];
 
             // Apply pagination and sorting (default: 25 per page, sorted by branch_id asc)
-            $grades = $this->paginateAndSort($query, $request, $sortableColumns, 'branch_id', 'asc');
+            // Prefix avoids ambiguous column names when joins are present (e.g. is_active on schools/branches)
+            $grades = $this->paginateAndSort($query, $request, $sortableColumns, 'branch_id', 'asc', 'grades.');
 
             // Transform the paginated data
             $transformedData = collect($grades->items())->map(function ($grade) {

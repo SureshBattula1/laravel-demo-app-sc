@@ -1338,7 +1338,9 @@ class AttendanceController extends Controller
                 DB::raw('SUM(CASE WHEN sa.status = "Present" THEN 1 ELSE 0 END) as present'),
                 DB::raw('SUM(CASE WHEN sa.status = "Absent" THEN 1 ELSE 0 END) as absent'),
                 DB::raw('SUM(CASE WHEN sa.status = "Late" THEN 1 ELSE 0 END) as late'),
-                DB::raw('SUM(CASE WHEN sa.status IN ("Leave", "Sick Leave") THEN 1 ELSE 0 END) as leaves')
+                DB::raw('SUM(CASE WHEN sa.status IN ("Leave", "Sick Leave") THEN 1 ELSE 0 END) as leaves'),
+                DB::raw('SUM(CASE WHEN sa.status = "Sick Leave" THEN 1 ELSE 0 END) as sick_leave'),
+                DB::raw('SUM(CASE WHEN sa.status = "Leave" THEN 1 ELSE 0 END) as leave_count')
             )
             ->first();
 
@@ -1347,7 +1349,9 @@ class AttendanceController extends Controller
             'present' => (int) ($summaryQuery->present ?? 0),
             'absent' => (int) ($summaryQuery->absent ?? 0),
             'late' => (int) ($summaryQuery->late ?? 0),
-            'leaves' => (int) ($summaryQuery->leaves ?? 0)
+            'leaves' => (int) ($summaryQuery->leaves ?? 0),
+            'sick_leave' => (int) ($summaryQuery->sick_leave ?? 0),
+            'leave' => (int) ($summaryQuery->leave_count ?? 0),
         ];
 
         // Get total count for percentage calculation (use same query source as summary)
@@ -1436,21 +1440,37 @@ class AttendanceController extends Controller
                 ];
             });
 
-        // If grade and section are specified, return detailed student list
-        if ($request->has('grade') && $request->has('section') && $request->grade && $request->section) {
-            // Use breakdownQuery since we need joins for grade/section and user data
-            $detailedQuery = (clone $breakdownQuery)
-                ->where('s.grade', $request->grade)
-                ->where('s.section', $request->section);
+        // Grade + section: per-student aggregated stats (all students in class), same idea as branch-wise teachers
+        if ($request->filled('grade') && $request->filled('section')) {
+            $grade = $request->input('grade');
+            $section = $request->input('section');
 
-            // Filter by status if provided (optional filter)
-            if ($request->has('status') && $request->status) {
-                $detailedQuery->where('sa.status', $request->status);
+            $studentListQuery = DB::table('students as s')
+                ->join('users as u', 's.user_id', '=', 'u.id')
+                ->whereNull('s.deleted_at')
+                ->whereNull('u.deleted_at')
+                ->where('s.grade', $grade)
+                ->where('s.section', $section);
+
+            if ($schoolId) {
+                $studentListQuery->where(function ($q) use ($schoolId) {
+                    $q->where('s.school_id', $schoolId)->orWhereNull('s.school_id');
+                });
             }
 
-            $detailedData = $detailedQuery
+            if ($request->filled('branch_id') && $request->branch_id) {
+                $studentListQuery->where('s.branch_id', (int) $request->branch_id);
+            } elseif ($accessibleBranchIds !== 'all') {
+                if (! empty($accessibleBranchIds)) {
+                    $studentListQuery->whereIn('s.branch_id', $accessibleBranchIds);
+                } else {
+                    $studentListQuery->whereRaw('1 = 0');
+                }
+            }
+
+            $allStudents = $studentListQuery
                 ->select(
-                    'sa.*',
+                    's.user_id as student_id',
                     'u.first_name',
                     'u.last_name',
                     's.admission_number',
@@ -1459,12 +1479,132 @@ class AttendanceController extends Controller
                 ->orderBy('s.roll_number')
                 ->get();
 
+            $studentIds = $allStudents->pluck('student_id')->filter()->unique()->values()->all();
+
+            if (empty($studentIds)) {
+                return response()->json([
+                    'success' => true,
+                    'data' => [
+                        'summary' => $summary,
+                        'students' => [],
+                    ],
+                ]);
+            }
+
+            $allAttendanceQuery = DB::table('student_attendance as sa')
+                ->whereBetween('sa.date', [$fromDate, $toDate])
+                ->whereIn('sa.student_id', $studentIds);
+
+            if ($academicYearId) {
+                $allAttendanceQuery->where('sa.academic_year_id', (int) $academicYearId);
+            } elseif ($request->filled('academic_year')) {
+                $allAttendanceQuery->where('sa.academic_year', $request->input('academic_year'));
+            }
+
+            if ($schoolId) {
+                $allAttendanceQuery->where(function ($q) use ($schoolId) {
+                    $q->where('sa.school_id', $schoolId)->orWhereNull('sa.school_id');
+                });
+            }
+
+            if ($request->filled('branch_id') && $request->branch_id) {
+                $allAttendanceQuery->where('sa.branch_id', (int) $request->branch_id);
+            } elseif ($accessibleBranchIds !== 'all' && ! empty($accessibleBranchIds)) {
+                $allAttendanceQuery->whereIn('sa.branch_id', $accessibleBranchIds);
+            }
+
+            $allAttendanceRecords = $allAttendanceQuery
+                ->select('sa.student_id', 'sa.status', 'sa.date')
+                ->get()
+                ->groupBy('student_id');
+
+            $filteredAttendanceRecords = $allAttendanceRecords;
+            if ($request->filled('status') && $request->status) {
+                $filteredAttendanceQuery = DB::table('student_attendance as sa')
+                    ->whereBetween('sa.date', [$fromDate, $toDate])
+                    ->whereIn('sa.student_id', $studentIds)
+                    ->where('sa.status', $request->status);
+
+                if ($academicYearId) {
+                    $filteredAttendanceQuery->where('sa.academic_year_id', (int) $academicYearId);
+                } elseif ($request->filled('academic_year')) {
+                    $filteredAttendanceQuery->where('sa.academic_year', $request->input('academic_year'));
+                }
+
+                if ($schoolId) {
+                    $filteredAttendanceQuery->where(function ($q) use ($schoolId) {
+                        $q->where('sa.school_id', $schoolId)->orWhereNull('sa.school_id');
+                    });
+                }
+
+                if ($request->filled('branch_id') && $request->branch_id) {
+                    $filteredAttendanceQuery->where('sa.branch_id', (int) $request->branch_id);
+                } elseif ($accessibleBranchIds !== 'all' && ! empty($accessibleBranchIds)) {
+                    $filteredAttendanceQuery->whereIn('sa.branch_id', $accessibleBranchIds);
+                }
+
+                $filteredAttendanceRecords = $filteredAttendanceQuery
+                    ->select('sa.student_id', 'sa.status', 'sa.date')
+                    ->get()
+                    ->groupBy('student_id');
+            }
+
+            $studentList = $allStudents->map(function ($student) use ($allAttendanceRecords, $filteredAttendanceRecords, $request) {
+                $sid = $student->student_id;
+                $allRecords = $allAttendanceRecords->get($sid) ?? collect();
+                $filteredRecords = $filteredAttendanceRecords->get($sid) ?? collect();
+
+                $totalRecords = $allRecords->count();
+                $presentCount = $allRecords->where('status', 'Present')->count();
+                $absentCount = $allRecords->where('status', 'Absent')->count();
+                $lateCount = $allRecords->where('status', 'Late')->count();
+                $halfDayCount = $allRecords->where('status', 'Half-Day')->count();
+                $sickLeaveCount = $allRecords->where('status', 'Sick Leave')->count();
+                $generalLeaveCount = $allRecords->where('status', 'Leave')->count();
+                $leaveCount = $sickLeaveCount + $generalLeaveCount;
+
+                $latestRecord = $allRecords->sortByDesc('date')->first();
+
+                return [
+                    'student_id' => $sid,
+                    'first_name' => $student->first_name,
+                    'last_name' => $student->last_name,
+                    'admission_number' => $student->admission_number,
+                    'roll_number' => $student->roll_number,
+                    'total_records' => $totalRecords,
+                    'present' => $presentCount,
+                    'absent' => $absentCount,
+                    'late' => $lateCount,
+                    'half_day' => $halfDayCount,
+                    'leaves' => $leaveCount,
+                    'sick_leave' => $sickLeaveCount,
+                    'leave' => $generalLeaveCount,
+                    'attendance_percentage' => $totalRecords > 0 ? round(($presentCount / $totalRecords) * 100, 2) : 0,
+                    'latest_status' => $latestRecord ? $latestRecord->status : 'N/A',
+                    'latest_date' => $latestRecord ? $latestRecord->date : null,
+                    '_has_filtered_status' => $filteredRecords->count() > 0,
+                ];
+            })
+                ->filter(function ($row) use ($request) {
+                    if ($request->filled('status') && $request->status) {
+                        return $row['_has_filtered_status'] === true;
+                    }
+
+                    return true;
+                })
+                ->map(function ($row) {
+                    unset($row['_has_filtered_status']);
+
+                    return $row;
+                })
+                ->values();
+
             return response()->json([
                 'success' => true,
                 'data' => [
                     'summary' => $summary,
-                    'data' => $detailedData
-                ]
+                    'students' => $studentList,
+                ],
             ]);
         }
 
@@ -1560,7 +1700,9 @@ class AttendanceController extends Controller
                 DB::raw('SUM(CASE WHEN ta.status = "Present" THEN 1 ELSE 0 END) as present'),
                 DB::raw('SUM(CASE WHEN ta.status = "Absent" THEN 1 ELSE 0 END) as absent'),
                 DB::raw('SUM(CASE WHEN ta.status = "Late" THEN 1 ELSE 0 END) as late'),
-                DB::raw('SUM(CASE WHEN ta.status IN ("Leave", "Sick Leave") THEN 1 ELSE 0 END) as leaves')
+                DB::raw('SUM(CASE WHEN ta.status IN ("Leave", "Sick Leave") THEN 1 ELSE 0 END) as leaves'),
+                DB::raw('SUM(CASE WHEN ta.status = "Sick Leave" THEN 1 ELSE 0 END) as sick_leave'),
+                DB::raw('SUM(CASE WHEN ta.status = "Leave" THEN 1 ELSE 0 END) as leave_count')
             )
             ->first();
 
@@ -1569,7 +1711,9 @@ class AttendanceController extends Controller
             'present' => (int) ($summaryQuery->present ?? 0),
             'absent' => (int) ($summaryQuery->absent ?? 0),
             'late' => (int) ($summaryQuery->late ?? 0),
-            'leaves' => (int) ($summaryQuery->leaves ?? 0)
+            'leaves' => (int) ($summaryQuery->leaves ?? 0),
+            'sick_leave' => (int) ($summaryQuery->sick_leave ?? 0),
+            'leave' => (int) ($summaryQuery->leave_count ?? 0),
         ];
 
         // Get total count for percentage calculation
@@ -1726,10 +1870,12 @@ class AttendanceController extends Controller
                 $presentCount = $allRecords->where('status', 'Present')->count();
                 $absentCount = $allRecords->where('status', 'Absent')->count();
                 $lateCount = $allRecords->where('status', 'Late')->count();
-                $leaveCount = $allRecords->whereIn('status', ['Leave', 'Sick Leave'])->count();
-                
+                $sickLeaveCount = $allRecords->where('status', 'Sick Leave')->count();
+                $generalLeaveCount = $allRecords->where('status', 'Leave')->count();
+                $leaveCount = $sickLeaveCount + $generalLeaveCount;
+
                 $latestRecord = $allRecords->sortByDesc('date')->first();
-                
+
                 return [
                     'teacher_id' => $teacherId,
                     'user_id' => $teacher->user_id,
@@ -1744,6 +1890,8 @@ class AttendanceController extends Controller
                     'absent' => $absentCount,
                     'late' => $lateCount,
                     'leaves' => $leaveCount,
+                    'sick_leave' => $sickLeaveCount,
+                    'leave' => $generalLeaveCount,
                     'attendance_percentage' => $totalRecords > 0 ? round(($presentCount / $totalRecords) * 100, 2) : 0,
                     'latest_status' => $latestRecord ? $latestRecord->status : 'N/A',
                     'latest_date' => $latestRecord ? $latestRecord->date : null,
