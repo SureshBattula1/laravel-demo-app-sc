@@ -261,9 +261,9 @@ class BranchController extends Controller
                 'emergency_contact' => 'nullable|string|max:20',
                 
                 // Principal Information
-                'principal_name' => 'nullable|string|max:255',
-                'principal_contact' => 'nullable|string|max:20',
-                'principal_email' => 'nullable|email|max:255',
+                'principal_name' => 'required|string|max:255',
+                'principal_contact' => 'required|string|max:20',
+                'principal_email' => 'required|email|max:255',
                 
                 // Dates
                 'established_date' => 'nullable|date|before_or_equal:today',
@@ -533,9 +533,9 @@ class BranchController extends Controller
                 'emergency_contact' => 'nullable|string|max:20',
                 
                 // Principal Information
-                'principal_name' => 'nullable|string|max:255',
-                'principal_contact' => 'nullable|string|max:20',
-                'principal_email' => 'nullable|email|max:255',
+                'principal_name' => 'required|string|max:255',
+                'principal_contact' => 'required|string|max:20',
+                'principal_email' => 'required|email|max:255',
                 
                 // Dates
                 'established_date' => 'nullable|date|before_or_equal:today',

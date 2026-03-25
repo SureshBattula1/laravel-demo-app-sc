@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Traits\PaginatesAndSorts;
 use App\Models\Student;
+use App\Models\Teacher;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -365,6 +366,8 @@ class LeaveController extends Controller
                         'users.first_name',
                         'users.last_name',
                         'users.email',
+                        'users.avatar as user_avatar',
+                        'students.profile_picture as student_profile_picture',
                         DB::raw('COALESCE(users.mobile, users.phone) as mobile_number'),
                         'students.admission_number',
                         'students.grade',
@@ -393,6 +396,7 @@ class LeaveController extends Controller
                         'users.first_name',
                         'users.last_name',
                         'users.email',
+                        'users.avatar as user_avatar',
                         DB::raw('COALESCE(users.mobile, users.phone) as mobile_number'),
                         'teachers.employee_id',
                         'teachers.designation',
@@ -422,6 +426,19 @@ class LeaveController extends Controller
             if ($from && $to) {
                 $leave['total_days'] = $this->calculateTotalDays($from, $to);
             }
+
+            // Profile image for leave detail header (student: student row or user avatar; teacher: avatar or Teacher accessor)
+            if ($type === 'student') {
+                $leave['profile_picture'] = $leave['student_profile_picture'] ?? $leave['user_avatar'] ?? null;
+            } else {
+                $pic = $leave['user_avatar'] ?? null;
+                if (empty($pic) && !empty($leave['teacher_id'])) {
+                    $teacher = Teacher::where('user_id', $leave['teacher_id'])->first();
+                    $pic = $teacher?->profile_picture;
+                }
+                $leave['profile_picture'] = $pic;
+            }
+            unset($leave['student_profile_picture'], $leave['user_avatar']);
             
             return response()->json([
                 'success' => true,
