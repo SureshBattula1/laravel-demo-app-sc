@@ -157,6 +157,11 @@ class Branch extends Model
         return $this->hasMany(BranchSetting::class);
     }
 
+    public function smsTemplates()
+    {
+        return $this->hasMany(SmsTemplate::class);
+    }
+
     public function universalAttachments()
     {
         return \App\Models\UniversalAttachment::where('module', 'branch')

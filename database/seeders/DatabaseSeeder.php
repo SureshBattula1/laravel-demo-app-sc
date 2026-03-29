@@ -365,11 +365,19 @@ class DatabaseSeeder extends Seeder
                 'permissions' => ['view', 'create', 'edit', 'delete']
             ],
             [
+                'name' => 'Bulk Management',
+                'slug' => 'bulk_management',
+                'icon' => 'hub',
+                'route' => '/bulk-management',
+                'order' => 20,
+                'permissions' => ['view', 'create', 'edit', 'delete']
+            ],
+            [
                 'name' => 'Reports',
                 'slug' => 'reports',
                 'icon' => 'assessment',
                 'route' => '/reports',
-                'order' => 20,
+                'order' => 21,
                 'permissions' => ['view', 'generate', 'export']
             ],
             [
@@ -377,7 +385,7 @@ class DatabaseSeeder extends Seeder
                 'slug' => 'roles',
                 'icon' => 'admin_panel_settings',
                 'route' => '/settings/roles',
-                'order' => 21,
+                'order' => 22,
                 'permissions' => ['view', 'create', 'edit', 'delete', 'update']
             ],
             [
@@ -385,7 +393,7 @@ class DatabaseSeeder extends Seeder
                 'slug' => 'permissions',
                 'icon' => 'shield',
                 'route' => '/settings/permissions',
-                'order' => 22,
+                'order' => 23,
                 'permissions' => ['view', 'create', 'edit', 'delete', 'update']
             ],
             [
@@ -393,7 +401,7 @@ class DatabaseSeeder extends Seeder
                 'slug' => 'users',
                 'icon' => 'people',
                 'route' => '/settings/users',
-                'order' => 23,
+                'order' => 24,
                 'permissions' => ['view', 'create', 'edit', 'delete', 'update']
             ],
             [
@@ -401,7 +409,7 @@ class DatabaseSeeder extends Seeder
                 'slug' => 'settings',
                 'icon' => 'settings',
                 'route' => '/settings',
-                'order' => 24,
+                'order' => 25,
                 'permissions' => ['view', 'edit']
             ]
         ];
@@ -475,6 +483,7 @@ class DatabaseSeeder extends Seeder
             'subjects.view', 'subjects.create', 'subjects.edit', 'subjects.delete',
             'departments.view', 'departments.create', 'departments.edit', 'departments.delete',
             'groups.view', 'groups.create', 'groups.edit', 'groups.delete',
+            'bulk_management.view', 'bulk_management.create', 'bulk_management.edit', 'bulk_management.delete',
             'holidays.view', 'holidays.create', 'holidays.edit', 'holidays.delete',
             'leaves.view', 'leaves.create', 'leaves.edit', 'leaves.delete', 'leaves.approve', 'leaves.reject',
             'import.view', 'import.upload', 'import.validate', 'import.commit', 'import.cancel', 'import.template',
@@ -497,6 +506,7 @@ class DatabaseSeeder extends Seeder
             'subjects.view',
             'holidays.view',
             'groups.view',
+            'bulk_management.view',
             'leaves.view', 'leaves.create', // Teachers can view and create their own leaves
             'import.view', 'import.template', // Teachers can view imports and download templates
         ])->pluck('id')->toArray();
@@ -514,6 +524,7 @@ class DatabaseSeeder extends Seeder
             'fees.view', 'fees.collect',
             'holidays.view',
             'groups.view',
+            'bulk_management.view', 'bulk_management.create', 'bulk_management.edit',
             'leaves.view', 'leaves.create', 'leaves.edit', 'leaves.approve', 'leaves.reject', // Staff can manage leaves
             'import.view', 'import.upload', 'import.validate', 'import.commit', 'import.cancel', 'import.template', // Staff can manage imports
         ])->pluck('id')->toArray();

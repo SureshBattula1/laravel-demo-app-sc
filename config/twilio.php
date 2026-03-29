@@ -20,5 +20,8 @@ return [
 
     'whatsapp_from' => env('TWILIO_WHATSAPP_FROM', 'whatsapp:+14155238886'),
 
+    // Public callback URL for Twilio WhatsApp delivery updates.
+    'whatsapp_status_callback_url' => env('TWILIO_WHATSAPP_STATUS_CALLBACK_URL'),
+
 ];
 

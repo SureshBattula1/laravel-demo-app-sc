@@ -44,6 +44,13 @@ use App\Http\Controllers\AdmissionController;
 use App\Http\Controllers\CommunicationController;
 use App\Http\Controllers\MessageController;
 use App\Http\Controllers\AcademicYearController;
+use App\Http\Controllers\BranchSmsGatewayConfigController;
+use App\Http\Controllers\SmsBulkQueueLogController;
+use App\Http\Controllers\SmsBulkSendController;
+use App\Http\Controllers\SmsTemplateController;
+use App\Http\Controllers\TwilioWhatsAppStatusWebhookController;
+use App\Http\Controllers\WhatsAppBulkQueueLogController;
+use App\Http\Controllers\WhatsAppBulkSendController;
 
 /*
 |--------------------------------------------------------------------------
@@ -56,6 +63,7 @@ Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
 Route::post('/reset-password', [AuthController::class, 'resetPassword']);
+Route::post('/webhooks/twilio/whatsapp-status', TwilioWhatsAppStatusWebhookController::class);
 
 // Health Check
 Route::get('/health', function () {
@@ -107,7 +115,63 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
         Route::get('hierarchy/{id}', [BranchController::class, 'getHierarchy']);
         Route::get('locations', [BranchController::class, 'getBranchLocations']);
         Route::get('comparative-analytics', [BranchController::class, 'getComparativeAnalytics']);
-        
+
+        // Branch SMS gateway configs (bulk messaging; credentials encrypted at rest)
+        Route::get('{id}/sms-gateway-config', [BranchSmsGatewayConfigController::class, 'index'])
+            ->middleware('permission:bulk_management.view');
+        Route::put('{id}/sms-gateway-config', [BranchSmsGatewayConfigController::class, 'update'])
+            ->middleware('permission:bulk_management.edit');
+        Route::post('{id}/sms-gateway-config/send-test', [BranchSmsGatewayConfigController::class, 'sendTest'])
+            ->middleware('permission:bulk_management.edit');
+
+        // Bulk delivery logs (all accessible branches + academic year; optional ?branch_id=)
+        Route::get('sms-bulk-logs', [SmsBulkQueueLogController::class, 'indexAll'])
+            ->middleware('permission:bulk_management.view');
+        Route::get('whatsapp-bulk-logs', [WhatsAppBulkQueueLogController::class, 'indexAll'])
+            ->middleware('permission:bulk_management.view');
+
+        // SMS templates & bulk send (personalized #tags#)
+        Route::get('{id}/sms-templates', [SmsTemplateController::class, 'index'])
+            ->middleware('permission:bulk_management.view');
+        Route::post('{id}/sms-templates', [SmsTemplateController::class, 'store'])
+            ->middleware('permission:bulk_management.edit');
+        Route::put('{id}/sms-templates/{templateId}', [SmsTemplateController::class, 'update'])
+            ->middleware('permission:bulk_management.edit');
+        Route::delete('{id}/sms-templates/{templateId}', [SmsTemplateController::class, 'destroy'])
+            ->middleware('permission:bulk_management.edit');
+        Route::post('{id}/sms-templates/preview', [SmsTemplateController::class, 'preview'])
+            ->middleware('permission:bulk_management.view');
+        Route::get('{id}/sms-recipient-options', [SmsBulkSendController::class, 'recipientOptions'])
+            ->middleware('permission:bulk_management.view');
+        Route::get('{id}/sms-student-search', [SmsBulkSendController::class, 'searchStudents'])
+            ->middleware('permission:bulk_management.view');
+        Route::post('{id}/sms-bulk-send/preview', [SmsBulkSendController::class, 'preview'])
+            ->middleware('permission:bulk_management.view');
+        Route::post('{id}/sms-bulk-send', [SmsBulkSendController::class, 'store'])
+            ->middleware('permission:bulk_management.edit');
+        Route::get('{id}/sms-bulk-logs', [SmsBulkQueueLogController::class, 'index'])
+            ->middleware('permission:bulk_management.view');
+        Route::get('{id}/sms-bulk-logs/{queueId}', [SmsBulkQueueLogController::class, 'show'])
+            ->middleware('permission:bulk_management.view');
+        Route::post('{id}/sms-bulk-logs/{queueId}/resend', [SmsBulkQueueLogController::class, 'resend'])
+            ->middleware('permission:bulk_management.edit');
+
+        // WhatsApp bulk (same templates & audience rules as SMS; Twilio WhatsApp only)
+        Route::get('{id}/whatsapp-recipient-options', [WhatsAppBulkSendController::class, 'recipientOptions'])
+            ->middleware('permission:bulk_management.view');
+        Route::get('{id}/whatsapp-student-search', [WhatsAppBulkSendController::class, 'searchStudents'])
+            ->middleware('permission:bulk_management.view');
+        Route::post('{id}/whatsapp-bulk-send/preview', [WhatsAppBulkSendController::class, 'preview'])
+            ->middleware('permission:bulk_management.view');
+        Route::post('{id}/whatsapp-bulk-send', [WhatsAppBulkSendController::class, 'store'])
+            ->middleware('permission:bulk_management.edit');
+        Route::get('{id}/whatsapp-bulk-logs', [WhatsAppBulkQueueLogController::class, 'index'])
+            ->middleware('permission:bulk_management.view');
+        Route::get('{id}/whatsapp-bulk-logs/{queueId}', [WhatsAppBulkQueueLogController::class, 'show'])
+            ->middleware('permission:bulk_management.view');
+        Route::post('{id}/whatsapp-bulk-logs/{queueId}/resend', [WhatsAppBulkQueueLogController::class, 'resend'])
+            ->middleware('permission:bulk_management.edit');
+
         // Single branch operations
         Route::get('{id}', [BranchController::class, 'show']);
         Route::put('{id}', [BranchController::class, 'update']);
