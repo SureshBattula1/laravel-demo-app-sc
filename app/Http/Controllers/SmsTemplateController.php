@@ -7,12 +7,84 @@ use App\Models\Student;
 use App\Models\Teacher;
 use App\Services\SmsTemplateTagContextFactory;
 use App\Services\SmsTemplateTagRenderer;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 
 class SmsTemplateController extends Controller
 {
+    /**
+     * All SMS templates for branches the user can access (one query + join).
+     * Optional ?branch_id= to restrict to one branch.
+     */
+    public function indexAll(Request $request): JsonResponse
+    {
+        $qb = $request->query('branch_id');
+        if ($qb !== null && $qb !== '' && ! $this->canAccessBranch($request, (int) $qb)) {
+            return response()->json(['success' => false, 'message' => 'Forbidden'], 403);
+        }
+
+        $t = (new SmsTemplate)->getTable();
+
+        $query = SmsTemplate::query()
+            ->join('branches as br', 'br.id', '=', $t.'.branch_id')
+            ->whereNull('br.deleted_at')
+            ->select($t.'.*')
+            ->addSelect(DB::raw('br.name as branch_name'));
+
+        $this->applyAccessibleBranchesToTemplateQuery($query, $request, $t);
+
+        $templates = $query
+            ->orderBy('br.name')
+            ->orderBy($t.'.name')
+            ->get();
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'templates' => $templates,
+                'allowed_tags' => SmsTemplateTagRenderer::allowedTags(),
+            ],
+        ]);
+    }
+
+    /**
+     * @param  Builder<\App\Models\SmsTemplate>  $query
+     */
+    protected function applyAccessibleBranchesToTemplateQuery(Builder $query, Request $request, string $t): void
+    {
+        $qb = $request->query('branch_id');
+        if ($qb !== null && $qb !== '') {
+            $query->where($t.'.branch_id', (int) $qb);
+
+            return;
+        }
+
+        $accessible = $this->getAccessibleBranchIds($request);
+        if ($accessible === 'all') {
+            $schoolId = $this->getCurrentSchoolId($request);
+            if ($schoolId) {
+                $query->whereIn($t.'.branch_id', function ($q) use ($schoolId) {
+                    $q->select('id')
+                        ->from('branches')
+                        ->where('school_id', $schoolId)
+                        ->whereNull('deleted_at');
+                });
+            }
+
+            return;
+        }
+        if (is_array($accessible) && count($accessible) > 0) {
+            $query->whereIn($t.'.branch_id', $accessible);
+
+            return;
+        }
+        $query->whereRaw('1 = 0');
+    }
+
     public function index(Request $request, int $branchId)
     {
         if (! $this->canAccessBranch($request, $branchId)) {

@@ -216,12 +216,28 @@ class SmsBulkQueueLogController extends Controller
         $query->whereRaw('1 = 0');
     }
 
+    /**
+     * Filter queue rows by academic year when the client sends ?academic_year_id= (or middleware set it).
+     * Rows with NULL academic_year_id (legacy or created before backfill) are included so logs do not disappear.
+     */
     protected function applyAcademicYearToQueueQuery(Builder $query, Request $request, string $t): void
     {
-        $ayId = $request->attributes->get('academic_year_id') ?? $request->query('academic_year_id');
-        if ($ayId !== null && $ayId !== '') {
-            $query->where($t.'.academic_year_id', (int) $ayId);
+        $ayId = $request->query('academic_year_id');
+        if ($ayId === null || $ayId === '') {
+            $ayId = $request->attributes->get('academic_year_id');
         }
+        if ($ayId === null || $ayId === '') {
+            return;
+        }
+        $ayId = (int) $ayId;
+        if ($ayId < 1) {
+            return;
+        }
+
+        $query->where(function ($w) use ($t, $ayId) {
+            $w->where($t.'.academic_year_id', $ayId)
+                ->orWhereNull($t.'.academic_year_id');
+        });
     }
 
     public function show(Request $request, int $branchId, int $queueId): JsonResponse

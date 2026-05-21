@@ -27,11 +27,11 @@ class SmsBulkRecipientSeedService
             return false;
         }
 
+        // Count by queue only: unique key is (queue, type, recipient_id); branch_id mismatches must not look "empty".
         $existing = SmsBulkRecipient::query()
             ->where('sms_bulk_queue_id', $queue->id)
-            ->where('branch_id', $branchId)
             ->count();
-        if ($existing > 0) {
+        if ($existing >= $queue->recipient_count) {
             return false;
         }
 
@@ -198,6 +198,8 @@ class SmsBulkRecipientSeedService
      */
     public function seedRecipients(int $queueId, int $branchId, array $studentIds, array $teacherIds): void
     {
+        $studentIds = array_values(array_unique(array_filter(array_map('intval', $studentIds))));
+        $teacherIds = array_values(array_unique(array_filter(array_map('intval', $teacherIds))));
         $now = now();
         $rows = [];
 
@@ -256,7 +258,7 @@ class SmsBulkRecipientSeedService
         }
 
         foreach (array_chunk($rows, 200) as $chunk) {
-            DB::table('sms_bulk_recipients')->insert($chunk);
+            DB::table('sms_bulk_recipients')->insertOrIgnore($chunk);
         }
     }
 
@@ -265,6 +267,7 @@ class SmsBulkRecipientSeedService
      */
     public function seedRecipientsLegacy(int $queueId, int $branchId, string $recipientType, array $ids): void
     {
+        $ids = array_values(array_unique(array_filter(array_map('intval', $ids))));
         $now = now();
         $rows = [];
 
@@ -319,7 +322,7 @@ class SmsBulkRecipientSeedService
         }
 
         foreach (array_chunk($rows, 200) as $chunk) {
-            DB::table('sms_bulk_recipients')->insert($chunk);
+            DB::table('sms_bulk_recipients')->insertOrIgnore($chunk);
         }
     }
 }
