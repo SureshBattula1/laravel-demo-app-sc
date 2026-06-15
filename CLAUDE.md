@@ -37,6 +37,34 @@ php artisan test --filter StudentTest
 Seeders of note: `CompleteSchoolSystemSeeder` (full demo school), `CompanyPortalSeeder`
 (SaaS/company-portal data), `AssignSuperAdminPermissions`. Entry point is `DatabaseSeeder`.
 
+## Running with Docker
+
+A full-stack Docker setup lives in the **parent directory** (`../docker-compose.yml`),
+covering this API, the `../ui` Angular app, and a dedicated MySQL. Run all `docker`
+commands from **inside WSL2 Ubuntu** (Docker Engine CLI — no Docker Desktop needed):
+
+```bash
+cd /mnt/c/.../Projects        # the folder containing docker-compose.yml
+docker compose up --build -d  # build + start db, api, ui
+docker compose logs -f api    # watch API logs
+docker compose down           # stop (keeps DB volume)
+docker compose down -v        # stop AND wipe the DB (fresh seed next boot)
+```
+
+Endpoints when running: UI `http://localhost:8080`, API `http://localhost:8000`,
+MySQL `127.0.0.1:3309` (root/root, visible in Workbench).
+
+Key files (this repo): [Dockerfile](Dockerfile) (PHP 8.4-fpm + extensions + Composer),
+[docker/entrypoint.sh](docker/entrypoint.sh) (waits for DB → `migrate --force` → seeds
+**only on a fresh DB** → `artisan serve`), [.env.docker](.env.docker) (container env;
+`DB_HOST=db`). The image bakes in code, so **rebuild (`up --build`) after code changes**.
+
+Notes:
+- The compose MySQL uses host port **3309** to avoid clashing with any pre-existing
+  `mysql8` container on 3308. It is a separate database from local (non-Docker) runs.
+- `.dockerignore` excludes `vendor`, `.env`, and the SQLite file; the image runs
+  `composer install` itself. `entrypoint.sh` must keep **LF** line endings.
+
 ## Architecture & conventions
 
 **Multi-tenancy hierarchy — this is the most important concept:**
