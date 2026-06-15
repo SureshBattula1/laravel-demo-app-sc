@@ -43,11 +43,16 @@ class AcademicYear extends Model
     }
 
     /**
-     * Whether this academic year has ended (end_date is in the past).
+     * Whether this academic year is treated as ended for write restrictions.
+     * The designated current year (is_current) stays editable even if end_date was not extended yet.
      */
     public function isPast(): bool
     {
-        return $this->end_date->isPast();
+        if ($this->is_current) {
+            return false;
+        }
+
+        return $this->end_date->copy()->endOfDay()->isPast();
     }
 
     /**

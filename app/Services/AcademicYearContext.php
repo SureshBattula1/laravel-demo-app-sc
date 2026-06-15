@@ -109,15 +109,46 @@ class AcademicYearContext
     }
 
     /**
+     * Whether a specific academic year has ended (by id).
+     */
+    public function isPastForId(?int $academicYearId): bool
+    {
+        if ($academicYearId === null) {
+            return $this->isPast();
+        }
+
+        $model = AcademicYear::query()->find($academicYearId);
+
+        return $model ? $model->isPast() : false;
+    }
+
+    /**
      * Throw 422 if the resolved academic year is past (for structural operations like new admissions, fee structure, promotions).
      */
     public function rejectIfPast(string $message = 'This operation is not allowed for past academic years.'): void
     {
         if ($this->isPast()) {
-            throw new HttpResponseException(
-                response()->json(['success' => false, 'message' => $message], Response::HTTP_UNPROCESSABLE_ENTITY)
-            );
+            $this->throwPastYearException($message);
         }
+    }
+
+    /**
+     * Throw 422 if the given academic year is past.
+     * When $academicYearId is null, falls back to toolbar/context resolution (rejectIfPast).
+     * Use this when the operation targets an explicit year from the request body (e.g. fee structure form).
+     */
+    public function rejectIfPastForId(?int $academicYearId, string $message = 'This operation is not allowed for past academic years.'): void
+    {
+        if ($this->isPastForId($academicYearId)) {
+            $this->throwPastYearException($message);
+        }
+    }
+
+    private function throwPastYearException(string $message): void
+    {
+        throw new HttpResponseException(
+            response()->json(['success' => false, 'message' => $message], Response::HTTP_UNPROCESSABLE_ENTITY)
+        );
     }
 
     /**

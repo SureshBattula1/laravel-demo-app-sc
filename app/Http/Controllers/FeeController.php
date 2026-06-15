@@ -150,14 +150,19 @@ class FeeController extends Controller
      */
     public function storeStructure(Request $request)
     {
-        $this->academicYearContext->rejectIfPast('Creating fee structure is not allowed for past academic years.');
+        // Validate the year being assigned to the structure (form body), not only the toolbar year.
+        $targetAcademicYearId = $request->filled('academic_year_id')
+            ? (int) $request->academic_year_id
+            : null;
+        $this->academicYearContext->rejectIfPastForId(
+            $targetAcademicYearId,
+            'Creating fee structure is not allowed for past academic years.'
+        );
 
         DB::beginTransaction();
         try {
             // Use academic_year_id from request if provided, otherwise from context
-            $academicYearId = $request->filled('academic_year_id')
-                ? (int) $request->academic_year_id
-                : $this->academicYearContext->id(false);
+            $academicYearId = $targetAcademicYearId ?? $this->academicYearContext->id(false);
             $academicYearName = $academicYearId
                 ? (\App\Models\AcademicYear::query()->where('id', (int) $academicYearId)->value('name') ?? null)
                 : null;
@@ -239,6 +244,11 @@ class FeeController extends Controller
             $academicYearId = $request->filled('academic_year_id')
                 ? (int) $request->academic_year_id
                 : ($structure->academic_year_id ?? $this->academicYearContext->id(false));
+
+            $this->academicYearContext->rejectIfPastForId(
+                $academicYearId ? (int) $academicYearId : null,
+                'Updating fee structure is not allowed for past academic years.'
+            );
             $academicYearName = $academicYearId
                 ? (\App\Models\AcademicYear::query()->where('id', (int) $academicYearId)->value('name') ?? null)
                 : $structure->academic_year;
