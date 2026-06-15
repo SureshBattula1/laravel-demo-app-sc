@@ -641,6 +641,129 @@ class AttendanceController extends Controller
     }
 
     /**
+     * Current academic year attendance for student header + month-wise absent breakdown.
+     */
+    public function getStudentAttendanceOverview($studentId)
+    {
+        try {
+            $student = DB::table('students')
+                ->where('user_id', $studentId)
+                ->whereNull('deleted_at')
+                ->first();
+
+            if (!$student) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Student not found',
+                ], 404);
+            }
+
+            $baseQuery = DB::table('student_attendance')->where('student_id', $studentId);
+            $academicYearId = request()->attributes->get('academic_year_id');
+            $academicYearName = null;
+
+            if ($academicYearId) {
+                $year = AcademicYear::query()->find((int) $academicYearId);
+                $academicYearName = $year?->name;
+                if (\Illuminate\Support\Facades\Schema::hasColumn('student_attendance', 'academic_year_id')) {
+                    $baseQuery->where('student_attendance.academic_year_id', (int) $academicYearId);
+                } elseif ($academicYearName) {
+                    $baseQuery->where('student_attendance.academic_year', $academicYearName);
+                }
+            }
+
+            $summary = $this->summarizeStudentAttendance($baseQuery);
+            $byMonth = $this->getAttendanceAbsentByMonth($baseQuery);
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'current_year' => array_merge($summary, [
+                        'academic_year_id' => $academicYearId ? (int) $academicYearId : null,
+                        'academic_year_name' => $academicYearName,
+                    ]),
+                    'by_month' => $byMonth,
+                ],
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error fetching student attendance overview: ' . $e->getMessage());
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Error fetching student attendance overview',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+            ], 500);
+        }
+    }
+
+    /**
+     * @param \Illuminate\Database\Query\Builder $query
+     */
+    private function summarizeStudentAttendance($query): array
+    {
+        $summaryQuery = (clone $query)
+            ->select(
+                DB::raw('COUNT(*) as total_days'),
+                DB::raw('SUM(CASE WHEN status = "Present" THEN 1 ELSE 0 END) as present'),
+                DB::raw('SUM(CASE WHEN status = "Absent" THEN 1 ELSE 0 END) as absent'),
+                DB::raw('SUM(CASE WHEN status = "Late" THEN 1 ELSE 0 END) as late'),
+                DB::raw('SUM(CASE WHEN status IN ("Sick Leave", "Leave") THEN 1 ELSE 0 END) as leaves'),
+                DB::raw('SUM(CASE WHEN status = "Half-Day" THEN 1 ELSE 0 END) as half_day')
+            )
+            ->first();
+
+        $totalDays = (int) ($summaryQuery->total_days ?? 0);
+        $presentCount = (int) ($summaryQuery->present ?? 0);
+
+        return [
+            'total_days' => $totalDays,
+            'present' => $presentCount,
+            'absent' => (int) ($summaryQuery->absent ?? 0),
+            'late' => (int) ($summaryQuery->late ?? 0),
+            'leaves' => (int) ($summaryQuery->leaves ?? 0),
+            'half_day' => (int) ($summaryQuery->half_day ?? 0),
+            'percentage' => $totalDays > 0
+                ? round(($presentCount / $totalDays) * 100, 2)
+                : 0,
+        ];
+    }
+
+    /**
+     * @param \Illuminate\Database\Query\Builder $query
+     */
+    private function getAttendanceAbsentByMonth($query): array
+    {
+        $rows = (clone $query)
+            ->select(
+                DB::raw('DATE_FORMAT(date, "%Y-%m") as month'),
+                DB::raw('SUM(CASE WHEN status = "Absent" THEN 1 ELSE 0 END) as absent'),
+                DB::raw('SUM(CASE WHEN status = "Present" THEN 1 ELSE 0 END) as present'),
+                DB::raw('COUNT(*) as total_days')
+            )
+            ->groupBy(DB::raw('DATE_FORMAT(date, "%Y-%m")'))
+            ->orderBy('month', 'desc')
+            ->get();
+
+        return $rows->map(function ($row) {
+            $month = (string) ($row->month ?? '');
+            $label = $month;
+            try {
+                $label = Carbon::createFromFormat('Y-m', $month)->format('M Y');
+            } catch (\Exception $e) {
+                // keep raw month key
+            }
+
+            return [
+                'month' => $month,
+                'month_label' => $label,
+                'absent' => (int) ($row->absent ?? 0),
+                'present' => (int) ($row->present ?? 0),
+                'total_days' => (int) ($row->total_days ?? 0),
+            ];
+        })->values()->all();
+    }
+
+    /**
      * Get class attendance
      */
     public function getClassAttendance($grade, $section)

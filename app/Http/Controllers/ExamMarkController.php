@@ -2,11 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\AcademicYear;
 use App\Models\ExamMark;
 use App\Models\Student;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 
 class ExamMarkController extends Controller
@@ -156,6 +158,155 @@ class ExamMarkController extends Controller
             Log::error('Get student marks error', ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
             return response()->json(['success' => false, 'message' => 'Failed to fetch student marks: ' . $e->getMessage()], 500);
         }
+    }
+
+    /**
+     * Exam marks overview for student header (all years vs toolbar academic year).
+     * Separate from attendance — based on marks obtained ÷ total marks (non-absent only).
+     */
+    public function getStudentMarksOverview($studentId)
+    {
+        try {
+            $student = Student::where('user_id', $studentId)->whereNull('deleted_at')->first();
+            if (!$student) {
+                return response()->json(['success' => false, 'message' => 'Student not found'], 404);
+            }
+
+            $overallSummary = $this->summarizeStudentExamMarks(
+                $this->studentMarksBaseQuery($studentId, $student)
+            );
+
+            $currentYearQuery = $this->studentMarksBaseQuery($studentId, $student);
+            $academicYearId = request()->attributes->get('academic_year_id') ?? request()->input('academic_year_id');
+            $academicYearName = null;
+
+            if ($academicYearId) {
+                $year = AcademicYear::query()->find((int) $academicYearId);
+                $academicYearName = $year?->name;
+                if (Schema::hasColumn('exams', 'academic_year_id')) {
+                    $currentYearQuery->where('exams.academic_year_id', (int) $academicYearId);
+                } elseif ($academicYearName) {
+                    $currentYearQuery->where('exams.academic_year', $academicYearName);
+                }
+            }
+
+            $currentYearSummary = $this->summarizeStudentExamMarks($currentYearQuery);
+            $byYear = $this->getMarksBreakdownByYear($studentId, $student);
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'overall' => $overallSummary,
+                    'current_year' => array_merge($currentYearSummary, [
+                        'academic_year_id' => $academicYearId ? (int) $academicYearId : null,
+                        'academic_year_name' => $academicYearName,
+                    ]),
+                    'by_year' => $byYear,
+                ],
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Get student marks overview error', ['error' => $e->getMessage()]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch student marks overview',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+            ], 500);
+        }
+    }
+
+    /**
+     * @return \Illuminate\Database\Eloquent\Builder
+     */
+    private function studentMarksBaseQuery($studentId, Student $student)
+    {
+        $query = ExamMark::query()
+            ->where('exam_marks.student_id', $studentId)
+            ->join('exam_schedules', 'exam_marks.exam_schedule_id', '=', 'exam_schedules.id')
+            ->join('exams', 'exam_schedules.exam_id', '=', 'exams.id')
+            ->where('exams.branch_id', $student->branch_id);
+
+        if (!empty($student->school_id)) {
+            $query->where('exams.school_id', $student->school_id);
+        }
+
+        return $query;
+    }
+
+    /**
+     * Per academic year marks breakdown for overall ring popup.
+     */
+    private function getMarksBreakdownByYear($studentId, Student $student): array
+    {
+        $query = $this->studentMarksBaseQuery($studentId, $student)
+            ->where('exam_marks.is_absent', false);
+
+        if (Schema::hasColumn('exams', 'academic_year_id')) {
+            $rows = (clone $query)
+                ->leftJoin('academic_years', 'exams.academic_year_id', '=', 'academic_years.id')
+                ->select(
+                    'exams.academic_year_id',
+                    DB::raw('COALESCE(MAX(academic_years.name), MAX(exams.academic_year), "Unassigned") as academic_year_name'),
+                    DB::raw('SUM(exam_marks.marks_obtained) as marks_obtained'),
+                    DB::raw('SUM(exam_marks.total_marks) as total_marks'),
+                    DB::raw('COUNT(*) as subjects_count')
+                )
+                ->groupBy('exams.academic_year_id')
+                ->get();
+        } else {
+            $rows = (clone $query)
+                ->select(
+                    DB::raw('COALESCE(exams.academic_year, "Unassigned") as academic_year_name'),
+                    DB::raw('SUM(exam_marks.marks_obtained) as marks_obtained'),
+                    DB::raw('SUM(exam_marks.total_marks) as total_marks'),
+                    DB::raw('COUNT(*) as subjects_count')
+                )
+                ->groupBy('exams.academic_year')
+                ->get();
+        }
+
+        return $rows
+            ->map(function ($row) {
+                $obtained = (float) ($row->marks_obtained ?? 0);
+                $total = (float) ($row->total_marks ?? 0);
+
+                return [
+                    'academic_year_id' => isset($row->academic_year_id) ? (int) $row->academic_year_id : null,
+                    'academic_year_name' => (string) ($row->academic_year_name ?? 'Unassigned'),
+                    'marks_obtained' => $obtained,
+                    'total_marks' => $total,
+                    'subjects_count' => (int) ($row->subjects_count ?? 0),
+                    'percentage' => $total > 0 ? round(($obtained / $total) * 100, 2) : 0,
+                ];
+            })
+            ->sortByDesc('academic_year_name')
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @param \Illuminate\Database\Eloquent\Builder $query
+     */
+    private function summarizeStudentExamMarks($query): array
+    {
+        $summary = (clone $query)
+            ->where('exam_marks.is_absent', false)
+            ->select(
+                DB::raw('SUM(exam_marks.marks_obtained) as marks_obtained'),
+                DB::raw('SUM(exam_marks.total_marks) as total_marks'),
+                DB::raw('COUNT(*) as subjects_count')
+            )
+            ->first();
+
+        $obtained = (float) ($summary->marks_obtained ?? 0);
+        $total = (float) ($summary->total_marks ?? 0);
+
+        return [
+            'marks_obtained' => $obtained,
+            'total_marks' => $total,
+            'subjects_count' => (int) ($summary->subjects_count ?? 0),
+            'percentage' => $total > 0 ? round(($obtained / $total) * 100, 2) : 0,
+        ];
     }
 
     private function calculateGrade($percentage): string

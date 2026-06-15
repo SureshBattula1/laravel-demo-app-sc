@@ -289,6 +289,7 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
     Route::prefix('exam-marks')->group(function () {
         Route::get('schedule/{scheduleId}', [ExamMarkController::class, 'getMarks']);
         Route::post('schedule/{scheduleId}', [ExamMarkController::class, 'storeMarks']);
+        Route::get('student/{studentId}/overview', [ExamMarkController::class, 'getStudentMarksOverview']);
         Route::get('student/{studentId}', [ExamMarkController::class, 'getStudentMarks']);
     });
     
@@ -345,6 +346,7 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
         Route::get('export', [AttendanceController::class, 'export']);
         Route::post('bulk', [AttendanceController::class, 'markBulk']);
         Route::get('report', [AttendanceController::class, 'getReport']);
+        Route::get('student/{studentId}/overview', [AttendanceController::class, 'getStudentAttendanceOverview']);
         Route::get('student/{studentId}', [AttendanceController::class, 'getStudentAttendance']);
         Route::get('teacher/{teacherId}', [AttendanceController::class, 'getTeacherAttendance']);
         Route::get('class/{grade}/{section}', [AttendanceController::class, 'getClassAttendance']);
