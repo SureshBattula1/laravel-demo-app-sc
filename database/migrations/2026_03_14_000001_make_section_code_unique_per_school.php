@@ -20,12 +20,21 @@ return new class extends Migration
 
         // Backfill school_id from branch_id for existing rows
         if (Schema::hasColumn('sections', 'school_id') && Schema::hasColumn('sections', 'branch_id')) {
-            DB::statement('
-                UPDATE sections s
-                INNER JOIN branches b ON b.id = s.branch_id
-                SET s.school_id = b.school_id
-                WHERE s.branch_id IS NOT NULL AND (s.school_id IS NULL OR s.school_id = 0)
-            ');
+            if (Schema::getConnection()->getDriverName() === 'sqlite') {
+                DB::statement('
+                    UPDATE sections
+                    SET school_id = (SELECT b.school_id FROM branches b WHERE b.id = sections.branch_id)
+                    WHERE branch_id IS NOT NULL AND (school_id IS NULL OR school_id = 0)
+                    AND EXISTS (SELECT 1 FROM branches b WHERE b.id = sections.branch_id)
+                ');
+            } else {
+                DB::statement('
+                    UPDATE sections s
+                    INNER JOIN branches b ON b.id = s.branch_id
+                    SET s.school_id = b.school_id
+                    WHERE s.branch_id IS NOT NULL AND (s.school_id IS NULL OR s.school_id = 0)
+                ');
+            }
         }
 
         Schema::table('sections', function (Blueprint $table) {

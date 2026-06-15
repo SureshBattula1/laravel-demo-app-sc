@@ -19,12 +19,21 @@ return new class extends Migration
 
         // Backfill school_id from branch_id for existing rows (if school_id column exists)
         if (Schema::hasColumn('account_categories', 'school_id') && Schema::hasColumn('account_categories', 'branch_id')) {
-            DB::statement('
-                UPDATE account_categories ac
-                INNER JOIN branches b ON b.id = ac.branch_id
-                SET ac.school_id = b.school_id
-                WHERE ac.branch_id IS NOT NULL AND (ac.school_id IS NULL OR ac.school_id = 0)
-            ');
+            if (Schema::getConnection()->getDriverName() === 'sqlite') {
+                DB::statement('
+                    UPDATE account_categories
+                    SET school_id = (SELECT b.school_id FROM branches b WHERE b.id = account_categories.branch_id)
+                    WHERE branch_id IS NOT NULL AND (school_id IS NULL OR school_id = 0)
+                    AND EXISTS (SELECT 1 FROM branches b WHERE b.id = account_categories.branch_id)
+                ');
+            } else {
+                DB::statement('
+                    UPDATE account_categories ac
+                    INNER JOIN branches b ON b.id = ac.branch_id
+                    SET ac.school_id = b.school_id
+                    WHERE ac.branch_id IS NOT NULL AND (ac.school_id IS NULL OR ac.school_id = 0)
+                ');
+            }
         }
 
         Schema::table('account_categories', function (Blueprint $table) {

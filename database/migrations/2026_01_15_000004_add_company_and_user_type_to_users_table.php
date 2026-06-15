@@ -22,9 +22,16 @@ return new class extends Migration
 
         // Handle user_type column - modify existing enum to include new values
         if (Schema::hasColumn('users', 'user_type')) {
-            // Modify existing user_type column to support new enum values
-            // MySQL requires dropping and recreating the enum to add new values
-            DB::statement("ALTER TABLE `users` MODIFY COLUMN `user_type` ENUM('Student', 'Teacher', 'Parent', 'Staff', 'Admin', 'SchoolUser', 'CompanyAdmin', 'SupportStaff') NULL");
+            if (Schema::getConnection()->getDriverName() === 'sqlite') {
+                // SQLite: the enum is backed by a CHECK constraint. Convert it to a plain
+                // string so the new user types (SchoolUser/CompanyAdmin/SupportStaff) are allowed.
+                Schema::table('users', function (Blueprint $table) {
+                    $table->string('user_type')->nullable()->change();
+                });
+            } else {
+                // MySQL requires dropping and recreating the enum to add new values
+                DB::statement("ALTER TABLE `users` MODIFY COLUMN `user_type` ENUM('Student', 'Teacher', 'Parent', 'Staff', 'Admin', 'SchoolUser', 'CompanyAdmin', 'SupportStaff') NULL");
+            }
         } else {
             // Add new user_type column if it doesn't exist
             Schema::table('users', function (Blueprint $table) {

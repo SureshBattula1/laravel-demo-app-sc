@@ -144,17 +144,27 @@ return new class extends Migration
     private function indexExists(string $tableName, string $indexName): bool
     {
         $connection = Schema::getConnection();
+
+        if ($connection->getDriverName() === 'sqlite') {
+            $result = $connection->select(
+                "SELECT COUNT(*) as count FROM sqlite_master WHERE type = 'index' AND name = ?",
+                [$indexName]
+            );
+
+            return $result[0]->count > 0;
+        }
+
         $databaseName = $connection->getDatabaseName();
-        
+
         $result = $connection->select(
-            "SELECT COUNT(*) as count 
-             FROM information_schema.statistics 
-             WHERE table_schema = ? 
-             AND table_name = ? 
+            "SELECT COUNT(*) as count
+             FROM information_schema.statistics
+             WHERE table_schema = ?
+             AND table_name = ?
              AND index_name = ?",
             [$databaseName, $tableName, $indexName]
         );
-        
+
         return $result[0]->count > 0;
     }
 

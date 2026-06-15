@@ -12,8 +12,19 @@ return new class extends Migration
      */
     public function up(): void
     {
-        // Change qualification from JSON to TEXT column
-        DB::statement('ALTER TABLE teachers MODIFY COLUMN qualification TEXT NULL');
+        if (! Schema::hasColumn('teachers', 'qualification')) {
+            return;
+        }
+
+        // Change qualification from JSON to TEXT column (driver-portable).
+        if (Schema::getConnection()->getDriverName() === 'sqlite') {
+            // SQLite stores JSON as TEXT and has no MODIFY COLUMN; nothing to change.
+            return;
+        }
+
+        Schema::table('teachers', function (Blueprint $table) {
+            $table->text('qualification')->nullable()->change();
+        });
     }
 
     /**
@@ -21,7 +32,16 @@ return new class extends Migration
      */
     public function down(): void
     {
-        // Revert back to JSON
-        DB::statement('ALTER TABLE teachers MODIFY COLUMN qualification JSON NULL');
+        if (! Schema::hasColumn('teachers', 'qualification')) {
+            return;
+        }
+
+        if (Schema::getConnection()->getDriverName() === 'sqlite') {
+            return;
+        }
+
+        Schema::table('teachers', function (Blueprint $table) {
+            $table->json('qualification')->nullable()->change();
+        });
     }
 };

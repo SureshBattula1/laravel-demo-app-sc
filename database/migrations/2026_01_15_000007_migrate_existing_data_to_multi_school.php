@@ -142,42 +142,45 @@ return new class extends Migration
 
         foreach ($tables as $table) {
             if (Schema::hasTable($table) && Schema::hasColumn($table, 'branch_id') && Schema::hasColumn($table, 'school_id')) {
-                // Update school_id based on branch_id
-                DB::statement("
-                    UPDATE {$table} t
-                    INNER JOIN branches b ON t.branch_id = b.id
-                    SET t.school_id = b.school_id
-                    WHERE t.branch_id IS NOT NULL
-                    AND b.school_id IS NOT NULL
-                    AND t.school_id IS NULL
-                ");
-
+                $this->backfillSchoolId($table);
                 Log::info("Updated school_id for table: {$table}");
             }
         }
 
         // Update students and teachers tables
-        if (Schema::hasTable('students') && Schema::hasColumn('students', 'branch_id') && Schema::hasColumn('students', 'school_id')) {
+        foreach (['students', 'teachers'] as $table) {
+            if (Schema::hasTable($table) && Schema::hasColumn($table, 'branch_id') && Schema::hasColumn($table, 'school_id')) {
+                $this->backfillSchoolId($table);
+            }
+        }
+    }
+
+    /**
+     * Backfill school_id from the related branch, using driver-appropriate SQL.
+     */
+    private function backfillSchoolId(string $table): void
+    {
+        if (Schema::getConnection()->getDriverName() === 'sqlite') {
+            // SQLite has no UPDATE ... JOIN; use a correlated subquery instead.
             DB::statement("
-                UPDATE students s
-                INNER JOIN branches b ON s.branch_id = b.id
-                SET s.school_id = b.school_id
-                WHERE s.branch_id IS NOT NULL
-                AND b.school_id IS NOT NULL
-                AND s.school_id IS NULL
+                UPDATE {$table}
+                SET school_id = (SELECT b.school_id FROM branches b WHERE b.id = {$table}.branch_id)
+                WHERE branch_id IS NOT NULL
+                AND school_id IS NULL
+                AND EXISTS (SELECT 1 FROM branches b WHERE b.id = {$table}.branch_id AND b.school_id IS NOT NULL)
             ");
+
+            return;
         }
 
-        if (Schema::hasTable('teachers') && Schema::hasColumn('teachers', 'branch_id') && Schema::hasColumn('teachers', 'school_id')) {
-            DB::statement("
-                UPDATE teachers t
-                INNER JOIN branches b ON t.branch_id = b.id
-                SET t.school_id = b.school_id
-                WHERE t.branch_id IS NOT NULL
-                AND b.school_id IS NOT NULL
-                AND t.school_id IS NULL
-            ");
-        }
+        DB::statement("
+            UPDATE {$table} t
+            INNER JOIN branches b ON t.branch_id = b.id
+            SET t.school_id = b.school_id
+            WHERE t.branch_id IS NOT NULL
+            AND b.school_id IS NOT NULL
+            AND t.school_id IS NULL
+        ");
     }
 
     /**
