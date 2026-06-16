@@ -27,12 +27,19 @@ return Application::configure(basePath: dirname(__DIR__))
             'academic_year.context' => \App\Http\Middleware\SetAcademicYearContext::class,
         ]);
         
-        // Enable CORS for API routes; attach academic year context for scoping
+        // Enable CORS for API routes; attach academic year context for scoping.
+        // EncodeHashids is prepended (outermost) so it transforms the final JSON
+        // response; DecodeHashids is appended (innermost) so it rewrites incoming
+        // tokens to integer IDs right before controllers run.
         $middleware->api(
             prepend: [
                 \Illuminate\Http\Middleware\HandleCors::class,
+                \App\Http\Middleware\EncodeHashids::class,
             ],
             append: [
+                // Decode incoming ID tokens first, so the academic-year context
+                // (and controllers) see integer IDs.
+                \App\Http\Middleware\DecodeHashids::class,
                 \App\Http\Middleware\SetAcademicYearContext::class,
             ]
         );

@@ -32,13 +32,15 @@ class AcademicYearContext
             return $this->resolvedId;
         }
 
-        $id = $this->request->query('academic_year_id')
+        $raw = $this->request->query('academic_year_id')
             ?? $this->request->header('X-Academic-Year-Id')
             ?? $this->request->input('academic_year_id');
 
-        if ($id !== null && $id !== '') {
-            $id = (int) $id;
-            $model = AcademicYear::query()->where('id', $id)->first();
+        if ($raw !== null && $raw !== '') {
+            // Value may arrive as a Hashids token (header bypasses the decode
+            // middleware) or as a raw integer. Resolve either form to an int.
+            $id = app(\App\Support\IdHasher::class)->decode($raw) ?? (is_numeric($raw) ? (int) $raw : null);
+            $model = $id !== null ? AcademicYear::query()->where('id', $id)->first() : null;
             if ($model) {
                 $this->resolvedId = $id;
                 $this->resolvedModel = $model;
