@@ -272,14 +272,14 @@ class SmsBulkSendController extends Controller
     {
         $validator = Validator::make($request->all(), [
             'audience' => 'required|string|in:global,teachers,students',
-            'template_id' => 'nullable|integer|exists:sms_templates,id',
+            'template_id' => 'nullable|string|exists:sms_templates,id',
             'body' => 'required_without:template_id|string|max:2000',
             'teacher_mode' => 'nullable|string|in:all,selected',
             'teacher_ids' => 'nullable|array',
-            'teacher_ids.*' => 'integer',
+            'teacher_ids.*' => 'string|exists:teachers,id',
             'student_mode' => 'nullable|string|in:all,filtered,selected',
             'student_ids' => 'nullable|array',
-            'student_ids.*' => 'integer',
+            'student_ids.*' => 'string|exists:students,id',
             'student_filters' => 'nullable|array',
             'student_filters.*.grade' => 'required_with:student_filters|string|max:255',
             'student_filters.*.section' => 'nullable|string|max:255',
