@@ -33,9 +33,11 @@ class SectionController extends Controller
                 'current_strength', 'room_number', 'class_teacher_id', 'is_active',
                 'created_at', 'updated_at'
             ])
+            // classTeacher is intentionally NOT eager-loaded for the list — the list UI
+            // doesn't display the class teacher, so loading it just adds a join + payload.
+            // (export() builds class_teacher_name via its own query, so it's unaffected.)
             ->with([
-                'branch:id,name,code',
-                'classTeacher:id,first_name,last_name,email'
+                'branch:id,name,code'
             ]);
 
             // 🔥 APPLY SCHOOL FILTERING - School-level isolation
@@ -135,8 +137,25 @@ class SectionController extends Controller
                 })
                 ->toArray();
 
+            // OPTIMIZATION: Batch-load all grades for this page in ONE query so the
+            // grade_label / grade_details accessors don't query per row (was N+1).
+            $gradeRows = collect();
+            $branchIds = $sections->pluck('branch_id')->filter()->unique()->values()->all();
+            $gradeValues = $sections->pluck('grade_level')->filter()->unique()->values()->all();
+            if (!empty($branchIds) && !empty($gradeValues)) {
+                $gradeRows = DB::table('grades')
+                    ->whereIn('branch_id', $branchIds)
+                    ->whereIn('value', $gradeValues)
+                    ->get();
+            }
+            $gradeMap = $gradeRows->mapWithKeys(function ($g) {
+                return [$g->branch_id . '_' . $g->value => $g];
+            });
+
             // Enhance each section with grade details and actual student count
-            $sections->getCollection()->transform(function ($section) use ($studentCounts) {
+            $sections->getCollection()->transform(function ($section) use ($studentCounts, $gradeMap) {
+                // Feed the pre-fetched grade so accessors don't hit the DB per row
+                $section->setPreloadedGrade($gradeMap[$section->branch_id . '_' . $section->grade_level] ?? null);
                 // Append grade_details accessor data
                 $section->append('grade_details');
                 // Override current_strength with pre-fetched count (no N+1!)

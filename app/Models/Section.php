@@ -40,12 +40,34 @@ class Section extends Model
     protected $appends = ['grade_label', 'actual_strength'];
 
     /**
+     * Preloaded grade row, injected by list endpoints to avoid an N+1 in the
+     * grade_label / grade_details accessors (which both resolve the grade).
+     * Declared as a real PHP property so it is NOT serialized into JSON.
+     */
+    public ?object $preloadedGrade = null;
+    public bool $gradePreloaded = false;
+
+    /**
+     * Inject a pre-fetched grade row (from a single batch query) so the
+     * accessors don't each hit the DB per row.
+     */
+    public function setPreloadedGrade(?object $grade): void
+    {
+        $this->preloadedGrade = $grade;
+        $this->gradePreloaded = true;
+    }
+
+    /**
      * Resolve grade from grades table (branch-specific join by branch_id + value).
+     * Uses the preloaded grade when the caller has batch-loaded it (avoids N+1).
      */
     private function resolveGradeFromGradesTable(): ?object
     {
         if (!$this->grade_level) {
             return null;
+        }
+        if ($this->gradePreloaded) {
+            return $this->preloadedGrade;
         }
         return DB::table('grades')
             ->where('branch_id', $this->branch_id)
