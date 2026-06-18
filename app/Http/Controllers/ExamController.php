@@ -3,43 +3,77 @@
 namespace App\Http\Controllers;
 
 use App\Models\Exam;
+use App\Models\Student;
+use App\Services\AcademicYearContext;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
+use Carbon\Carbon;
 
 class ExamController extends Controller
 {
+    public function __construct(
+        protected AcademicYearContext $academicYearContext
+    ) {}
+
     /**
-     * Display a listing of exams
+     * Display a listing of exams - OPTIMIZED with pagination
      */
     public function index(Request $request)
     {
         try {
-            $query = Exam::with(['branch', 'creator']);
+            $query = Exam::with(['branch', 'examTerm', 'creator']);
+            $academicYearId = $this->academicYearContext->id(false);
+
+            // 🔥 APPLY SCHOOL FILTERING - School-level isolation
+            $schoolId = $this->getCurrentSchoolId($request);
+            if ($schoolId) {
+                $query->where('school_id', $schoolId);
+            }
+
+            // Apply branch access filtering
+            $this->applyBranchFilter($query, $request);
 
             // Filter by branch
             if ($request->has('branch_id')) {
                 $query->where('branch_id', $request->branch_id);
             }
 
-            // Filter by academic year
-            if ($request->has('academic_year')) {
+            // Filter by exam term
+            if ($request->has('exam_term_id')) {
+                $query->where('exam_term_id', $request->exam_term_id);
+            }
+
+            // Academic year: prefer request (e.g. advanced search), else toolbar context
+            if ($request->filled('academic_year_id')) {
+                $query->where('academic_year_id', (int) $request->academic_year_id);
+            } elseif ($request->filled('academic_year')) {
                 $query->where('academic_year', $request->academic_year);
+            } elseif ($academicYearId) {
+                $query->where('academic_year_id', (int) $academicYearId);
             }
 
-            // Filter by exam type
+            // Filter by exam type (DB column is 'type')
             if ($request->has('exam_type')) {
-                $query->where('exam_type', $request->exam_type);
+                $query->where('type', $request->exam_type);
             }
 
-            // Search by name
-            if ($request->has('search')) {
-                $search = $request->search;
+            // OPTIMIZED Search by name - prefix search for better index usage
+            if ($request->has('search') && !empty($request->search)) {
+                $search = strip_tags($request->search);
                 $query->where(function($q) use ($search) {
-                    $q->where('name', 'like', "%{$search}%")
-                      ->orWhere('exam_type', 'like', "%{$search}%")
-                      ->orWhere('academic_year', 'like', "%{$search}%");
+                    $q->where('name', 'like', "{$search}%")  // ✅ Can use index
+                      ->orWhere('type', 'like', "{$search}%")
+                      ->orWhere('academic_year', 'like', "{$search}%")
+                      ->orWhereHas('branch', function($q) use ($search) {
+                          $q->where('name', 'like', "{$search}%")
+                            ->orWhere('code', 'like', "{$search}%");
+                      })
+                      ->orWhereHas('examTerm', function($q) use ($search) {
+                          $q->where('name', 'like', "{$search}%")
+                            ->orWhere('code', 'like', "{$search}%");
+                      });
                 });
             }
 
@@ -48,11 +82,46 @@ class ExamController extends Controller
                 $query->where('is_active', $request->boolean('is_active'));
             }
 
-            $exams = $query->orderBy('start_date', 'desc')->get();
+            // Sorting
+            $sortBy = $request->get('sort_by', 'created_at');
+            $sortDir = strtolower($request->get('sort_direction', 'desc')) === 'asc' ? 'asc' : 'desc';
+            $sortableColumns = ['name', 'branch.name', 'exam_term_name', 'academic_year', 'status_display', 'created_at'];
+            if (!in_array($sortBy, $sortableColumns)) {
+                $sortBy = 'created_at';
+            }
+            if ($sortBy === 'branch.name') {
+                $query->orderBy(
+                    DB::raw('(SELECT name FROM branches WHERE branches.id = exams.branch_id)'),
+                    $sortDir
+                );
+            } elseif ($sortBy === 'exam_term_name') {
+                $query->orderBy(
+                    DB::raw('(SELECT name FROM exam_terms WHERE exam_terms.id = exams.exam_term_id)'),
+                    $sortDir
+                );
+            } elseif ($sortBy === 'status_display') {
+                $query->orderBy('is_active', $sortDir);
+            } else {
+                $query->orderBy($sortBy, $sortDir);
+            }
+
+            // OPTIMIZED: Add pagination to prevent loading all exams
+            $perPage = (int) $request->get('per_page', 25);
+            $perPage = max(1, min(100, $perPage));
+            $page = (int) $request->get('page', 1);
+            $exams = $query->paginate($perPage, ['*'], 'page', $page);
 
             return response()->json([
                 'success' => true,
-                'data' => $exams,
+                'data' => $exams->items(),
+                'meta' => [
+                    'current_page' => $exams->currentPage(),
+                    'per_page' => $exams->perPage(),
+                    'total' => $exams->total(),
+                    'last_page' => $exams->lastPage(),
+                    'from' => $exams->firstItem(),
+                    'to' => $exams->lastItem(),
+                ],
                 'message' => 'Exams retrieved successfully'
             ]);
 
@@ -73,15 +142,18 @@ class ExamController extends Controller
     {
         DB::beginTransaction();
         try {
+            $academicYearId = $this->academicYearContext->id(false);
+            $academicYearName = $academicYearId
+                ? (\App\Models\AcademicYear::query()->where('id', (int) $academicYearId)->value('name') ?? null)
+                : null;
+
             $validator = Validator::make($request->all(), [
-                'branch_id' => 'required|uuid|exists:branches,id',
+                'branch_id' => 'required|integer|exists:branches,id',
                 'name' => 'required|string|max:255',
-                'exam_type' => 'required|string|in:Midterm,Final,Quiz,Assignment,Practical,Other',
-                'academic_year' => 'required|string|max:20',
-                'start_date' => 'required|date',
-                'end_date' => 'required|date|after_or_equal:start_date',
-                'total_marks' => 'required|numeric|min:0',
-                'passing_marks' => 'required|numeric|min:0|lte:total_marks',
+                'exam_term_id' => 'nullable|integer|exists:exam_terms,id',
+                'exam_type' => 'nullable|string|in:Midterm,Final,Quiz,Assignment,Practical,Other',
+                'start_date' => 'nullable|date',
+                'end_date' => 'nullable|date|after_or_equal:start_date',
                 'description' => 'nullable|string',
                 'is_active' => 'boolean'
             ]);
@@ -94,8 +166,31 @@ class ExamController extends Controller
                 ], 422);
             }
 
+            // Prepare data with proper date formatting
+            $examData = $request->only([
+                'exam_term_id', 'branch_id', 'name', 'exam_type', 'description'
+            ]);
+
+            // Set school_id from branch
+            $branch = \App\Models\Branch::find($request->branch_id);
+            $examData['school_id'] = $branch ? $branch->school_id : null;
+            
+            // Set default values for total_marks and passing_marks
+            $examData['total_marks'] = 0;
+            $examData['passing_marks'] = 0;
+            
+            // Format dates properly
+            if ($request->has('start_date')) {
+                $examData['start_date'] = Carbon::parse($request->start_date)->format('Y-m-d');
+            }
+            if ($request->has('end_date')) {
+                $examData['end_date'] = Carbon::parse($request->end_date)->format('Y-m-d');
+            }
+            
             $exam = Exam::create([
-                ...$request->all(),
+                ...$examData,
+                'academic_year_id' => $academicYearId ? (int) $academicYearId : null,
+                'academic_year' => $academicYearName,
                 'created_by' => $request->user()->id,
                 'is_active' => $request->has('is_active') ? $request->boolean('is_active') : true
             ]);
@@ -104,7 +199,7 @@ class ExamController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data' => $exam->load(['branch', 'creator']),
+                'data' => $exam->load(['branch', 'examTerm', 'creator']),
                 'message' => 'Exam created successfully'
             ], 201);
 
@@ -125,7 +220,7 @@ class ExamController extends Controller
     public function show(string $id)
     {
         try {
-            $exam = Exam::with(['branch', 'results.student', 'creator', 'updater'])->findOrFail($id);
+            $exam = Exam::with(['branch', 'examTerm', 'results.student', 'creator', 'updater'])->findOrFail($id);
 
             return response()->json([
                 'success' => true,
@@ -151,15 +246,18 @@ class ExamController extends Controller
         DB::beginTransaction();
         try {
             $exam = Exam::findOrFail($id);
+            $academicYearId = $this->academicYearContext->id(false);
+            $academicYearName = $academicYearId
+                ? (\App\Models\AcademicYear::query()->where('id', (int) $academicYearId)->value('name') ?? null)
+                : null;
 
             $validator = Validator::make($request->all(), [
+                'branch_id' => 'integer|exists:branches,id',
                 'name' => 'string|max:255',
-                'exam_type' => 'string|in:Midterm,Final,Quiz,Assignment,Practical,Other',
-                'academic_year' => 'string|max:20',
-                'start_date' => 'date',
-                'end_date' => 'date|after_or_equal:start_date',
-                'total_marks' => 'numeric|min:0',
-                'passing_marks' => 'numeric|min:0',
+                'exam_term_id' => 'nullable|integer|exists:exam_terms,id',
+                'exam_type' => 'nullable|string|in:Midterm,Final,Quiz,Assignment,Practical,Other',
+                'start_date' => 'nullable|date',
+                'end_date' => 'nullable|date|after_or_equal:start_date',
                 'description' => 'nullable|string',
                 'is_active' => 'boolean'
             ]);
@@ -172,8 +270,23 @@ class ExamController extends Controller
                 ], 422);
             }
 
+            // Prepare update data with proper date formatting
+            $updateData = $request->only([
+                'exam_term_id', 'branch_id', 'name', 'exam_type', 'description', 'is_active'
+            ]);
+            
+            // Format dates properly
+            if ($request->has('start_date')) {
+                $updateData['start_date'] = Carbon::parse($request->start_date)->format('Y-m-d');
+            }
+            if ($request->has('end_date')) {
+                $updateData['end_date'] = Carbon::parse($request->end_date)->format('Y-m-d');
+            }
+            
             $exam->update([
-                ...$request->all(),
+                ...$updateData,
+                'academic_year_id' => $academicYearId ? (int) $academicYearId : $exam->academic_year_id,
+                'academic_year' => $academicYearName ?? $exam->academic_year,
                 'updated_by' => $request->user()->id
             ]);
 
@@ -181,7 +294,7 @@ class ExamController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data' => $exam->load(['branch', 'creator', 'updater']),
+                'data' => $exam->load(['branch', 'examTerm', 'creator', 'updater']),
                 'message' => 'Exam updated successfully'
             ]);
 
@@ -233,19 +346,31 @@ class ExamController extends Controller
     }
 
     /**
-     * Get exam statistics
+     * Get exam statistics - OPTIMIZED with single query
      */
     public function statistics(string $id)
     {
         try {
-            $exam = Exam::with('results')->findOrFail($id);
+            $exam = Exam::findOrFail($id);
 
-            $totalStudents = $exam->results()->count();
-            $passedStudents = $exam->results()->where('marks_obtained', '>=', $exam->passing_marks)->count();
+            // OPTIMIZED: Single aggregated query instead of 5 separate queries
+            $stats = DB::table('exam_results')
+                ->where('exam_id', $id)
+                ->select(
+                    DB::raw('COUNT(*) as total_students'),
+                    DB::raw('SUM(CASE WHEN marks_obtained >= ' . (float)$exam->passing_marks . ' THEN 1 ELSE 0 END) as passed_students'),
+                    DB::raw('AVG(marks_obtained) as average_marks'),
+                    DB::raw('MAX(marks_obtained) as highest_marks'),
+                    DB::raw('MIN(marks_obtained) as lowest_marks')
+                )
+                ->first();
+
+            $totalStudents = (int) ($stats->total_students ?? 0);
+            $passedStudents = (int) ($stats->passed_students ?? 0);
             $failedStudents = $totalStudents - $passedStudents;
-            $averageMarks = $exam->results()->avg('marks_obtained');
-            $highestMarks = $exam->results()->max('marks_obtained');
-            $lowestMarks = $exam->results()->min('marks_obtained');
+            $averageMarks = round((float) ($stats->average_marks ?? 0), 2);
+            $highestMarks = (float) ($stats->highest_marks ?? 0);
+            $lowestMarks = (float) ($stats->lowest_marks ?? 0);
 
             return response()->json([
                 'success' => true,
@@ -256,7 +381,7 @@ class ExamController extends Controller
                         'passed_students' => $passedStudents,
                         'failed_students' => $failedStudents,
                         'pass_percentage' => $totalStudents > 0 ? round(($passedStudents / $totalStudents) * 100, 2) : 0,
-                        'average_marks' => round($averageMarks, 2),
+                        'average_marks' => $averageMarks,
                         'highest_marks' => $highestMarks,
                         'lowest_marks' => $lowestMarks
                     ]
@@ -389,9 +514,21 @@ class ExamController extends Controller
     public function getStudentResults(string $studentId)
     {
         try {
-            $results = \App\Models\ExamResult::where('student_id', $studentId)
+            // Get student's academic year for filtering
+            $student = \App\Models\Student::where('user_id', $studentId)->first();
+            $academicYear = $student->academic_year ?? request('academic_year');
+            
+            $resultsQuery = \App\Models\ExamResult::where('exam_results.student_id', $studentId)
+                ->join('exams', 'exam_results.exam_id', '=', 'exams.id');
+            
+            // Filter by academic year if available
+            if ($academicYear) {
+                $resultsQuery->where('exams.academic_year', $academicYear);
+            }
+            
+            $results = $resultsQuery->select('exam_results.*')
                 ->with(['exam', 'subject'])
-                ->orderBy('created_at', 'desc')
+                ->orderBy('exam_results.created_at', 'desc')
                 ->get();
 
             // Group by exam

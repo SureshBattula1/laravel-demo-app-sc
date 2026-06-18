@@ -123,8 +123,10 @@ class TimetableController extends Controller
                 ], 422);
             }
 
+            $branch = \App\Models\Branch::find($request->branch_id);
             $timetable = Timetable::create([
                 'branch_id' => $request->branch_id,
+                'school_id' => $branch ? $branch->school_id : null,
                 'grade' => $request->grade,
                 'section' => $request->section,
                 'subject_id' => $request->subject_id,

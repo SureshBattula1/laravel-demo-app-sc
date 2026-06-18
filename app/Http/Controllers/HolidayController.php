@@ -3,6 +3,12 @@
 namespace App\Http\Controllers;
 
 use App\Models\Holiday;
+use App\Exports\HolidaysExport;
+use App\Services\PdfExportService;
+use App\Services\CsvExportService;
+use App\Services\ExportService;
+use App\Services\AcademicYearContext;
+use Maatwebsite\Excel\Facades\Excel;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Validator;
@@ -11,6 +17,10 @@ use Illuminate\Support\Facades\Log;
 
 class HolidayController extends Controller
 {
+    public function __construct(
+        protected AcademicYearContext $academicYearContext
+    ) {}
+
     /**
      * Get all holidays with role-based filtering
      */
@@ -19,15 +29,16 @@ class HolidayController extends Controller
         try {
             $user = Auth::user();
             $query = Holiday::with(['branch', 'createdBy']);
+            $academicYearId = $this->academicYearContext->id(false);
 
-            // Role-based filtering
-            if ($user->role === 'BranchAdmin') {
-                // Branch admin sees: their branch holidays + national/state holidays
-                $query->where(function($q) use ($user) {
-                    $q->where('branch_id', $user->branch_id)
-                      ->orWhereNull('branch_id')
-                      ->orWhereIn('type', ['National', 'State']);
-                });
+            // Restrict to company holidays only: holidays in user's accessible branches (no National/State or branch-null)
+            $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+            if ($accessibleBranchIds !== 'all') {
+                if (empty($accessibleBranchIds)) {
+                    $query->whereRaw('1 = 0'); // no branches = no holidays
+                } else {
+                    $query->whereIn('branch_id', $accessibleBranchIds);
+                }
             }
 
             // Apply filters
@@ -35,8 +46,8 @@ class HolidayController extends Controller
                 $query->where('type', $request->type);
             }
 
-            if ($request->has('academic_year')) {
-                $query->where('academic_year', $request->academic_year);
+            if ($academicYearId) {
+                $query->where('academic_year_id', (int) $academicYearId);
             }
 
             if ($request->has('is_active')) {
@@ -53,25 +64,35 @@ class HolidayController extends Controller
                       ->orWhereRaw('MONTH(end_date) = ?', [$month]);
             }
 
-            if ($request->has('search')) {
+            // OPTIMIZED Search filter - prefix search for better index usage
+            if ($request->has('search') && !empty($request->search)) {
                 $search = strip_tags($request->search);
                 $query->where(function($q) use ($search) {
-                    $q->where('title', 'like', '%' . $search . '%')
-                      ->orWhere('description', 'like', '%' . $search . '%');
+                    $q->where('title', 'like', "{$search}%")
+                      ->orWhere('description', 'like', "{$search}%");
                 });
             }
 
-            $holidays = $query->orderBy('start_date', 'asc')->get();
+            // OPTIMIZED: Add pagination and calculate duration in SQL
+            $perPage = $request->get('per_page', 25);
+            $page = $request->get('page', 1);
+            
+            $holidays = $query->orderBy('start_date', 'asc')->paginate($perPage, ['*'], 'page', $page);
 
-            // Append duration to each holiday
-            $holidays->each(function ($holiday) {
-                $holiday->append('duration');
-            });
+            // Duration is computed via model accessor; branch_name appended from model
 
             return response()->json([
                 'success' => true,
-                'data' => $holidays,
-                'count' => $holidays->count()
+                'data' => $holidays->items(),
+                'meta' => [
+                    'current_page' => $holidays->currentPage(),
+                    'per_page' => $holidays->perPage(),
+                    'total' => $holidays->total(),
+                    'last_page' => $holidays->lastPage(),
+                    'from' => $holidays->firstItem(),
+                    'to' => $holidays->lastItem(),
+                    'has_more_pages' => $holidays->hasMorePages()
+                ]
             ]);
 
         } catch (\Exception $e) {
@@ -92,6 +113,14 @@ class HolidayController extends Controller
     {
         try {
             $user = Auth::user();
+            // Use academic_year_id from request body (form selection) or fall back to context/toolbar
+            $academicYearId = $request->filled('academic_year_id')
+                ? (int) $request->academic_year_id
+                : $this->academicYearContext->id(false);
+            $academicYearModel = $academicYearId
+                ? \App\Models\AcademicYear::query()->find($academicYearId)
+                : null;
+            $academicYearName = $academicYearModel?->name;
 
             // Check role permissions
             if (!in_array($user->role, ['SuperAdmin', 'BranchAdmin'])) {
@@ -109,8 +138,8 @@ class HolidayController extends Controller
                 'type' => 'required|in:National,State,School,Optional,Restricted',
                 'color' => 'nullable|string|max:20',
                 'branch_id' => 'nullable|exists:branches,id',
+                'academic_year_id' => 'nullable|exists:academic_years,id',
                 'is_recurring' => 'boolean',
-                'academic_year' => 'nullable|string|max:20'
             ]);
 
             if ($validator->fails()) {
@@ -130,10 +159,11 @@ class HolidayController extends Controller
 
             $title = strip_tags($request->title);
             $startDate = $request->start_date;
-            $academicYear = $request->academic_year ?: $this->getCurrentAcademicYear();
             
+            $branch = $branchId ? \App\Models\Branch::find($branchId) : null;
             $holiday = Holiday::create([
                 'branch_id' => $branchId ?: 1, // Default to branch 1 if null (for old schema)
+                'school_id' => $branch ? $branch->school_id : null,
                 'name' => $title, // Old schema column
                 'title' => $title,
                 'date' => $startDate, // Old schema column
@@ -143,7 +173,8 @@ class HolidayController extends Controller
                 'type' => $request->type,
                 'color' => $request->color ?: $this->getDefaultColor($request->type),
                 'is_recurring' => $request->boolean('is_recurring', false),
-                'academic_year' => $academicYear, // Required field, always has value
+                'academic_year_id' => $academicYearId ? (int) $academicYearId : null,
+                'academic_year' => $academicYearName,
                 'is_active' => $request->boolean('is_active', true),
                 'created_by' => $user->id
             ]);
@@ -221,6 +252,7 @@ class HolidayController extends Controller
                 'start_date' => 'sometimes|date',
                 'end_date' => 'sometimes|date|after_or_equal:start_date',
                 'type' => 'sometimes|in:National,State,School,Optional,Restricted',
+                'academic_year_id' => 'nullable|exists:academic_years,id',
                 'is_active' => 'sometimes|boolean'
             ]);
 
@@ -234,9 +266,17 @@ class HolidayController extends Controller
             DB::beginTransaction();
 
             $updateData = $request->only([
-                'title', 'description', 'start_date', 'end_date', 
-                'type', 'color', 'is_recurring', 'is_active'
+                'title', 'description', 'start_date', 'end_date',
+                'type', 'color', 'is_recurring', 'is_active', 'academic_year_id'
             ]);
+
+            if ($request->has('academic_year_id')) {
+                $ayId = $request->academic_year_id ? (int) $request->academic_year_id : null;
+                $updateData['academic_year_id'] = $ayId;
+                $updateData['academic_year'] = $ayId
+                    ? (\App\Models\AcademicYear::query()->find($ayId)?->name ?? null)
+                    : null;
+            }
 
             foreach (['title', 'description'] as $field) {
                 if (isset($updateData[$field])) {
@@ -314,15 +354,18 @@ class HolidayController extends Controller
             $endDate = date('Y-m-t', strtotime("$year-$month-01"));
 
             $query = Holiday::active()
+                ->with(['branch'])
                 ->inDateRange($startDate, $endDate);
 
-            // Role-based filtering
-            if ($user->role === 'BranchAdmin') {
-                $query->where(function($q) use ($user) {
-                    $q->where('branch_id', $user->branch_id)
-                      ->orWhereNull('branch_id')
-                      ->orWhereIn('type', ['National', 'State']);
-                });
+            // Company holidays only: restrict to user's accessible branches
+            $request = request();
+            $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+            if ($accessibleBranchIds !== 'all') {
+                if (empty($accessibleBranchIds)) {
+                    $query->whereRaw('1 = 0');
+                } else {
+                    $query->whereIn('branch_id', $accessibleBranchIds);
+                }
             }
 
             $holidays = $query->get();
@@ -351,12 +394,14 @@ class HolidayController extends Controller
 
             $query = Holiday::active()->upcoming();
 
-            if ($user->role === 'BranchAdmin') {
-                $query->where(function($q) use ($user) {
-                    $q->where('branch_id', $user->branch_id)
-                      ->orWhereNull('branch_id')
-                      ->orWhereIn('type', ['National', 'State']);
-                });
+            // Company holidays only: restrict to user's accessible branches
+            $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+            if ($accessibleBranchIds !== 'all') {
+                if (empty($accessibleBranchIds)) {
+                    $query->whereRaw('1 = 0');
+                } else {
+                    $query->whereIn('branch_id', $accessibleBranchIds);
+                }
             }
 
             $holidays = $query->orderBy('start_date', 'asc')
@@ -391,15 +436,183 @@ class HolidayController extends Controller
         };
     }
 
+    // Academic year context is resolved centrally via AcademicYearContext (Option A)
+
     /**
-     * Get current academic year
+     * Export holidays data
+     * Supports Excel, PDF, and CSV formats with filtering
      */
-    private function getCurrentAcademicYear(): string
+    public function export(Request $request)
     {
-        $year = date('Y');
-        $month = date('n');
+        try {
+            $validator = Validator::make($request->all(), [
+                'format' => 'required|in:excel,pdf,csv',
+                'columns' => 'nullable|array',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            // Build query with same filters as index method
+            $query = $this->buildHolidayQuery($request);
+
+            // Get all matching records
+            $holidays = $query->get();
+
+            // Transform data for export
+            $exportData = collect($holidays)->map(function($holiday) {
+                $createdByName = '';
+                if ($holiday->createdBy) {
+                    $createdByName = $holiday->createdBy->first_name . ' ' . $holiday->createdBy->last_name;
+                }
+
+                // Calculate duration
+                $duration = $holiday->start_date->diffInDays($holiday->end_date) + 1;
+
+                return [
+                    'id' => $holiday->id,
+                    'title' => $holiday->title,
+                    'start_date' => $holiday->start_date,
+                    'end_date' => $holiday->end_date,
+                    'duration' => $duration,
+                    'type' => $holiday->type,
+                    'branch_name' => $holiday->branch->name ?? 'All Branches',
+                    'description' => $holiday->description ?? '',
+                    'academic_year' => $holiday->academic_year,
+                    'is_recurring' => $holiday->is_recurring,
+                    'color' => $holiday->color,
+                    'is_active' => $holiday->is_active,
+                    'created_by_name' => $createdByName,
+                    'created_at' => $holiday->created_at,
+                ];
+            });
+
+            $format = $request->format;
+            $columns = $request->columns;
+
+            return match($format) {
+                'excel' => $this->exportExcel($exportData, $columns),
+                'pdf' => $this->exportPdf($exportData, $columns),
+                'csv' => $this->exportCsv($exportData, $columns),
+            };
+
+        } catch (\Exception $e) {
+            Log::error('Export holidays error', ['error' => $e->getMessage()]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to export holidays',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Build holiday query with filters (reusable for index and export)
+     */
+    protected function buildHolidayQuery(Request $request)
+    {
+        $query = Holiday::with(['branch', 'createdBy']);
+        $academicYearId = $this->academicYearContext->id(false);
+
+        // Restrict to company holidays only (branches accessible to user)
+        $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+        if ($accessibleBranchIds !== 'all') {
+            if (empty($accessibleBranchIds)) {
+                $query->whereRaw('1 = 0');
+            } else {
+                $query->whereIn('branch_id', $accessibleBranchIds);
+            }
+        }
+
+        // Filter by type
+        if ($request->has('type') && $request->type !== '') {
+            $query->where('type', $request->type);
+        }
+
+        if ($academicYearId) {
+            $query->where('academic_year_id', (int) $academicYearId);
+        }
+
+        // Filter by active status
+        if ($request->has('is_active') && $request->is_active !== '') {
+            $query->where('is_active', $request->boolean('is_active'));
+        }
+
+        // Filter by date range
+        if ($request->has('from_date') && $request->has('to_date')) {
+            $query->inDateRange($request->from_date, $request->to_date);
+        }
+
+        // Filter by month
+        if ($request->has('month') && $request->month !== '') {
+            $month = $request->month;
+            $query->whereRaw('MONTH(start_date) = ?', [$month])
+                  ->orWhereRaw('MONTH(end_date) = ?', [$month]);
+        }
+
+        // OPTIMIZED Global search - prefix search for better index usage
+        if ($request->has('search') && $request->search !== '') {
+            $searchTerm = strip_tags($request->search);
+            $query->where(function($q) use ($searchTerm) {
+                $q->where('title', 'like', "{$searchTerm}%")
+                  ->orWhere('description', 'like', "{$searchTerm}%");
+            });
+        }
+
+        return $query;
+    }
+
+    /**
+     * Export to Excel
+     */
+    protected function exportExcel($data, ?array $columns)
+    {
+        $export = new HolidaysExport($data, $columns);
+        $filename = (new ExportService('holidays'))->generateFilename('xlsx');
         
-        return $month < 4 ? ($year - 1) . '-' . $year : $year . '-' . ($year + 1);
+        return Excel::download($export, $filename);
+    }
+
+    /**
+     * Export to PDF
+     */
+    protected function exportPdf($data, ?array $columns)
+    {
+        $pdfService = new PdfExportService('holidays');
+        
+        if ($columns) {
+            $pdfService->setColumns($columns);
+        }
+        
+        // Use A3 paper for holidays to accommodate more columns
+        $pdfService->setPaperSize('a3');
+        $pdfService->setOrientation('landscape');
+        
+        $pdf = $pdfService->generate($data, 'Holidays Report');
+        $filename = (new ExportService('holidays'))->generateFilename('pdf');
+        
+        return $pdf->download($filename);
+    }
+
+    /**
+     * Export to CSV
+     */
+    protected function exportCsv($data, ?array $columns)
+    {
+        $csvService = new CsvExportService('holidays');
+        
+        if ($columns) {
+            $csvService->setColumns($columns);
+        }
+        
+        $filename = (new ExportService('holidays'))->generateFilename('csv');
+        
+        return $csvService->generate($data, $filename);
     }
 }
 

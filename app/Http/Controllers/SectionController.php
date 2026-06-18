@@ -2,29 +2,87 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Traits\PaginatesAndSorts;
 use App\Models\Section;
+use App\Models\Branch;
+use App\Exports\SectionsExport;
+use App\Services\PdfExportService;
+use App\Services\CsvExportService;
+use App\Services\ExportService;
+use Maatwebsite\Excel\Facades\Excel;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class SectionController extends Controller
 {
+    use PaginatesAndSorts;
+
     /**
-     * Get all sections
+     * Get all sections with server-side pagination and sorting
      */
     public function index(Request $request)
     {
         try {
-            $query = Section::with(['branch', 'classTeacher', 'class']);
+            $user = $request->user();
+            // 🚀 OPTIMIZED: Select specific columns and limit eager loading
+            $query = Section::select([
+                'id', 'branch_id', 'name', 'code', 'grade_level', 'capacity',
+                'current_strength', 'room_number', 'class_teacher_id', 'is_active',
+                'created_at', 'updated_at'
+            ])
+            ->with([
+                'branch:id,name,code',
+                'classTeacher:id,first_name,last_name,email'
+            ]);
 
-            // Filters
-            if ($request->has('branch_id')) {
-                $query->where('branch_id', $request->branch_id);
+            // 🔥 APPLY SCHOOL FILTERING - School-level isolation
+            // Include sections with matching school_id OR null school_id (so dropdown gets data when sections not yet linked to school)
+            $schoolId = $this->getCurrentSchoolId($request);
+            if ($schoolId) {
+                $query->where(function ($q) use ($schoolId) {
+                    $q->where('school_id', $schoolId)->orWhereNull('school_id');
+                });
             }
 
-            if ($request->has('grade_level')) {
-                $query->where('grade_level', $request->grade_level);
+            // 🔥 APPLY BRANCH FILTERING - Restrict to accessible branches
+            $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+            if ($user && $user->role === 'SuperAdmin' && !empty($user->company_id) && !$request->filled('branch_id')) {
+                // SuperAdmin company context: filter by company via SQL subquery (fast, avoids big whereIn lists).
+                $query->whereIn('branch_id', function ($q) use ($user) {
+                    $q->select('branches.id')
+                        ->from('branches')
+                        ->join('schools', 'branches.school_id', '=', 'schools.id')
+                        ->where('schools.company_id', (int) $user->company_id)
+                        ->whereNull('schools.deleted_at')
+                        ->whereNull('branches.deleted_at');
+                });
+            } elseif ($accessibleBranchIds !== 'all') {
+                if (!empty($accessibleBranchIds)) {
+                    $query->whereIn('branch_id', $accessibleBranchIds);
+                } else {
+                    $query->whereRaw('1 = 0');
+                }
+            }
+
+            // Filters
+            // Allow branch_id filter if user has access to all branches OR if the requested branch is in accessible branches
+            if ($request->has('branch_id')) {
+                $requestedBranchId = $request->branch_id;
+                if ($accessibleBranchIds === 'all') {
+                    // SuperAdmin: can filter by any branch
+                    $query->where('branch_id', $requestedBranchId);
+                } else if (is_array($accessibleBranchIds) && in_array($requestedBranchId, $accessibleBranchIds)) {
+                    // Regular user: can filter by branch if they have access to it
+                    $query->where('branch_id', $requestedBranchId);
+                }
+                // If branch_id is not accessible, the query will already be filtered by accessibleBranchIds above
+            }
+
+            if ($request->has('grade_level') && $request->grade_level !== '' && $request->grade_level !== null) {
+                $query->where('grade_level', (string) $request->grade_level);
             }
 
             if ($request->has('is_active')) {
@@ -40,18 +98,68 @@ class SectionController extends Controller
                 });
             }
 
-            $sections = $query->orderBy('name', 'asc')->get();
+            // Define sortable columns
+            $sortableColumns = [
+                'id',
+                'code',
+                'name',
+                'branch_id',
+                'grade_level',
+                'capacity',
+                'current_strength',
+                'room_number',
+                'is_active',
+                'created_at',
+                'updated_at'
+            ];
 
-            // Enhance each section with grade details
-            $sections->each(function ($section) {
+            // Apply pagination and sorting (default: 25 per page, sorted by name asc)
+            $sections = $this->paginateAndSort($query, $request, $sortableColumns, 'name', 'asc');
+
+            // OPTIMIZATION: Get student counts for all sections in ONE query to avoid N+1
+            $sectionIds = $sections->pluck('id')->toArray();
+            $studentCounts = DB::table('students')
+                ->select(
+                    'branch_id',
+                    'grade',
+                    'section',
+                    DB::raw('COUNT(*) as count')
+                )
+                ->where('student_status', 'Active')
+                ->whereIn('branch_id', $sections->pluck('branch_id')->unique())
+                ->groupBy('branch_id', 'grade', 'section')
+                ->get()
+                ->mapWithKeys(function($item) {
+                    $key = $item->branch_id . '_' . $item->grade . '_' . $item->section;
+                    return [$key => $item->count];
+                })
+                ->toArray();
+
+            // Enhance each section with grade details and actual student count
+            $sections->getCollection()->transform(function ($section) use ($studentCounts) {
                 // Append grade_details accessor data
                 $section->append('grade_details');
+                // Override current_strength with pre-fetched count (no N+1!)
+                $key = $section->branch_id . '_' . $section->grade_level . '_' . $section->name;
+                $section->current_strength = $studentCounts[$key] ?? 0;
+                $section->actual_strength = $studentCounts[$key] ?? 0;
+                return $section;
             });
 
+            // Return standardized paginated response
             return response()->json([
                 'success' => true,
-                'data' => $sections,
-                'count' => $sections->count()
+                'message' => 'Sections retrieved successfully',
+                'data' => $sections->items(),
+                'meta' => [
+                    'current_page' => $sections->currentPage(),
+                    'per_page' => $sections->perPage(),
+                    'total' => $sections->total(),
+                    'last_page' => $sections->lastPage(),
+                    'from' => $sections->firstItem(),
+                    'to' => $sections->lastItem(),
+                    'has_more_pages' => $sections->hasMorePages()
+                ]
             ]);
 
         } catch (\Exception $e) {
@@ -71,10 +179,20 @@ class SectionController extends Controller
     public function store(Request $request)
     {
         try {
+            $branch = Branch::find($request->branch_id);
+            $schoolId = $branch?->school_id;
+
             $validator = Validator::make($request->all(), [
                 'branch_id' => 'required|exists:branches,id',
                 'name' => 'required|string|max:50',
-                'code' => 'required|string|max:50|unique:sections',
+                'code' => [
+                    'required',
+                    'string',
+                    'max:50',
+                    Rule::unique('sections', 'code')->where(function ($query) use ($schoolId) {
+                        $query->where('school_id', $schoolId);
+                    }),
+                ],
                 'grade_level' => 'nullable|string|max:20',
                 'capacity' => 'required|integer|min:1|max:100',
                 'room_number' => 'nullable|string|max:50',
@@ -105,8 +223,10 @@ class SectionController extends Controller
                 ], 400);
             }
 
+            $branch = Branch::find($request->branch_id);
             $section = Section::create([
                 'branch_id' => $request->branch_id,
+                'school_id' => $branch ? $branch->school_id : null,
                 'name' => strtoupper(strip_tags($request->name)),
                 'code' => strtoupper(strip_tags($request->code)),
                 'grade_level' => $request->grade_level ? strip_tags($request->grade_level) : null,
@@ -149,8 +269,18 @@ class SectionController extends Controller
             $section = Section::with(['branch', 'classTeacher', 'class'])
                 ->findOrFail($id);
 
-            // Append grade details
+            // OPTIMIZATION: Get actual student count without accessor (avoid extra query)
+            $actualCount = DB::table('students')
+                ->where('branch_id', $section->branch_id)
+                ->where('grade', $section->grade_level)
+                ->where('section', $section->name)
+                ->where('student_status', 'Active')
+                ->count();
+
+            // Append grade details and update current_strength with actual count
             $section->append('grade_details');
+            $section->current_strength = $actualCount;
+            $section->actual_strength = $actualCount;
 
             return response()->json([
                 'success' => true,
@@ -183,10 +313,18 @@ class SectionController extends Controller
     {
         try {
             $section = Section::findOrFail($id);
+            $schoolId = $section->school_id;
 
             $validator = Validator::make($request->all(), [
                 'name' => 'sometimes|string|max:50',
-                'code' => 'sometimes|string|max:50|unique:sections,code,' . $id,
+                'code' => [
+                    'sometimes',
+                    'string',
+                    'max:50',
+                    Rule::unique('sections', 'code')->where(function ($query) use ($schoolId) {
+                        $query->where('school_id', $schoolId);
+                    })->ignore($id),
+                ],
                 'grade_level' => 'nullable|string|max:20',
                 'capacity' => 'sometimes|integer|min:1|max:100',
                 'room_number' => 'nullable|string|max:50',
@@ -314,6 +452,177 @@ class SectionController extends Controller
                 'message' => 'Failed to update section status'
             ], 500);
         }
+    }
+
+    /**
+     * Export sections data
+     * Supports Excel, PDF, and CSV formats with filtering
+     */
+    public function export(Request $request)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'format' => 'required|in:excel,pdf,csv',
+                'columns' => 'nullable|array',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            // Build query with same filters as index method
+            $query = $this->buildSectionQuery($request);
+
+            // Get all matching records
+            $sections = $query->get();
+
+            // Transform data for export
+            $exportData = collect($sections)->map(function($section) {
+                $classTeacherName = '';
+                if ($section->classTeacher) {
+                    $classTeacherName = $section->classTeacher->first_name . ' ' . $section->classTeacher->last_name;
+                }
+
+                return [
+                    'id' => $section->id,
+                    'code' => $section->code,
+                    'name' => $section->name,
+                    'grade_label' => $section->grade_label,
+                    'branch_name' => $section->branch->name ?? '',
+                    'class_teacher_name' => $classTeacherName,
+                    'capacity' => $section->capacity,
+                    'current_strength' => $section->current_strength,
+                    'actual_strength' => $section->actual_strength,
+                    'room_number' => $section->room_number,
+                    'description' => $section->description ?? '',
+                    'is_active' => $section->is_active,
+                    'created_at' => $section->created_at,
+                ];
+            });
+
+            $format = $request->format;
+            $columns = $request->columns;
+
+            return match($format) {
+                'excel' => $this->exportExcel($exportData, $columns),
+                'pdf' => $this->exportPdf($exportData, $columns),
+                'csv' => $this->exportCsv($exportData, $columns),
+            };
+
+        } catch (\Exception $e) {
+            Log::error('Export sections error', ['error' => $e->getMessage()]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to export sections',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Build section query with filters (reusable for index and export)
+     */
+    protected function buildSectionQuery(Request $request)
+    {
+        $query = Section::with(['branch', 'classTeacher', 'class']);
+
+        // Apply branch filtering
+        $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+        if ($accessibleBranchIds !== 'all') {
+            if (!empty($accessibleBranchIds)) {
+                $query->whereIn('branch_id', $accessibleBranchIds);
+            } else {
+                $query->whereRaw('1 = 0');
+            }
+        }
+
+        // Filter by branch
+        // Allow branch_id filter if user has access to all branches OR if the requested branch is in accessible branches
+        if ($request->has('branch_id') && $request->branch_id !== '') {
+            $requestedBranchId = $request->branch_id;
+            if ($accessibleBranchIds === 'all') {
+                // SuperAdmin: can filter by any branch
+                $query->where('branch_id', $requestedBranchId);
+            } else if (is_array($accessibleBranchIds) && in_array($requestedBranchId, $accessibleBranchIds)) {
+                // Regular user: can filter by branch if they have access to it
+                $query->where('branch_id', $requestedBranchId);
+            }
+            // If branch_id is not accessible, the query will already be filtered by accessibleBranchIds above
+        }
+
+        // Filter by grade level
+        if ($request->has('grade_level') && $request->grade_level !== '') {
+            $query->where('grade_level', $request->grade_level);
+        }
+
+        // Filter by active status
+        if ($request->has('is_active') && $request->is_active !== '') {
+            $query->where('is_active', $request->boolean('is_active'));
+        }
+
+        // Global search
+        if ($request->has('search') && $request->search !== '') {
+            $searchTerm = $request->search;
+            $query->where(function($q) use ($searchTerm) {
+                $q->where('name', 'like', '%' . $searchTerm . '%')
+                  ->orWhere('code', 'like', '%' . $searchTerm . '%')
+                  ->orWhere('room_number', 'like', '%' . $searchTerm . '%');
+            });
+        }
+
+        return $query;
+    }
+
+    /**
+     * Export to Excel
+     */
+    protected function exportExcel($data, ?array $columns)
+    {
+        $export = new SectionsExport($data, $columns);
+        $filename = (new ExportService('sections'))->generateFilename('xlsx');
+        
+        return Excel::download($export, $filename);
+    }
+
+    /**
+     * Export to PDF
+     */
+    protected function exportPdf($data, ?array $columns)
+    {
+        $pdfService = new PdfExportService('sections');
+        
+        if ($columns) {
+            $pdfService->setColumns($columns);
+        }
+        
+        // Use A3 paper for sections to accommodate more columns
+        $pdfService->setPaperSize('a3');
+        $pdfService->setOrientation('landscape');
+        
+        $pdf = $pdfService->generate($data, 'Sections Report');
+        $filename = (new ExportService('sections'))->generateFilename('pdf');
+        
+        return $pdf->download($filename);
+    }
+
+    /**
+     * Export to CSV
+     */
+    protected function exportCsv($data, ?array $columns)
+    {
+        $csvService = new CsvExportService('sections');
+        
+        if ($columns) {
+            $csvService->setColumns($columns);
+        }
+        
+        $filename = (new ExportService('sections'))->generateFilename('csv');
+        
+        return $csvService->generate($data, $filename);
     }
 }
 

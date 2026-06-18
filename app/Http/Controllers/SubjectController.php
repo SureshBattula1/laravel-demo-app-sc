@@ -2,49 +2,145 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Traits\PaginatesAndSorts;
 use App\Models\Subject;
+use App\Models\Branch;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 
 class SubjectController extends Controller
 {
+    use PaginatesAndSorts;
+
+    /**
+     * Get all subjects with server-side pagination and sorting
+     */
     public function index(Request $request)
     {
         try {
-            $query = Subject::with(['department', 'teacher', 'branch']);
+            $schoolId = $this->getCurrentSchoolId($request);
+            $hasGradesBranchId = Schema::hasColumn('grades', 'branch_id');
 
-            if ($request->branch_id) {
-                $query->where('branch_id', $request->branch_id);
+            // List endpoint: keep payload small by selecting only list fields + minimal relations
+            $query = Subject::query()
+                ->with([
+                    'department:id,name',
+                    'teacher:id,first_name,last_name,email',
+                    'branch:id,name,code',
+                ])
+                ->leftJoin('grades', function ($join) use ($schoolId, $hasGradesBranchId) {
+                    $join->on('subjects.grade_level', '=', 'grades.value');
+                    if ($hasGradesBranchId) {
+                        // Grades are branch-specific; prevent duplicate matches across branches.
+                        $join->whereColumn('grades.branch_id', 'subjects.branch_id');
+                    } elseif ($schoolId) {
+                        // Legacy fallback (before grades became branch-specific).
+                        $join->where('grades.school_id', '=', (int) $schoolId);
+                    }
+                })
+                ->select([
+                    'subjects.id',
+                    'subjects.code',
+                    'subjects.name',
+                    'subjects.description',
+                    'subjects.department_id',
+                    'subjects.teacher_id',
+                    'subjects.grade_level',
+                    'subjects.type',
+                    'subjects.credits',
+                    'subjects.branch_id',
+                    'subjects.school_id',
+                    'subjects.is_active',
+                    'subjects.created_at',
+                    'subjects.updated_at',
+                    'subjects.deleted_at',
+                ])
+                ->addSelect('grades.label as grade_label')
+                ->distinct('subjects.id');
+
+            // 🔥 APPLY SCHOOL FILTERING - School-level isolation
+            if ($schoolId) {
+                $query->where('subjects.school_id', $schoolId);
             }
 
-            if ($request->department_id) {
-                $query->where('department_id', $request->department_id);
+            // 🔥 APPLY BRANCH FILTERING - Restrict to accessible branches
+            $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+            if ($accessibleBranchIds !== 'all') {
+                if (!empty($accessibleBranchIds)) {
+                    $query->whereIn('subjects.branch_id', $accessibleBranchIds);
+                } else {
+                    $query->whereRaw('1 = 0');
+                }
             }
 
-            if ($request->grade_level) {
-                $query->where('grade_level', strip_tags($request->grade_level));
+            // Filter by branch (always allowed; still protected by accessible-branches scope above)
+            if ($request->filled('branch_id')) {
+                $query->where('subjects.branch_id', (int) $request->branch_id);
             }
 
-            if ($request->type) {
-                $query->where('type', strip_tags($request->type));
+            // Filter by department
+            if ($request->has('department_id')) {
+                $query->where('subjects.department_id', $request->department_id);
             }
 
-            if ($request->search) {
+            // Filter by grade level
+            if ($request->has('grade_level')) {
+                $query->where('subjects.grade_level', strip_tags($request->grade_level));
+            }
+
+            // Filter by type
+            if ($request->has('type')) {
+                $query->where('subjects.type', strip_tags($request->type));
+            }
+
+            // OPTIMIZED Search functionality - prefix search for better index usage
+            if ($request->has('search') && !empty($request->search)) {
                 $search = strip_tags($request->search);
                 $query->where(function($q) use ($search) {
-                    $q->where('name', 'like', '%' . $search . '%')
-                      ->orWhere('code', 'like', '%' . $search . '%');
+                    $q->where('subjects.name', 'like', "{$search}%")
+                      ->orWhere('subjects.code', 'like', "{$search}%")
+                      ->orWhere('subjects.description', 'like', "{$search}%");
                 });
             }
 
-            $subjects = $query->orderBy('name', 'asc')->get();
+            // Define sortable columns
+            $sortableColumns = [
+                'subjects.id',
+                'subjects.name',
+                'subjects.code',
+                'subjects.grade_level',
+                'subjects.type',
+                'subjects.credits',
+                'subjects.is_active',
+                'subjects.created_at',
+                'subjects.updated_at'
+            ];
 
+            // Apply pagination and sorting (default: branch_id asc, then name asc)
+            // The helper supports only one default column, so we apply a stable pre-order when client didn't request sorting.
+            if (!$request->filled('sort_by')) {
+                $query->orderBy('subjects.branch_id', 'asc')
+                    ->orderBy('subjects.name', 'asc');
+            }
+            $subjects = $this->paginateAndSort($query, $request, $sortableColumns, 'subjects.name', 'asc');
+
+            // Return standardized paginated response
             return response()->json([
                 'success' => true,
-                'data' => $subjects,
-                'count' => $subjects->count()
+                'message' => 'Subjects retrieved successfully',
+                'data' => $subjects->items(),
+                'meta' => [
+                    'current_page' => $subjects->currentPage(),
+                    'per_page' => $subjects->perPage(),
+                    'total' => $subjects->total(),
+                    'last_page' => $subjects->lastPage(),
+                    'from' => $subjects->firstItem(),
+                    'to' => $subjects->lastItem(),
+                    'has_more_pages' => $subjects->hasMorePages()
+                ]
             ]);
 
         } catch (\Exception $e) {
@@ -63,9 +159,9 @@ class SubjectController extends Controller
         try {
             $validator = Validator::make($request->all(), [
                 'name' => 'required|string|max:255|regex:/^[a-zA-Z0-9\s\-&]+$/',
-                'code' => 'required|string|max:50|unique:subjects|regex:/^[A-Z0-9\-]+$/',
+                'code' => 'required|string|max:50|unique:subjects|regex:/^[a-zA-Z0-9\-_]+$/', // Allow both uppercase and lowercase
                 'department_id' => 'required|exists:departments,id',
-                'grade_level' => 'required|string|in:1,2,3,4,5,6,7,8,9,10,11,12',
+                'grade_level' => 'required|string|exists:grades,value',
                 'type' => 'required|in:Core,Elective,Language,Lab,Activity',
                 'branch_id' => 'required|exists:branches,id',
                 'teacher_id' => 'nullable|exists:users,id',
@@ -82,6 +178,7 @@ class SubjectController extends Controller
 
             DB::beginTransaction();
 
+            $branch = Branch::find($request->branch_id);
             $sanitizedData = [
                 'name' => strip_tags($request->name),
                 'code' => strtoupper(strip_tags($request->code)),
@@ -92,6 +189,7 @@ class SubjectController extends Controller
                 'credits' => $request->credits ?? 0,
                 'type' => $request->type,
                 'branch_id' => $request->branch_id,
+                'school_id' => $branch ? $branch->school_id : null,
                 'is_active' => $request->is_active ?? true
             ];
 
@@ -104,7 +202,7 @@ class SubjectController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Subject created successfully',
-                'data' => $subject->load(['department', 'teacher'])
+                'data' => $subject->load(['department', 'teacher', 'branch'])
             ], 201);
 
         } catch (\Exception $e) {
@@ -129,7 +227,7 @@ class SubjectController extends Controller
                 ], 400);
             }
 
-            $subject = Subject::with(['department', 'teacher', 'exams'])->findOrFail($id);
+            $subject = Subject::with(['department', 'teacher', 'branch', 'exams'])->findOrFail($id);
             
             return response()->json([
                 'success' => true,
@@ -166,7 +264,7 @@ class SubjectController extends Controller
 
             $validator = Validator::make($request->all(), [
                 'name' => 'sometimes|string|max:255|regex:/^[a-zA-Z0-9\s\-&]+$/',
-                'code' => 'sometimes|string|max:50|unique:subjects,code,' . $id . '|regex:/^[A-Z0-9\-]+$/',
+                'code' => 'sometimes|string|max:50|unique:subjects,code,' . $id . '|regex:/^[a-zA-Z0-9\-_]+$/', // Allow both uppercase and lowercase
                 'department_id' => 'sometimes|exists:departments,id',
                 'grade_level' => 'sometimes|string|in:1,2,3,4,5,6,7,8,9,10,11,12',
                 'type' => 'sometimes|in:Core,Elective,Language,Lab,Activity',
@@ -210,7 +308,7 @@ class SubjectController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Subject updated successfully',
-                'data' => $subject->load(['department', 'teacher'])
+                'data' => $subject->load(['department', 'teacher', 'branch'])
             ]);
 
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {

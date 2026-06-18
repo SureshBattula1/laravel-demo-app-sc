@@ -13,6 +13,7 @@ class Section extends Model
 
     protected $fillable = [
         'branch_id',
+        'school_id',
         'name',
         'code',
         'grade_level',
@@ -36,16 +37,30 @@ class Section extends Model
     /**
      * Attributes to append to JSON
      */
-    protected $appends = ['grade_label'];
+    protected $appends = ['grade_label', 'actual_strength'];
 
     /**
-     * Get grade label (e.g., "Grade 5" instead of "5")
+     * Resolve grade from grades table (branch-specific join by branch_id + value).
+     */
+    private function resolveGradeFromGradesTable(): ?object
+    {
+        if (!$this->grade_level) {
+            return null;
+        }
+        return DB::table('grades')
+            ->where('branch_id', $this->branch_id)
+            ->where('value', $this->grade_level)
+            ->first();
+    }
+
+    /**
+     * Get grade label (e.g., "International Grade 10" instead of "10")
+     * Joins grades by branch_id + value so branch-specific labels (e.g. "International Grade 10") display correctly.
      */
     public function getGradeLabelAttribute(): ?string
     {
         if ($this->grade_level) {
-            // Get grade details from grades table
-            $grade = DB::table('grades')->where('value', $this->grade_level)->first();
+            $grade = $this->resolveGradeFromGradesTable();
             if ($grade) {
                 return $grade->label;
             }
@@ -60,7 +75,7 @@ class Section extends Model
     public function getGradeDetailsAttribute(): ?array
     {
         if ($this->grade_level) {
-            $grade = DB::table('grades')->where('value', $this->grade_level)->first();
+            $grade = $this->resolveGradeFromGradesTable();
             if ($grade) {
                 return [
                     'value' => $grade->value,
@@ -86,13 +101,33 @@ class Section extends Model
         return $this->belongsTo(Branch::class);
     }
 
+    public function school()
+    {
+        return $this->belongsTo(School::class);
+    }
+
     public function classTeacher()
     {
         return $this->belongsTo(User::class, 'class_teacher_id');
     }
 
+    /**
+     * Get actual student strength by counting students in this section
+     */
+    public function getActualStrengthAttribute(): int
+    {
+        return DB::table('students')
+            ->where('branch_id', $this->branch_id)
+            ->where('grade', $this->grade_level)
+            ->where('section', $this->name)
+            ->where('student_status', 'Active')
+            ->count();
+    }
+
     public function students()
     {
+        // Note: This relationship won't work with current schema where students have grade/section as strings
+        // Use the actualStrength accessor instead
         return $this->hasMany(User::class, 'section_id')->where('user_type', 'Student');
     }
 
@@ -106,6 +141,29 @@ class Section extends Model
             ->where('branch_id', $this->branch_id);
     }
 
+    /**
+     * Get subjects assigned to this section
+     */
+    public function subjects()
+    {
+        return $this->belongsToMany(
+            Subject::class,
+            'section_subjects',
+            'section_id',
+            'subject_id'
+        )
+        ->withPivot(['teacher_id', 'academic_year', 'is_active'])
+        ->withTimestamps();
+    }
+
+    /**
+     * Get section subjects with full details
+     */
+    public function sectionSubjects()
+    {
+        return $this->hasMany(SectionSubject::class);
+    }
+
     // Helper methods
     public function getAvailableSeats()
     {
@@ -115,6 +173,12 @@ class Section extends Model
     public function isFull()
     {
         return $this->current_strength >= $this->capacity;
+    }
+
+    // Scopes
+    public function scopeForSchool($query, int $schoolId)
+    {
+        return $query->where('school_id', $schoolId);
     }
 }
 

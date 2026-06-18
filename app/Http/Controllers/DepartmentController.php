@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Traits\PaginatesAndSorts;
 use App\Models\Department;
+use App\Models\Branch;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
@@ -10,39 +12,100 @@ use Illuminate\Support\Facades\Log;
 
 class DepartmentController extends Controller
 {
+    use PaginatesAndSorts;
+
     /**
-     * Display a listing of departments with security filters
+     * Display a listing of departments with server-side pagination and sorting
      */
     public function index(Request $request)
     {
         try {
+            $user = $request->user();
             $query = Department::with(['branch', 'headOfDepartment']);
 
-            // Branch filter (required for multi-branch security)
-            if ($request->branch_id) {
-                $query->where('branch_id', $request->branch_id);
+            // SuperAdmin with company_id: filter via joins (avoids large whereIn lists).
+            if ($user && $user->role === 'SuperAdmin' && !empty($user->company_id) && !$request->filled('branch_id')) {
+                $query->join('branches', 'branches.id', '=', 'departments.branch_id')
+                    ->join('schools', 'schools.id', '=', 'branches.school_id')
+                    ->where('schools.company_id', (int) $user->company_id)
+                    ->select('departments.*');
+            }
+
+            // 🔥 APPLY SCHOOL FILTERING - School-level isolation
+            $schoolId = $this->getCurrentSchoolId($request);
+            if ($schoolId && !($user && $user->role === 'SuperAdmin' && !empty($user->company_id) && !$request->filled('branch_id'))) {
+                $query->where('school_id', $schoolId);
+            }
+
+            // 🔥 APPLY BRANCH FILTERING - Restrict to accessible branches
+            $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+            if ($accessibleBranchIds !== 'all') {
+                if (!empty($accessibleBranchIds)) {
+                    // In company-join mode we already restricted by company_id.
+                    if (!($user && $user->role === 'SuperAdmin' && !empty($user->company_id) && !$request->filled('branch_id'))) {
+                        $query->whereIn('branch_id', $accessibleBranchIds);
+                    }
+                } else {
+                    $query->whereRaw('1 = 0');
+                }
+            }
+
+            // Branch filter (only allow if SuperAdmin/cross-branch user)
+            if ($request->has('branch_id') && $request->branch_id !== '') {
+                $requestedBranchId = (int) $request->branch_id;
+                if ($accessibleBranchIds === 'all' || (is_array($accessibleBranchIds) && in_array($requestedBranchId, $accessibleBranchIds, true))) {
+                    $query->where('departments.branch_id', $requestedBranchId);
+                } else {
+                    $query->whereRaw('1 = 0');
+                }
             }
 
             // Status filter
             if ($request->has('is_active')) {
-                $query->where('is_active', filter_var($request->is_active, FILTER_VALIDATE_BOOLEAN));
+                $query->where('departments.is_active', filter_var($request->is_active, FILTER_VALIDATE_BOOLEAN));
             }
 
             // Secure search
-            if ($request->search) {
+            if ($request->has('search')) {
                 $search = strip_tags($request->search);
                 $query->where(function($q) use ($search) {
-                    $q->where('name', 'like', '%' . $search . '%')
-                      ->orWhere('head', 'like', '%' . $search . '%');
+                    $q->where('departments.name', 'like', '%' . $search . '%')
+                      ->orWhere('departments.head', 'like', '%' . $search . '%')
+                      ->orWhere('departments.description', 'like', '%' . $search . '%');
                 });
             }
 
-            $departments = $query->orderBy('name', 'asc')->get();
+            // Define sortable columns
+            $sortableColumns = [
+                'id',
+                'name',
+                'head',
+                'branch_id',
+                'is_active',
+                'students_count',
+                'teachers_count',
+                'established_date',
+                'created_at',
+                'updated_at'
+            ];
 
+            // Apply pagination and sorting (default: 25 per page, sorted by branch_id asc)
+            $departments = $this->paginateAndSort($query, $request, $sortableColumns, 'branch_id', 'asc');
+
+            // Return standardized paginated response
             return response()->json([
                 'success' => true,
-                'data' => $departments,
-                'count' => $departments->count()
+                'message' => 'Departments retrieved successfully',
+                'data' => $departments->items(),
+                'meta' => [
+                    'current_page' => $departments->currentPage(),
+                    'per_page' => $departments->perPage(),
+                    'total' => $departments->total(),
+                    'last_page' => $departments->lastPage(),
+                    'from' => $departments->firstItem(),
+                    'to' => $departments->lastItem(),
+                    'has_more_pages' => $departments->hasMorePages()
+                ]
             ]);
 
         } catch (\Exception $e) {
@@ -95,6 +158,10 @@ class DepartmentController extends Controller
                 'teachers_count' => $request->teachers_count ?? 0,
                 'is_active' => $request->is_active ?? true
             ];
+
+            // Set school_id from the selected branch
+            $branch = Branch::find($request->branch_id);
+            $sanitizedData['school_id'] = $branch ? $branch->school_id : null;
 
             $department = Department::create($sanitizedData);
 

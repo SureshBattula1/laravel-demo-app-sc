@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Traits\PaginatesAndSorts;
 use App\Models\Invoice;
 use App\Models\InvoiceItem;
 use App\Models\Transaction;
@@ -13,18 +14,45 @@ use Illuminate\Support\Facades\Log;
 
 class InvoiceController extends Controller
 {
+    use PaginatesAndSorts;
+
     /**
-     * Get all invoices
+     * Get all invoices - OPTIMIZED with pagination
      */
     public function index(Request $request)
     {
         try {
             $user = Auth::user();
-            $query = Invoice::with(['branch', 'createdBy', 'items', 'transactions']);
+            
+            // 🚀 OPTIMIZED: Select only needed columns and limit eager loading
+            $query = Invoice::select([
+                'id', 'invoice_number', 'branch_id', 'student_id', 'customer_name',
+                'customer_email', 'customer_phone', 'invoice_date', 'due_date',
+                'invoice_type', 'subtotal', 'tax_amount', 'discount_amount',
+                'total_amount', 'paid_amount', 'balance_amount', 'status',
+                'payment_status', 'payment_method', 'payment_date', 'created_by',
+                'created_at', 'updated_at'
+            ])
+            ->with([
+                'branch:id,name,code',
+                'createdBy:id,first_name,last_name,email',
+                'items:id,invoice_id,description,quantity,unit_price,amount'
+            ]);
 
-            // Role-based filtering
-            if ($user->role === 'BranchAdmin') {
-                $query->where('branch_id', $user->branch_id);
+            // 🔥 APPLY SCHOOL FILTERING - School-level isolation
+            $schoolId = $this->getCurrentSchoolId($request);
+            if ($schoolId) {
+                $query->where('school_id', $schoolId);
+            }
+
+            // 🔥 APPLY BRANCH FILTERING - Restrict to accessible branches
+            $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+            if ($accessibleBranchIds !== 'all') {
+                if (!empty($accessibleBranchIds)) {
+                    $query->whereIn('branch_id', $accessibleBranchIds);
+                } else {
+                    $query->whereRaw('1 = 0');
+                }
             }
 
             // Filters
@@ -48,20 +76,44 @@ class InvoiceController extends Controller
                 $query->overdue();
             }
 
-            if ($request->has('search')) {
+            // OPTIMIZED Search filter - prefix search for better index usage
+            if ($request->has('search') && !empty($request->search)) {
                 $search = strip_tags($request->search);
                 $query->where(function($q) use ($search) {
-                    $q->where('invoice_number', 'like', '%' . $search . '%')
-                      ->orWhere('customer_name', 'like', '%' . $search . '%');
+                    $q->where('invoice_number', 'like', "{$search}%")
+                      ->orWhere('customer_name', 'like', "{$search}%");
                 });
             }
 
-            $invoices = $query->orderBy('invoice_date', 'desc')->get();
+            // Define sortable columns
+            $sortableColumns = [
+                'id',
+                'invoice_number',
+                'invoice_date',
+                'due_date',
+                'customer_name',
+                'total_amount',
+                'status',
+                'payment_status',
+                'created_at'
+            ];
+
+            // Apply pagination and sorting (default: 25 per page, sorted by invoice_date desc)
+            $invoices = $this->paginateAndSort($query, $request, $sortableColumns, 'invoice_date', 'desc');
 
             return response()->json([
                 'success' => true,
-                'data' => $invoices,
-                'count' => $invoices->count()
+                'message' => 'Invoices retrieved successfully',
+                'data' => $invoices->items(),
+                'meta' => [
+                    'current_page' => $invoices->currentPage(),
+                    'per_page' => $invoices->perPage(),
+                    'total' => $invoices->total(),
+                    'last_page' => $invoices->lastPage(),
+                    'from' => $invoices->firstItem(),
+                    'to' => $invoices->lastItem(),
+                    'has_more_pages' => $invoices->hasMorePages()
+                ]
             ]);
 
         } catch (\Exception $e) {
@@ -69,7 +121,8 @@ class InvoiceController extends Controller
             
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to fetch invoices'
+                'message' => 'Failed to fetch invoices',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
             ], 500);
         }
     }
@@ -96,43 +149,48 @@ class InvoiceController extends Controller
                 $query->where('branch_id', $request->branch_id);
             }
 
-            // Enhanced search: Student name, roll number, teacher name, expense name
+            // OPTIMIZED Enhanced search: Student name, roll number, teacher name, expense name
+            // Use prefix search where possible for better index usage
             if ($request->has('search_term')) {
                 $searchTerm = strip_tags($request->search_term);
                 
                 $query->where(function($q) use ($searchTerm) {
-                    // Search by party name
-                    $q->where('party_name', 'like', '%' . $searchTerm . '%')
-                      ->orWhere('description', 'like', '%' . $searchTerm . '%');
+                    // Search by party name - prefix search when possible
+                    $q->where('party_name', 'like', $searchTerm . '%')
+                      ->orWhere('description', 'like', $searchTerm . '%');
                     
-                    // Search by student roll number or name
+                    // Search by student roll number or name - prefix search for roll_number and admission_number
                     $q->orWhereExists(function($subQ) use ($searchTerm) {
                         $subQ->select(DB::raw(1))
                              ->from('students')
                              ->whereColumn('students.id', 'transactions.party_id')
                              ->where('transactions.party_type', 'Student')
                              ->where(function($studentQ) use ($searchTerm) {
-                                 $studentQ->where('roll_number', 'like', '%' . $searchTerm . '%')
-                                          ->orWhere('admission_number', 'like', '%' . $searchTerm . '%')
-                                          ->orWhere(DB::raw("CONCAT(first_name, ' ', last_name)"), 'like', '%' . $searchTerm . '%');
+                                 $studentQ->where('roll_number', 'like', $searchTerm . '%')
+                                          ->orWhere('admission_number', 'like', $searchTerm . '%')
+                                          ->orWhere('first_name', 'like', $searchTerm . '%')
+                                          ->orWhere('last_name', 'like', $searchTerm . '%');
                              });
                     });
                     
-                    // Search by teacher name
+                    // Search by teacher name - prefix search
                     $q->orWhereExists(function($subQ) use ($searchTerm) {
                         $subQ->select(DB::raw(1))
                              ->from('users')
                              ->whereColumn('users.id', 'transactions.party_id')
                              ->where('transactions.party_type', 'Teacher')
                              ->where('role', 'Teacher')
-                             ->where(DB::raw("CONCAT(first_name, ' ', last_name)"), 'like', '%' . $searchTerm . '%');
+                             ->where(function($teacherQ) use ($searchTerm) {
+                                 $teacherQ->where('first_name', 'like', $searchTerm . '%')
+                                          ->orWhere('last_name', 'like', $searchTerm . '%');
+                             });
                     });
                 });
             }
 
-            // Legacy party_name filter (for backward compatibility)
+            // Legacy party_name filter (for backward compatibility) - OPTIMIZED to prefix search
             if ($request->has('party_name')) {
-                $query->where('party_name', 'like', '%' . $request->party_name . '%');
+                $query->where('party_name', 'like', $request->party_name . '%');
             }
 
             if ($request->has('category_id')) {
@@ -157,11 +215,31 @@ class InvoiceController extends Controller
                                   ->limit($request->get('limit', 100))
                                   ->get();
 
-            // Add additional data for display
-            $transactions->each(function($transaction) {
-                // Add student or teacher details if available
-                if ($transaction->party_type === 'Student' && $transaction->party_id) {
-                    $student = DB::table('students')->find($transaction->party_id);
+            // OPTIMIZED: Batch load students and teachers to avoid N+1 queries
+            $studentIds = $transactions->filter(function($t) {
+                return $t->party_type === 'Student' && $t->party_id;
+            })->pluck('party_id')->unique()->filter();
+
+            $teacherIds = $transactions->filter(function($t) {
+                return $t->party_type === 'Teacher' && $t->party_id;
+            })->pluck('party_id')->unique()->filter();
+
+            // Single query for all students
+            $students = $studentIds->isEmpty() ? collect() : DB::table('students')
+                ->whereIn('id', $studentIds)
+                ->get()
+                ->keyBy('id');
+
+            // Single query for all teachers
+            $teachers = $teacherIds->isEmpty() ? collect() : DB::table('users')
+                ->whereIn('id', $teacherIds)
+                ->get()
+                ->keyBy('id');
+
+            // Map to transactions (0 queries in loop)
+            $transactions->each(function($transaction) use ($students, $teachers) {
+                if ($transaction->party_type === 'Student') {
+                    $student = $students->get($transaction->party_id);
                     if ($student) {
                         $transaction->student_details = [
                             'name' => $student->first_name . ' ' . $student->last_name,
@@ -171,8 +249,8 @@ class InvoiceController extends Controller
                     }
                 }
                 
-                if ($transaction->party_type === 'Teacher' && $transaction->party_id) {
-                    $teacher = DB::table('users')->find($transaction->party_id);
+                if ($transaction->party_type === 'Teacher') {
+                    $teacher = $teachers->get($transaction->party_id);
                     if ($teacher) {
                         $transaction->teacher_details = [
                             'name' => $teacher->first_name . ' ' . $teacher->last_name,

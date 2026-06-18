@@ -14,24 +14,46 @@ class FeeStructure extends Model
     protected $fillable = [
         'id',
         'branch_id',
+        'school_id',
         'grade',
         'fee_type',
         'amount',
         'academic_year',
+        'academic_year_id',
         'due_date',
         'description',
         'is_recurring',
         'recurrence_period',
         'is_active',
         'created_by',
-        'updated_by'
+        'updated_by',
+        // Breakdown fields (optional - for detailed fee breakdown if provided by frontend)
+        'tuition_fee',
+        'admission_fee',
+        'exam_fee',
+        'library_fee',
+        'transport_fee',
+        'sports_fee',
+        'lab_fee',
+        'other_fees',
+        'total_amount'
     ];
 
     protected $casts = [
         'amount' => 'decimal:2',
         'due_date' => 'date',
         'is_recurring' => 'boolean',
-        'is_active' => 'boolean'
+        'is_active' => 'boolean',
+        // Breakdown fields casting
+        'tuition_fee' => 'decimal:2',
+        'admission_fee' => 'decimal:2',
+        'exam_fee' => 'decimal:2',
+        'library_fee' => 'decimal:2',
+        'transport_fee' => 'decimal:2',
+        'sports_fee' => 'decimal:2',
+        'lab_fee' => 'decimal:2',
+        'other_fees' => 'array', // JSON field
+        'total_amount' => 'decimal:2'
     ];
 
     protected $keyType = 'string';
@@ -53,6 +75,11 @@ class FeeStructure extends Model
         return $this->belongsTo(Branch::class);
     }
 
+    public function school()
+    {
+        return $this->belongsTo(School::class);
+    }
+
     public function payments()
     {
         return $this->hasMany(FeePayment::class);
@@ -66,5 +93,11 @@ class FeeStructure extends Model
     public function updater()
     {
         return $this->belongsTo(User::class, 'updated_by');
+    }
+
+    // Scopes
+    public function scopeForSchool($query, int $schoolId)
+    {
+        return $query->where('school_id', $schoolId);
     }
 }

@@ -1,0 +1,2014 @@
+{
+    "info": {
+        "_postman_id": "school-management-api-collection",
+        "name": "School Management API",
+        "description": "Complete API collection for School Management System including Login, Dashboard, Branches, Teachers, Students, Attendance, and Leaves",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "item": [
+        {
+            "name": "Authentication",
+            "item": [
+                {
+                    "name": "Login",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "if (pm.response.code === 200) {",
+                                    "    var jsonData = pm.response.json();",
+                                    "    if (jsonData.access_token) {",
+                                    "        pm.environment.set(\"access_token\", jsonData.access_token);",
+                                    "        pm.environment.set(\"user_id\", jsonData.user.id);",
+                                    "    }",
+                                    "}"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"email\": \"admin@example.com\",\n    \"password\": \"password123\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/login",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "login"
+                            ]
+                        },
+                        "description": "Login with email/phone and password. Returns access token for authenticated requests."
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Current User",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/me",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "me"
+                            ]
+                        },
+                        "description": "Get current authenticated user information"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Logout",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/logout",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "logout"
+                            ]
+                        },
+                        "description": "Logout current user and revoke token"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Update Profile",
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"first_name\": \"John\",\n    \"last_name\": \"Doe\",\n    \"phone\": \"+1234567890\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/profile",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "profile"
+                            ]
+                        },
+                        "description": "Update current user profile"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Change Password",
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"current_password\": \"oldpassword123\",\n    \"password\": \"newpassword123\",\n    \"password_confirmation\": \"newpassword123\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/change-password",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "change-password"
+                            ]
+                        },
+                        "description": "Change user password"
+                    },
+                    "response": []
+                }
+            ],
+            "description": "Authentication endpoints for login, logout, and user management"
+        },
+        {
+            "name": "Dashboard",
+            "item": [
+                {
+                    "name": "Get Dashboard Stats",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/dashboard/stats?period=today&branch_id=1",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "dashboard",
+                                "stats"
+                            ],
+                            "query": [
+                                {
+                                    "key": "period",
+                                    "value": "today",
+                                    "description": "today, week, month, custom"
+                                },
+                                {
+                                    "key": "from_date",
+                                    "value": "2024-01-01",
+                                    "description": "Required if period=custom"
+                                },
+                                {
+                                    "key": "to_date",
+                                    "value": "2024-01-31",
+                                    "description": "Required if period=custom"
+                                },
+                                {
+                                    "key": "branch_id",
+                                    "value": "1",
+                                    "description": "Optional branch filter"
+                                }
+                            ]
+                        },
+                        "description": "Get comprehensive dashboard statistics with date range filtering"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Dashboard Attendance",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/dashboard/attendance",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "dashboard",
+                                "attendance"
+                            ]
+                        },
+                        "description": "Get attendance statistics for dashboard"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Top Performers",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/dashboard/top-performers",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "dashboard",
+                                "top-performers"
+                            ]
+                        },
+                        "description": "Get top performing students"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Low Attendance",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/dashboard/low-attendance",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "dashboard",
+                                "low-attendance"
+                            ]
+                        },
+                        "description": "Get students with low attendance"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Upcoming Exams",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/dashboard/upcoming-exams",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "dashboard",
+                                "upcoming-exams"
+                            ]
+                        },
+                        "description": "Get upcoming exams"
+                    },
+                    "response": []
+                }
+            ],
+            "description": "Dashboard endpoints for statistics and analytics"
+        },
+        {
+            "name": "Branches",
+            "item": [
+                {
+                    "name": "Get All Branches",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/branches?page=1&per_page=10&search=&is_active=1&status=Active",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "branches"
+                            ],
+                            "query": [
+                                {
+                                    "key": "page",
+                                    "value": "1"
+                                },
+                                {
+                                    "key": "per_page",
+                                    "value": "10"
+                                },
+                                {
+                                    "key": "search",
+                                    "value": ""
+                                },
+                                {
+                                    "key": "is_active",
+                                    "value": "1"
+                                },
+                                {
+                                    "key": "status",
+                                    "value": "Active"
+                                }
+                            ]
+                        },
+                        "description": "Get all branches with pagination and filters"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Accessible Branches",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/branches/accessible",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "branches",
+                                "accessible"
+                            ]
+                        },
+                        "description": "Get branches accessible to current user"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Branch by ID",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/branches/1",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "branches",
+                                "1"
+                            ]
+                        },
+                        "description": "Get single branch details"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Create Branch",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"name\": \"Main Branch\",\n    \"code\": \"MB001\",\n    \"branch_type\": \"Main\",\n    \"city\": \"New York\",\n    \"state\": \"NY\",\n    \"region\": \"North\",\n    \"phone\": \"+1234567890\",\n    \"email\": \"main@school.com\",\n    \"address\": \"123 Main St\",\n    \"pincode\": \"10001\",\n    \"principal_name\": \"John Doe\",\n    \"principal_contact\": \"+1234567890\",\n    \"principal_email\": \"principal@school.com\",\n    \"total_capacity\": 500,\n    \"status\": \"Active\",\n    \"is_active\": true\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/branches",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "branches"
+                            ]
+                        },
+                        "description": "Create a new branch"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Update Branch",
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"name\": \"Updated Branch Name\",\n    \"phone\": \"+1234567890\",\n    \"email\": \"updated@school.com\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/branches/1",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "branches",
+                                "1"
+                            ]
+                        },
+                        "description": "Update branch details"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Delete Branch",
+                    "request": {
+                        "method": "DELETE",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/branches/1",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "branches",
+                                "1"
+                            ]
+                        },
+                        "description": "Soft delete a branch"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Branch Stats",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/branches/1/stats",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "branches",
+                                "1",
+                                "stats"
+                            ]
+                        },
+                        "description": "Get statistics for a specific branch"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Export Branches",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/branches/export?format=excel",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "branches",
+                                "export"
+                            ],
+                            "query": [
+                                {
+                                    "key": "format",
+                                    "value": "excel",
+                                    "description": "excel, csv, pdf"
+                                }
+                            ]
+                        },
+                        "description": "Export branches to Excel, CSV, or PDF"
+                    },
+                    "response": []
+                }
+            ],
+            "description": "Branch management endpoints"
+        },
+        {
+            "name": "Teachers",
+            "item": [
+                {
+                    "name": "Get All Teachers",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/teachers?page=1&per_page=10&search=&branch_id=&department_id=&is_active=1",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "teachers"
+                            ],
+                            "query": [
+                                {
+                                    "key": "page",
+                                    "value": "1"
+                                },
+                                {
+                                    "key": "per_page",
+                                    "value": "10"
+                                },
+                                {
+                                    "key": "search",
+                                    "value": ""
+                                },
+                                {
+                                    "key": "branch_id",
+                                    "value": ""
+                                },
+                                {
+                                    "key": "department_id",
+                                    "value": ""
+                                },
+                                {
+                                    "key": "is_active",
+                                    "value": "1"
+                                }
+                            ]
+                        },
+                        "description": "Get all teachers with pagination and filters"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Teacher by ID",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/teachers/1",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "teachers",
+                                "1"
+                            ]
+                        },
+                        "description": "Get single teacher details"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Create Teacher",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"first_name\": \"Jane\",\n    \"last_name\": \"Smith\",\n    \"email\": \"jane.smith@school.com\",\n    \"phone\": \"+1234567890\",\n    \"password\": \"password123\",\n    \"branch_id\": 1,\n    \"department_id\": 1,\n    \"employee_id\": \"EMP001\",\n    \"category_type\": \"Teaching\",\n    \"designation\": \"Senior Teacher\",\n    \"gender\": \"Female\",\n    \"date_of_birth\": \"1985-05-15\",\n    \"joining_date\": \"2020-01-01\",\n    \"qualification\": \"M.Sc. Mathematics\",\n    \"experience_years\": 10\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/teachers",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "teachers"
+                            ]
+                        },
+                        "description": "Create a new teacher"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Update Teacher",
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"first_name\": \"Jane Updated\",\n    \"designation\": \"Principal\",\n    \"phone\": \"+1234567890\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/teachers/1",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "teachers",
+                                "1"
+                            ]
+                        },
+                        "description": "Update teacher details"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Delete Teacher",
+                    "request": {
+                        "method": "DELETE",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/teachers/1",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "teachers",
+                                "1"
+                            ]
+                        },
+                        "description": "Soft delete (deactivate) a teacher"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Restore Teacher",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/teachers/1/restore",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "teachers",
+                                "1",
+                                "restore"
+                            ]
+                        },
+                        "description": "Restore (reactivate) a soft-deleted teacher"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Upload Teacher Profile Picture",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "formdata",
+                            "formdata": [
+                                {
+                                    "key": "profile_picture",
+                                    "type": "file",
+                                    "src": []
+                                }
+                            ]
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/teachers/1/upload-profile-picture",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "teachers",
+                                "1",
+                                "upload-profile-picture"
+                            ]
+                        },
+                        "description": "Upload profile picture for a teacher"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Export Teachers",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/teachers/export?format=excel",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "teachers",
+                                "export"
+                            ],
+                            "query": [
+                                {
+                                    "key": "format",
+                                    "value": "excel",
+                                    "description": "excel, csv, pdf"
+                                }
+                            ]
+                        },
+                        "description": "Export teachers to Excel, CSV, or PDF"
+                    },
+                    "response": []
+                }
+            ],
+            "description": "Teacher management endpoints"
+        },
+        {
+            "name": "Students",
+            "item": [
+                {
+                    "name": "Get All Students",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/students?page=1&per_page=10&search=&branch_id=&grade=&section=&status=Active",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "students"
+                            ],
+                            "query": [
+                                {
+                                    "key": "page",
+                                    "value": "1"
+                                },
+                                {
+                                    "key": "per_page",
+                                    "value": "10"
+                                },
+                                {
+                                    "key": "search",
+                                    "value": ""
+                                },
+                                {
+                                    "key": "branch_id",
+                                    "value": ""
+                                },
+                                {
+                                    "key": "grade",
+                                    "value": ""
+                                },
+                                {
+                                    "key": "section",
+                                    "value": ""
+                                },
+                                {
+                                    "key": "status",
+                                    "value": "Active"
+                                }
+                            ]
+                        },
+                        "description": "Get all students with pagination and filters"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Student by ID",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/students/1",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "students",
+                                "1"
+                            ]
+                        },
+                        "description": "Get single student details"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Create Student",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"first_name\": \"John\",\n    \"last_name\": \"Doe\",\n    \"email\": \"john.doe@student.com\",\n    \"phone\": \"+1234567890\",\n    \"password\": \"password123\",\n    \"branch_id\": 1,\n    \"admission_number\": \"ADM001\",\n    \"grade\": \"10\",\n    \"section\": \"A\",\n    \"date_of_birth\": \"2010-05-15\",\n    \"gender\": \"Male\",\n    \"admission_date\": \"2024-01-01\",\n    \"father_name\": \"Father Name\",\n    \"mother_name\": \"Mother Name\",\n    \"guardian_contact\": \"+1234567890\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/students",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "students"
+                            ]
+                        },
+                        "description": "Create a new student"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Update Student",
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"first_name\": \"John Updated\",\n    \"grade\": \"11\",\n    \"section\": \"B\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/students/1",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "students",
+                                "1"
+                            ]
+                        },
+                        "description": "Update student details"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Delete Student",
+                    "request": {
+                        "method": "DELETE",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/students/1",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "students",
+                                "1"
+                            ]
+                        },
+                        "description": "Soft delete (deactivate) a student"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Restore Student",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/students/1/restore",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "students",
+                                "1",
+                                "restore"
+                            ]
+                        },
+                        "description": "Restore (reactivate) a soft-deleted student"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Upload Student Profile Picture",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "formdata",
+                            "formdata": [
+                                {
+                                    "key": "profile_picture",
+                                    "type": "file",
+                                    "src": []
+                                }
+                            ]
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/students/1/upload-profile-picture",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "students",
+                                "1",
+                                "upload-profile-picture"
+                            ]
+                        },
+                        "description": "Upload profile picture for a student"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Student Dues",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/students/1/dues",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "students",
+                                "1",
+                                "dues"
+                            ]
+                        },
+                        "description": "Get fee dues for a student"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Export Students",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/students/export?format=excel",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "students",
+                                "export"
+                            ],
+                            "query": [
+                                {
+                                    "key": "format",
+                                    "value": "excel",
+                                    "description": "excel, csv, pdf"
+                                }
+                            ]
+                        },
+                        "description": "Export students to Excel, CSV, or PDF"
+                    },
+                    "response": []
+                }
+            ],
+            "description": "Student management endpoints"
+        },
+        {
+            "name": "Attendance",
+            "item": [
+                {
+                    "name": "Get All Attendance",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/attendance?type=student&page=1&per_page=10&date=&branch_id=&grade=&section=",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "attendance"
+                            ],
+                            "query": [
+                                {
+                                    "key": "type",
+                                    "value": "student",
+                                    "description": "student or teacher"
+                                },
+                                {
+                                    "key": "page",
+                                    "value": "1"
+                                },
+                                {
+                                    "key": "per_page",
+                                    "value": "10"
+                                },
+                                {
+                                    "key": "date",
+                                    "value": ""
+                                },
+                                {
+                                    "key": "branch_id",
+                                    "value": ""
+                                },
+                                {
+                                    "key": "grade",
+                                    "value": ""
+                                },
+                                {
+                                    "key": "section",
+                                    "value": ""
+                                }
+                            ]
+                        },
+                        "description": "Get all attendance records with pagination and filters"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Attendance by ID",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/attendance/1?type=student",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "attendance",
+                                "1"
+                            ],
+                            "query": [
+                                {
+                                    "key": "type",
+                                    "value": "student",
+                                    "description": "student or teacher"
+                                }
+                            ]
+                        },
+                        "description": "Get single attendance record"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Mark Attendance",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"type\": \"student\",\n    \"student_id\": 1,\n    \"branch_id\": 1,\n    \"grade_level\": \"10\",\n    \"section\": \"A\",\n    \"date\": \"2024-01-15\",\n    \"status\": \"Present\",\n    \"academic_year\": \"2024-2025\",\n    \"remarks\": \"On time\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/attendance",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "attendance"
+                            ]
+                        },
+                        "description": "Mark attendance for a student or teacher. Status: Present, Absent, Late, Half-Day, Sick Leave, Leave"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Bulk Mark Attendance",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"type\": \"student\",\n    \"branch_id\": 1,\n    \"grade_level\": \"10\",\n    \"section\": \"A\",\n    \"date\": \"2024-01-15\",\n    \"academic_year\": \"2024-2025\",\n    \"attendance_records\": [\n        {\n            \"student_id\": 1,\n            \"status\": \"Present\",\n            \"remarks\": \"\"\n        },\n        {\n            \"student_id\": 2,\n            \"status\": \"Absent\",\n            \"remarks\": \"Sick\"\n        }\n    ]\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/attendance/bulk",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "attendance",
+                                "bulk"
+                            ]
+                        },
+                        "description": "Mark attendance for multiple students at once"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Update Attendance",
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"type\": \"student\",\n    \"status\": \"Late\",\n    \"remarks\": \"Updated remarks\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/attendance/1",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "attendance",
+                                "1"
+                            ]
+                        },
+                        "description": "Update attendance record"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Delete Attendance",
+                    "request": {
+                        "method": "DELETE",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/attendance/1?type=student",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "attendance",
+                                "1"
+                            ],
+                            "query": [
+                                {
+                                    "key": "type",
+                                    "value": "student",
+                                    "description": "student or teacher"
+                                }
+                            ]
+                        },
+                        "description": "Delete attendance record"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Student Attendance",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/attendance/student/1?from_date=2024-01-01&to_date=2024-01-31",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "attendance",
+                                "student",
+                                "1"
+                            ],
+                            "query": [
+                                {
+                                    "key": "from_date",
+                                    "value": "2024-01-01"
+                                },
+                                {
+                                    "key": "to_date",
+                                    "value": "2024-01-31"
+                                }
+                            ]
+                        },
+                        "description": "Get attendance records for a specific student"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Teacher Attendance",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/attendance/teacher/1?from_date=2024-01-01&to_date=2024-01-31",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "attendance",
+                                "teacher",
+                                "1"
+                            ],
+                            "query": [
+                                {
+                                    "key": "from_date",
+                                    "value": "2024-01-01"
+                                },
+                                {
+                                    "key": "to_date",
+                                    "value": "2024-01-31"
+                                }
+                            ]
+                        },
+                        "description": "Get attendance records for a specific teacher"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Class Attendance",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/attendance/class/10/A?date=2024-01-15",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "attendance",
+                                "class",
+                                "10",
+                                "A"
+                            ],
+                            "query": [
+                                {
+                                    "key": "date",
+                                    "value": "2024-01-15"
+                                }
+                            ]
+                        },
+                        "description": "Get attendance for a specific class (grade and section)"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Attendance Report",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/attendance/report?type=student&from_date=2024-01-01&to_date=2024-01-31&branch_id=1&grade=10&section=A",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "attendance",
+                                "report"
+                            ],
+                            "query": [
+                                {
+                                    "key": "type",
+                                    "value": "student",
+                                    "description": "student or teacher"
+                                },
+                                {
+                                    "key": "from_date",
+                                    "value": "2024-01-01",
+                                    "required": true
+                                },
+                                {
+                                    "key": "to_date",
+                                    "value": "2024-01-31",
+                                    "required": true
+                                },
+                                {
+                                    "key": "branch_id",
+                                    "value": "1"
+                                },
+                                {
+                                    "key": "grade",
+                                    "value": "10"
+                                },
+                                {
+                                    "key": "section",
+                                    "value": "A"
+                                }
+                            ]
+                        },
+                        "description": "Get attendance report with summary statistics"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Export Attendance",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/attendance/export?format=excel&type=student&from_date=2024-01-01&to_date=2024-01-31",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "attendance",
+                                "export"
+                            ],
+                            "query": [
+                                {
+                                    "key": "format",
+                                    "value": "excel",
+                                    "description": "excel, csv, pdf"
+                                },
+                                {
+                                    "key": "type",
+                                    "value": "student",
+                                    "description": "student or teacher"
+                                },
+                                {
+                                    "key": "from_date",
+                                    "value": "2024-01-01"
+                                },
+                                {
+                                    "key": "to_date",
+                                    "value": "2024-01-31"
+                                }
+                            ]
+                        },
+                        "description": "Export attendance to Excel, CSV, or PDF"
+                    },
+                    "response": []
+                }
+            ],
+            "description": "Attendance management endpoints for students and teachers"
+        },
+        {
+            "name": "Leaves",
+            "item": [
+                {
+                    "name": "Get All Leaves",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/leaves?type=student&page=1&per_page=10&status=&from_date=&to_date=",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "leaves"
+                            ],
+                            "query": [
+                                {
+                                    "key": "type",
+                                    "value": "student",
+                                    "description": "student or teacher"
+                                },
+                                {
+                                    "key": "page",
+                                    "value": "1"
+                                },
+                                {
+                                    "key": "per_page",
+                                    "value": "10"
+                                },
+                                {
+                                    "key": "status",
+                                    "value": "",
+                                    "description": "Pending, Approved, Rejected, Cancelled"
+                                },
+                                {
+                                    "key": "from_date",
+                                    "value": ""
+                                },
+                                {
+                                    "key": "to_date",
+                                    "value": ""
+                                }
+                            ]
+                        },
+                        "description": "Get all leave records with pagination and filters"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Leave by ID",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/leaves/1?type=student",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "leaves",
+                                "1"
+                            ],
+                            "query": [
+                                {
+                                    "key": "type",
+                                    "value": "student",
+                                    "description": "student or teacher"
+                                }
+                            ]
+                        },
+                        "description": "Get single leave record"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Create Leave Request",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"type\": \"student\",\n    \"student_id\": 1,\n    \"branch_id\": 1,\n    \"from_date\": \"2024-01-20\",\n    \"to_date\": \"2024-01-22\",\n    \"leave_type\": \"Sick Leave\",\n    \"reason\": \"Fever and cold\",\n    \"remarks\": \"Doctor advised rest\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/leaves",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "leaves"
+                            ]
+                        },
+                        "description": "Create a new leave request. Leave types: Sick Leave, Casual Leave, Medical Leave, Family Emergency, Other"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Update Leave",
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"type\": \"student\",\n    \"status\": \"Approved\",\n    \"remarks\": \"Approved by principal\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/leaves/1",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "leaves",
+                                "1"
+                            ]
+                        },
+                        "description": "Update leave request (approve/reject/update details)"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Delete Leave",
+                    "request": {
+                        "method": "DELETE",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/leaves/1?type=student",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "leaves",
+                                "1"
+                            ],
+                            "query": [
+                                {
+                                    "key": "type",
+                                    "value": "student",
+                                    "description": "student or teacher"
+                                }
+                            ]
+                        },
+                        "description": "Delete leave record"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Student Leaves",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/leaves/student/1?from_date=2024-01-01&to_date=2024-01-31",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "leaves",
+                                "student",
+                                "1"
+                            ],
+                            "query": [
+                                {
+                                    "key": "from_date",
+                                    "value": "2024-01-01"
+                                },
+                                {
+                                    "key": "to_date",
+                                    "value": "2024-01-31"
+                                }
+                            ]
+                        },
+                        "description": "Get all leave records for a specific student"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Teacher Leaves",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/leaves/teacher/1?from_date=2024-01-01&to_date=2024-01-31",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "leaves",
+                                "teacher",
+                                "1"
+                            ],
+                            "query": [
+                                {
+                                    "key": "from_date",
+                                    "value": "2024-01-01"
+                                },
+                                {
+                                    "key": "to_date",
+                                    "value": "2024-01-31"
+                                }
+                            ]
+                        },
+                        "description": "Get all leave records for a specific teacher"
+                    },
+                    "response": []
+                }
+            ],
+            "description": "Leave management endpoints for students and teachers"
+        }
+    ],
+    "event": [
+        {
+            "listen": "prerequest",
+            "script": {
+                "type": "text/javascript",
+                "exec": [
+                    ""
+                ]
+            }
+        },
+        {
+            "listen": "test",
+            "script": {
+                "type": "text/javascript",
+                "exec": [
+                    ""
+                ]
+            }
+        }
+    ],
+    "variable": [
+        {
+            "key": "base_url",
+            "value": "http://localhost:8000/api",
+            "type": "string"
+        },
+        {
+            "key": "access_token",
+            "value": "",
+            "type": "string"
+        }
+    ]
+}
+

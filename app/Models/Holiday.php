@@ -12,6 +12,7 @@ class Holiday extends Model
 
     protected $fillable = [
         'branch_id',
+        'school_id',
         'name',  // Old column (keep for compatibility)
         'title',
         'description',
@@ -22,9 +23,12 @@ class Holiday extends Model
         'color',
         'is_recurring',
         'academic_year',
+        'academic_year_id',
         'is_active',
         'created_by'
     ];
+
+    protected $appends = ['branch_name', 'duration'];
 
     protected function casts(): array
     {
@@ -34,6 +38,14 @@ class Holiday extends Model
             'is_recurring' => 'boolean',
             'is_active' => 'boolean',
         ];
+    }
+
+    /**
+     * Get branch name for display (or "All Branches" when null)
+     */
+    public function getBranchNameAttribute(): string
+    {
+        return $this->branch?->name ?? 'All Branches';
     }
 
     /**

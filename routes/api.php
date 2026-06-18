@@ -4,13 +4,17 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BranchController;
-use App\Http\Controllers\EnhancedBranchController;
 use App\Http\Controllers\BranchTransferController;
 use App\Http\Controllers\DepartmentController;
 use App\Http\Controllers\SubjectController;
 use App\Http\Controllers\ExamController;
 use App\Http\Controllers\FeeController;
+use App\Http\Controllers\FeeDuesController;
+use App\Http\Controllers\FeeReportController;
+use App\Http\Controllers\RealTimeNotificationController;
+use App\Http\Controllers\FeeTypeController;
 use App\Http\Controllers\AttendanceController;
+use App\Http\Controllers\LeaveController;
 use App\Http\Controllers\LibraryController;
 use App\Http\Controllers\TransportController;
 use App\Http\Controllers\EventController;
@@ -18,7 +22,6 @@ use App\Http\Controllers\TimetableController;
 use App\Http\Controllers\TeacherController;
 use App\Http\Controllers\StudentController;
 use App\Http\Controllers\DashboardController;
-use App\Http\Controllers\ClassSectionController;
 use App\Http\Controllers\StudentGroupController;
 use App\Http\Controllers\ClassController;
 use App\Http\Controllers\SectionController;
@@ -27,6 +30,27 @@ use App\Http\Controllers\AccountController;
 use App\Http\Controllers\TransactionController;
 use App\Http\Controllers\InvoiceController;
 use App\Http\Controllers\HolidayController;
+use App\Http\Controllers\UserController;
+use App\Http\Controllers\RoleController;
+use App\Http\Controllers\PermissionManagementController;
+use App\Http\Controllers\ModuleController;
+use App\Http\Controllers\SectionSubjectController;
+use App\Http\Controllers\ExamTermController;
+use App\Http\Controllers\ExamScheduleController;
+use App\Http\Controllers\GlobalUploadController;
+use App\Http\Controllers\ExamMarkController;
+use App\Http\Controllers\UserPreferenceController;
+use App\Http\Controllers\AdmissionController;
+use App\Http\Controllers\CommunicationController;
+use App\Http\Controllers\MessageController;
+use App\Http\Controllers\AcademicYearController;
+use App\Http\Controllers\BranchSmsGatewayConfigController;
+use App\Http\Controllers\SmsBulkQueueLogController;
+use App\Http\Controllers\SmsBulkSendController;
+use App\Http\Controllers\SmsTemplateController;
+use App\Http\Controllers\TwilioWhatsAppStatusWebhookController;
+use App\Http\Controllers\WhatsAppBulkQueueLogController;
+use App\Http\Controllers\WhatsAppBulkSendController;
 
 /*
 |--------------------------------------------------------------------------
@@ -39,6 +63,7 @@ Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
 Route::post('/reset-password', [AuthController::class, 'resetPassword']);
+Route::post('/webhooks/twilio/whatsapp-status', TwilioWhatsAppStatusWebhookController::class);
 
 // Health Check
 Route::get('/health', function () {
@@ -49,8 +74,8 @@ Route::get('/health', function () {
     ]);
 });
 
-// Protected Routes with rate limiting
-Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
+// Protected Routes with rate limiting (180 requests per minute = 3 per second)
+Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
     
     // Auth Routes
     Route::get('/me', [AuthController::class, 'me']);
@@ -58,11 +83,25 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     Route::put('/profile', [AuthController::class, 'updateProfile']);
     Route::put('/change-password', [AuthController::class, 'changePassword']);
     
+    // User Preferences Routes
+    Route::prefix('preferences')->group(function () {
+        Route::get('/', [UserPreferenceController::class, 'index']);
+        Route::put('/', [UserPreferenceController::class, 'update']);
+        Route::put('/{key}', [UserPreferenceController::class, 'updateSingle']);
+        Route::post('/reset', [UserPreferenceController::class, 'reset']);
+    });
+    
     // Branch Routes - Enhanced Multi-Branch Management
     Route::prefix('branches')->group(function () {
+        // Get accessible branches for current user
+        Route::get('/accessible', [BranchController::class, 'getAccessibleBranches']);
+        
         // List and create
         Route::get('/', [BranchController::class, 'index']);
         Route::post('/', [BranchController::class, 'store']);
+        
+        // Export (requires branches.export permission)
+        Route::get('export', [BranchController::class, 'export'])->middleware('permission:branches.export');
         
         // Deleted branches (soft deleted - status = Closed)
         Route::get('deleted', [BranchController::class, 'getDeleted']);
@@ -76,7 +115,41 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
         Route::get('hierarchy/{id}', [BranchController::class, 'getHierarchy']);
         Route::get('locations', [BranchController::class, 'getBranchLocations']);
         Route::get('comparative-analytics', [BranchController::class, 'getComparativeAnalytics']);
-        
+
+        // Branch SMS gateway configs (bulk messaging; credentials encrypted at rest)
+        // Permission middleware disabled: routes remain protected by auth:sanctum only.
+        Route::get('{id}/sms-gateway-config', [BranchSmsGatewayConfigController::class, 'index']);
+        Route::put('{id}/sms-gateway-config', [BranchSmsGatewayConfigController::class, 'update']);
+        Route::post('{id}/sms-gateway-config/send-test', [BranchSmsGatewayConfigController::class, 'sendTest']);
+
+        // Bulk delivery logs (all accessible branches + academic year; optional ?branch_id=)
+        Route::get('sms-bulk-logs', [SmsBulkQueueLogController::class, 'indexAll']);
+        Route::get('whatsapp-bulk-logs', [WhatsAppBulkQueueLogController::class, 'indexAll']);
+
+        // SMS templates & bulk send (personalized #tags#)
+        Route::get('sms-templates', [SmsTemplateController::class, 'indexAll']);
+        Route::get('{id}/sms-templates', [SmsTemplateController::class, 'index']);
+        Route::post('{id}/sms-templates', [SmsTemplateController::class, 'store']);
+        Route::put('{id}/sms-templates/{templateId}', [SmsTemplateController::class, 'update']);
+        Route::delete('{id}/sms-templates/{templateId}', [SmsTemplateController::class, 'destroy']);
+        Route::post('{id}/sms-templates/preview', [SmsTemplateController::class, 'preview']);
+        Route::get('{id}/sms-recipient-options', [SmsBulkSendController::class, 'recipientOptions']);
+        Route::get('{id}/sms-student-search', [SmsBulkSendController::class, 'searchStudents']);
+        Route::post('{id}/sms-bulk-send/preview', [SmsBulkSendController::class, 'preview']);
+        Route::post('{id}/sms-bulk-send', [SmsBulkSendController::class, 'store']);
+        Route::get('{id}/sms-bulk-logs', [SmsBulkQueueLogController::class, 'index']);
+        Route::get('{id}/sms-bulk-logs/{queueId}', [SmsBulkQueueLogController::class, 'show']);
+        Route::post('{id}/sms-bulk-logs/{queueId}/resend', [SmsBulkQueueLogController::class, 'resend']);
+
+        // WhatsApp bulk (same templates & audience rules as SMS; Twilio WhatsApp only)
+        Route::get('{id}/whatsapp-recipient-options', [WhatsAppBulkSendController::class, 'recipientOptions']);
+        Route::get('{id}/whatsapp-student-search', [WhatsAppBulkSendController::class, 'searchStudents']);
+        Route::post('{id}/whatsapp-bulk-send/preview', [WhatsAppBulkSendController::class, 'preview']);
+        Route::post('{id}/whatsapp-bulk-send', [WhatsAppBulkSendController::class, 'store']);
+        Route::get('{id}/whatsapp-bulk-logs', [WhatsAppBulkQueueLogController::class, 'index']);
+        Route::get('{id}/whatsapp-bulk-logs/{queueId}', [WhatsAppBulkQueueLogController::class, 'show']);
+        Route::post('{id}/whatsapp-bulk-logs/{queueId}/resend', [WhatsAppBulkQueueLogController::class, 'resend']);
+
         // Single branch operations
         Route::get('{id}', [BranchController::class, 'show']);
         Route::put('{id}', [BranchController::class, 'update']);
@@ -113,17 +186,33 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     // Teacher Routes
     Route::get('teachers', [TeacherController::class, 'index']);
     Route::post('teachers', [TeacherController::class, 'store']);
+    Route::get('teachers/export', [TeacherController::class, 'export']);
     Route::get('teachers/{id}', [TeacherController::class, 'show']);
     Route::put('teachers/{id}', [TeacherController::class, 'update']);
-    Route::delete('teachers/{id}', [TeacherController::class, 'destroy']);
+    Route::delete('teachers/{id}', [TeacherController::class, 'destroy']); // Soft delete (deactivate)
+    Route::post('teachers/{id}/restore', [TeacherController::class, 'restore']); // Restore (reactivate)
+    Route::post('teachers/{id}/upload-profile-picture', [TeacherController::class, 'uploadProfilePicture']);
     
     // Student Routes
     Route::get('students', [StudentController::class, 'index']);
     Route::post('students', [StudentController::class, 'store']);
+    Route::get('students/export', [StudentController::class, 'export']);
+    Route::get('students/by-user/{userId}', [StudentController::class, 'getByUserId']);
+    
+    // Promotion routes - MUST come before students/{id} to avoid route conflicts
+    Route::post('students/promote', [StudentController::class, 'promote']);
+    Route::post('students/promote-with-fee-handling', [StudentController::class, 'promoteWithFeeHandling']);
+    Route::post('students/preview-promotion', [StudentController::class, 'previewPromotion']);
+    Route::post('students/revert-promotion', [StudentController::class, 'revertPromotion']);
+    Route::get('students/{id}/promotion-history', [StudentController::class, 'getPromotionHistory']);
+    Route::get('students/{id}/dues', [StudentController::class, 'getStudentDues']);
+    
+    // Student CRUD routes with parameters
     Route::get('students/{id}', [StudentController::class, 'show']);
     Route::put('students/{id}', [StudentController::class, 'update']);
-    Route::delete('students/{id}', [StudentController::class, 'destroy']);
-    Route::post('students/promote', [StudentController::class, 'promote']);
+    Route::delete('students/{id}', [StudentController::class, 'destroy']); // Soft delete (deactivate)
+    Route::post('students/{id}/restore', [StudentController::class, 'restore']); // Restore (reactivate)
+    Route::post('students/{id}/upload-profile-picture', [StudentController::class, 'uploadProfilePicture']);
     
     // Class & Section Routes - Full CRUD
     Route::prefix('classes')->group(function () {
@@ -138,6 +227,7 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     });
     
     // Grade Routes - Full CRUD
+    Route::get('grades/export', [GradeController::class, 'export']);
     Route::apiResource('grades', GradeController::class)->parameters([
         'grades' => 'value'  // Use grade value instead of id
     ]);
@@ -151,10 +241,22 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     Route::prefix('sections')->group(function () {
         Route::get('/', [SectionController::class, 'index']);
         Route::post('/', [SectionController::class, 'store']);
+        Route::get('export', [SectionController::class, 'export'])->middleware('permission:sections.export');
+        Route::get('{id}/subjects', [SectionSubjectController::class, 'getSectionSubjects']);
         Route::get('{id}', [SectionController::class, 'show']);
         Route::put('{id}', [SectionController::class, 'update']);
         Route::delete('{id}', [SectionController::class, 'destroy']);
         Route::put('{id}/toggle-status', [SectionController::class, 'toggleStatus']);
+    });
+    
+    // Section-Subject Assignment Routes
+    Route::prefix('section-subjects')->group(function () {
+        Route::get('/', [SectionSubjectController::class, 'index']);
+        Route::post('/', [SectionSubjectController::class, 'assignSubject']);
+        Route::post('bulk', [SectionSubjectController::class, 'assignMultipleSubjects']);
+        Route::post('copy', [SectionSubjectController::class, 'copySubjects']);
+        Route::put('{id}', [SectionSubjectController::class, 'updateAssignment']);
+        Route::delete('{id}', [SectionSubjectController::class, 'removeSubject']);
     });
     
     // Exam Routes
@@ -164,25 +266,98 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     Route::get('exams/{id}/results', [ExamController::class, 'getResults']);
     Route::get('students/{studentId}/results', [ExamController::class, 'getStudentResults']);
     
+    // Exam Terms
+    Route::prefix('exam-terms')->group(function () {
+        Route::get('/', [ExamTermController::class, 'index']);
+        Route::post('/', [ExamTermController::class, 'store']);
+        Route::get('{id}', [ExamTermController::class, 'show']);
+        Route::put('{id}', [ExamTermController::class, 'update']);
+        Route::delete('{id}', [ExamTermController::class, 'destroy']);
+    });
+    
+    // Exam Schedules
+    Route::prefix('exam-schedules')->group(function () {
+        Route::get('/', [ExamScheduleController::class, 'index']);
+        Route::post('/', [ExamScheduleController::class, 'store']);
+        Route::get('{id}/students', [ExamScheduleController::class, 'getStudents']);
+        Route::get('{id}', [ExamScheduleController::class, 'show'])->where('id', '[0-9]+');
+        Route::put('{id}', [ExamScheduleController::class, 'update']);
+        Route::delete('{id}', [ExamScheduleController::class, 'destroy']);
+    });
+
+    // Exam Marks
+    Route::prefix('exam-marks')->group(function () {
+        Route::get('schedule/{scheduleId}', [ExamMarkController::class, 'getMarks']);
+        Route::post('schedule/{scheduleId}', [ExamMarkController::class, 'storeMarks']);
+        Route::get('student/{studentId}/overview', [ExamMarkController::class, 'getStudentMarksOverview']);
+        Route::get('student/{studentId}', [ExamMarkController::class, 'getStudentMarks']);
+    });
+    
     // Fee Routes
+    // Fee Types Routes
+    Route::get('fee-types', [FeeTypeController::class, 'index']);
+    Route::post('fee-types', [FeeTypeController::class, 'store']);
+    Route::get('fee-types/{id}', [FeeTypeController::class, 'show']);
+    Route::put('fee-types/{id}', [FeeTypeController::class, 'update']);
+    Route::delete('fee-types/{id}', [FeeTypeController::class, 'destroy']);
+    Route::put('fee-types/{id}/toggle-status', [FeeTypeController::class, 'toggleStatus']);
+    
     Route::get('fee-structures', [FeeController::class, 'indexStructures']);
     Route::post('fee-structures', [FeeController::class, 'storeStructure']);
     Route::get('fee-structures/{id}', [FeeController::class, 'show']);
     Route::put('fee-structures/{id}', [FeeController::class, 'updateStructure']);
     Route::delete('fee-structures/{id}', [FeeController::class, 'destroyStructure']);
     
-    Route::get('fee-payments', [FeeController::class, 'indexPayments']);
-    Route::post('fee-payments', [FeeController::class, 'recordPayment']);
-    Route::get('fee-payments/{id}', [FeeController::class, 'showPayment']);
+    // Fee Payments Routes - Specific routes MUST come before parameterized routes
+    Route::prefix('fee-payments')->group(function () {
+        Route::get('today', [FeeController::class, 'getTodayPayments']);
+        Route::get('/', [FeeController::class, 'indexPayments']);
+        Route::post('/', [FeeController::class, 'recordPayment']);
+        Route::get('{id}/receipt', [FeeController::class, 'downloadReceipt']);
+        Route::get('{id}', [FeeController::class, 'showPayment']);
+    });
     Route::get('students/{studentId}/fees', [FeeController::class, 'getStudentFees']);
     
-    // Attendance Routes
+    // Fee Dues routes
+    Route::apiResource('fee-dues', FeeDuesController::class);
+    Route::get('fee-dues/student/{studentId}', [FeeDuesController::class, 'getStudentDues']);
+    Route::post('fee-dues/{id}/apply-payment', [FeeDuesController::class, 'applyPayment']);
+    Route::post('fee-dues/{id}/waive', [FeeDuesController::class, 'waiveDue']);
+    Route::get('fee-dues/aging-analysis', [FeeDuesController::class, 'getAgingAnalysis']);
+    Route::get('fee-dues/overdue', [FeeDuesController::class, 'getOverdueFees']);
+    Route::get('fee-dues/by-type/{studentId}', [FeeDuesController::class, 'getDuesByFeeType']);
+    
+    // Fee Reports routes
+    Route::prefix('fee-reports')->group(function () {
+        Route::get('dues', [FeeReportController::class, 'duesReport']);
+        Route::get('promotion-dues', [FeeReportController::class, 'promotionDuesReport']);
+        Route::get('collection', [FeeReportController::class, 'collectionReport']);
+        Route::get('overdue', [FeeReportController::class, 'overdueReport']);
+        Route::get('student-statement/{studentId}', [FeeReportController::class, 'studentStatement']);
+        Route::get('aging-analysis', [FeeReportController::class, 'agingAnalysis']);
+    });
+    
+    // Real-time notifications
+    Route::get('notifications/stream', [RealTimeNotificationController::class, 'streamNotifications']);
+    
+    // Attendance Routes (specific routes MUST come before apiResource)
+    Route::prefix('attendance')->group(function () {
+        Route::get('dashboard', [AttendanceController::class, 'getDashboard']);
+        Route::get('export', [AttendanceController::class, 'export']);
+        Route::post('bulk', [AttendanceController::class, 'markBulk']);
+        Route::get('report', [AttendanceController::class, 'getReport']);
+        Route::get('student/{studentId}/overview', [AttendanceController::class, 'getStudentAttendanceOverview']);
+        Route::get('student/{studentId}', [AttendanceController::class, 'getStudentAttendance']);
+        Route::get('teacher/{teacherId}', [AttendanceController::class, 'getTeacherAttendance']);
+        Route::get('class/{grade}/{section}', [AttendanceController::class, 'getClassAttendance']);
+        Route::get('report/{studentId}', [AttendanceController::class, 'generateReport']);
+    });
     Route::apiResource('attendance', AttendanceController::class);
-    Route::post('attendance/bulk', [AttendanceController::class, 'markBulk']);
-    Route::get('attendance/report', [AttendanceController::class, 'getReport']);
-    Route::get('attendance/student/{studentId}', [AttendanceController::class, 'getStudentAttendance']);
-    Route::get('attendance/class/{grade}/{section}', [AttendanceController::class, 'getClassAttendance']);
-    Route::get('attendance/report/{studentId}', [AttendanceController::class, 'generateReport']);
+    
+    // Leave Routes (specific routes MUST come before apiResource)
+    Route::get('leaves/student/{studentId}', [LeaveController::class, 'getStudentLeaves']);
+    Route::get('leaves/teacher/{teacherId}', [LeaveController::class, 'getTeacherLeaves']);
+    Route::apiResource('leaves', LeaveController::class);
     
     // Library Routes
     Route::apiResource('books', LibraryController::class);
@@ -226,9 +401,16 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     Route::prefix('accounts')->group(function () {
         Route::get('dashboard', [AccountController::class, 'getDashboard']);
         Route::get('categories', [AccountController::class, 'getCategories']);
+        Route::get('categories/{id}', [AccountController::class, 'getCategory']);
+        Route::post('categories', [AccountController::class, 'createCategory']);
+        Route::put('categories/{id}', [AccountController::class, 'updateCategory']);
+        Route::delete('categories/{id}', [AccountController::class, 'deleteCategory']);
+        Route::put('categories/{id}/toggle-status', [AccountController::class, 'toggleCategoryStatus']);
     });
     
     // Transaction Routes - Full CRUD
+    Route::get('transactions/export', [TransactionController::class, 'export']);
+    Route::get('transactions/{id}/receipt', [TransactionController::class, 'downloadReceipt']);
     Route::apiResource('transactions', TransactionController::class);
     Route::post('transactions/{id}/approve', [TransactionController::class, 'approve']);
     Route::post('transactions/{id}/reject', [TransactionController::class, 'reject']);
@@ -251,11 +433,162 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     Route::prefix('holidays')->group(function () {
         Route::get('/', [HolidayController::class, 'index']);
         Route::post('/', [HolidayController::class, 'store']);
+        Route::get('export', [HolidayController::class, 'export']);
         Route::get('upcoming', [HolidayController::class, 'getUpcoming']);
         Route::get('calendar/{year}/{month}', [HolidayController::class, 'getCalendarData']);
         Route::get('{id}', [HolidayController::class, 'show']);
         Route::put('{id}', [HolidayController::class, 'update']);
         Route::delete('{id}', [HolidayController::class, 'destroy']);
     });
+    
+    // Settings Module Routes - User, Role & Permission Management
+    // Users Management
+    Route::prefix('users')->group(function () {
+        Route::get('/', [UserController::class, 'index']);
+        Route::get('/all', [UserController::class, 'all']);
+        Route::get('/{id}', [UserController::class, 'show']);
+        Route::post('/', [UserController::class, 'store']);
+        Route::put('/{id}', [UserController::class, 'update']);
+        Route::delete('/{id}', [UserController::class, 'destroy']);
+        Route::patch('/{id}/toggle-status', [UserController::class, 'toggleStatus']);
+        Route::post('/{id}/reset-password', [UserController::class, 'resetPassword']);
+        
+        // Permission Management for Users
+        Route::get('/{id}/permissions', [UserController::class, 'getPermissions']);
+        Route::post('/{id}/permissions', [UserController::class, 'updatePermissions']);
+        Route::post('/{id}/roles', [UserController::class, 'assignRoles']);
+    });
+
+    // Academic Years Management
+    Route::prefix('academic-years')->group(function () {
+        Route::get('/', [AcademicYearController::class, 'index']);
+        Route::get('/current', [AcademicYearController::class, 'current']);
+        Route::post('/', [AcademicYearController::class, 'store']);
+        Route::get('/{id}', [AcademicYearController::class, 'show']);
+        Route::put('/{id}', [AcademicYearController::class, 'update']);
+        Route::delete('/{id}', [AcademicYearController::class, 'destroy']);
+    });
+    
+    // Roles Management
+    Route::prefix('roles')->group(function () {
+        Route::get('/', [RoleController::class, 'index']);
+        Route::get('/all', [RoleController::class, 'all']);
+        Route::get('/{id}', [RoleController::class, 'show']);
+        Route::post('/', [RoleController::class, 'store']);
+        Route::put('/{id}', [RoleController::class, 'update']);
+        Route::delete('/{id}', [RoleController::class, 'destroy']);
+        Route::post('/{id}/permissions', [RoleController::class, 'assignPermissions']);
+        Route::get('/{id}/permissions', [RoleController::class, 'permissions']);
+    });
+    
+    // Permissions Management - Combined routes
+    Route::prefix('permissions')->group(function () {
+        // Settings Module - CRUD operations
+        Route::get('/', [PermissionManagementController::class, 'index']);
+        Route::get('/all', [PermissionManagementController::class, 'all']);
+        Route::get('/by-module', [PermissionManagementController::class, 'byModule']);
+        Route::post('/', [PermissionManagementController::class, 'store']);
+        
+        // Legacy permission controller endpoints - MUST be before /{id} routes
+        Route::get('/roles', [App\Http\Controllers\PermissionController::class, 'getRoles']);
+        Route::get('/modules', [App\Http\Controllers\PermissionController::class, 'getModules']);
+        Route::get('/list', [App\Http\Controllers\PermissionController::class, 'getPermissions']);
+        Route::get('/user/{id}/permissions', [App\Http\Controllers\PermissionController::class, 'getUserPermissions']);
+        
+        // Details endpoint for settings - MUST be after specific routes
+        Route::get('/{id}', [PermissionManagementController::class, 'show']);
+        Route::put('/{id}', [PermissionManagementController::class, 'update']);
+        Route::delete('/{id}', [PermissionManagementController::class, 'destroy']);
+        
+        // Admin-only permission management
+        Route::middleware('role:SuperAdmin,BranchAdmin')->group(function () {
+            Route::post('/role/{roleId}/sync', [App\Http\Controllers\PermissionController::class, 'syncRolePermissions']);
+            Route::post('/user/{userId}/grant', [App\Http\Controllers\PermissionController::class, 'grantUserPermission']);
+            Route::post('/user/{userId}/revoke', [App\Http\Controllers\PermissionController::class, 'revokeUserPermission']);
+            Route::post('/roles', [App\Http\Controllers\PermissionController::class, 'createRole']);
+            Route::post('/modules', [App\Http\Controllers\PermissionController::class, 'createModule']);
+        });
+    });
+    
+    // Modules Management
+    Route::prefix('modules')->group(function () {
+        Route::get('/', [ModuleController::class, 'index']);
+        Route::get('/{id}', [ModuleController::class, 'show']);
+        Route::post('/', [ModuleController::class, 'store']);
+        Route::put('/{id}', [ModuleController::class, 'update']);
+        Route::delete('/{id}', [ModuleController::class, 'destroy']);
+    });
+    
+    // Import Module - Data Import System (Rate limited - 30 per minute)
+    Route::prefix('imports')->middleware('throttle:30,1')->group(function () {
+        Route::get('/modules', [App\Http\Controllers\ImportController::class, 'getModules']);
+        Route::get('/history', [App\Http\Controllers\ImportController::class, 'history']);
+        Route::get('/template/{entity}', [App\Http\Controllers\ImportController::class, 'downloadTemplate']);
+        
+        // Entity-specific import routes
+        Route::post('/{entity}/upload', [App\Http\Controllers\ImportController::class, 'upload']);
+        Route::post('/{entity}/validate/{batchId}', [App\Http\Controllers\ImportController::class, 'validate']);
+        Route::get('/{entity}/preview/{batchId}', [App\Http\Controllers\ImportController::class, 'preview']);
+        Route::post('/{entity}/commit/{batchId}', [App\Http\Controllers\ImportController::class, 'commit']);
+        Route::delete('/{entity}/cancel/{batchId}', [App\Http\Controllers\ImportController::class, 'cancel']);
+    });
+
+    // Global File Upload Routes (Rate limited - 60 per minute)
+    Route::prefix('uploads')->middleware('throttle:60,1')->group(function () {
+        Route::post('/', [GlobalUploadController::class, 'upload']);
+        Route::post('/multiple', [GlobalUploadController::class, 'uploadMultiple']);
+        Route::delete('/', [GlobalUploadController::class, 'delete']);
+        Route::get('/file-info', [GlobalUploadController::class, 'getFileInfo']);
+        Route::get('/exists', [GlobalUploadController::class, 'checkFileExists']);
+    });
+
+    // Attachments Routes (Universal Attachments)
+    Route::prefix('attachments')->group(function () {
+        Route::post('/save', [GlobalUploadController::class, 'saveAttachment']);
+        Route::get('/{module}/{moduleId}', [GlobalUploadController::class, 'getAttachments']);
+        Route::get('/{module}/{moduleId}/{attachmentId}/download', [GlobalUploadController::class, 'downloadAttachment']);
+        Route::delete('/{module}/{moduleId}/{attachmentId}', [GlobalUploadController::class, 'deleteAttachment']);
+    });
+    
+    // Admission Management Routes
+    Route::prefix('admissions')->group(function () {
+        Route::get('/', [AdmissionController::class, 'index']);
+        Route::get('/dashboard', [AdmissionController::class, 'getDashboard']);
+        Route::post('/', [AdmissionController::class, 'store']);
+        Route::get('/export', [AdmissionController::class, 'export']);
+        Route::get('/{id}', [AdmissionController::class, 'show']);
+        Route::put('/{id}', [AdmissionController::class, 'update']);
+        Route::delete('/{id}', [AdmissionController::class, 'destroy']);
+        Route::post('/{id}/update-status', [AdmissionController::class, 'updateStatus']);
+        Route::post('/{id}/convert-to-student', [AdmissionController::class, 'convertToStudent']);
+    });
+    
+    // Communication System Routes
+    Route::prefix('communications')->group(function () {
+        // Notifications
+        Route::get('/notifications', [CommunicationController::class, 'getNotifications']);
+        Route::post('/notifications', [CommunicationController::class, 'createNotification']);
+        Route::post('/notifications/{id}/read', [CommunicationController::class, 'markAsRead']);
+        
+        // Announcements
+        Route::get('/announcements', [CommunicationController::class, 'getAnnouncements']);
+        Route::post('/announcements', [CommunicationController::class, 'createAnnouncement']);
+        Route::get('/announcements/{id}', [CommunicationController::class, 'getAnnouncement']);
+        Route::put('/announcements/{id}', [CommunicationController::class, 'updateAnnouncement']);
+        Route::delete('/announcements/{id}', [CommunicationController::class, 'deleteAnnouncement']);
+        
+        // Circulars
+        Route::get('/circulars', [CommunicationController::class, 'getCirculars']);
+        Route::post('/circulars', [CommunicationController::class, 'createCircular']);
+        Route::get('/circulars/{id}', [CommunicationController::class, 'getCircular']);
+        Route::put('/circulars/{id}', [CommunicationController::class, 'updateCircular']);
+        Route::delete('/circulars/{id}', [CommunicationController::class, 'deleteCircular']);
+        Route::post('/circulars/{id}/acknowledge', [CommunicationController::class, 'acknowledgeCircular']);
+    });
+    
+    // Message Sending Routes (WhatsApp & SMS)
+    Route::post('/send-whatsapp', [MessageController::class, 'sendWhatsApp']);
+    Route::post('/send-sms', [MessageController::class, 'sendSms']);
+    Route::post('/send-both', [MessageController::class, 'sendBoth']);
 });
 

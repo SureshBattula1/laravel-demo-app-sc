@@ -503,27 +503,29 @@ return new class extends Migration
         }
 
         // PERMISSIONS
+        // NOTE: Permissions tables are now created in 2025_10_19_000000_create_permissions_system.php
+        // The following code has been commented out to avoid duplicate table creation
         
-        if (!Schema::hasTable('permissions')) {
-            Schema::create('permissions', function (Blueprint $table) {
-                $table->id();
-                $table->string('name')->unique();
-                $table->string('module');
-                $table->string('action');
-                $table->timestamps();
-            });
-        }
+        // if (!Schema::hasTable('permissions')) {
+        //     Schema::create('permissions', function (Blueprint $table) {
+        //         $table->id();
+        //         $table->string('name')->unique();
+        //         $table->string('module');
+        //         $table->string('action');
+        //         $table->timestamps();
+        //     });
+        // }
 
-        if (!Schema::hasTable('role_permissions')) {
-            Schema::create('role_permissions', function (Blueprint $table) {
-                $table->id();
-                $table->string('role');
-                $table->foreignId('permission_id')->constrained('permissions')->onDelete('cascade');
-                $table->timestamps();
-                
-                $table->unique(['role', 'permission_id']);
-            });
-        }
+        // if (!Schema::hasTable('role_permissions')) {
+        //     Schema::create('role_permissions', function (Blueprint $table) {
+        //         $table->id();
+        //         $table->string('role');
+        //         $table->foreignId('permission_id')->constrained('permissions')->onDelete('cascade');
+        //         $table->timestamps();
+        //         
+        //         $table->unique(['role', 'permission_id']);
+        //     });
+        // }
 
         // FEEDBACK & COMPLAINTS
         
@@ -580,8 +582,8 @@ return new class extends Migration
         Schema::dropIfExists('system_settings');
         Schema::dropIfExists('feedback');
         Schema::dropIfExists('complaints');
-        Schema::dropIfExists('role_permissions');
-        Schema::dropIfExists('permissions');
+        // Schema::dropIfExists('role_permissions'); // Now handled in create_permissions_system migration
+        // Schema::dropIfExists('permissions'); // Now handled in create_permissions_system migration
         Schema::dropIfExists('inventory_items');
         Schema::dropIfExists('inventory_categories');
         Schema::dropIfExists('generated_certificates');

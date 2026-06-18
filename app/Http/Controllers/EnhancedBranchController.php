@@ -7,11 +7,13 @@ use App\Models\BranchSetting;
 use App\Models\BranchTransfer;
 use App\Models\BranchAnalytic;
 use App\Models\User;
+use App\Models\Role;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
 use Carbon\Carbon;
 
 class EnhancedBranchController extends Controller
@@ -116,6 +118,7 @@ class EnhancedBranchController extends Controller
                 'code' => 'required|string|max:50|unique:branches',
                 'branch_type' => 'required|in:HeadOffice,RegionalOffice,School,Campus,SubBranch',
                 'parent_branch_id' => 'nullable|exists:branches,id',
+                'school_id' => 'nullable|exists:schools,id',
                 'address' => 'required|string|max:500',
                 'city' => 'required|string|max:100',
                 'state' => 'required|string|max:100',
@@ -157,8 +160,20 @@ class EnhancedBranchController extends Controller
                 'has_canteen' => 'boolean',
                 'has_sports' => 'boolean',
                 'status' => 'nullable|in:Active,Inactive,UnderConstruction,Maintenance,Closed',
-                'is_active' => 'boolean'
+                'is_active' => 'boolean',
+                'branch_admin_password' => 'nullable|string|min:8'
             ]);
+
+            if ($request->filled('branch_admin_password')) {
+                $validator->after(function ($v) use ($request) {
+                    if (empty($request->principal_name) || empty($request->principal_email)) {
+                        $v->errors()->add('branch_admin_password', 'Principal name and email are required when setting branch admin password.');
+                    }
+                    if ($request->filled('principal_email') && User::where('email', $request->principal_email)->exists()) {
+                        $v->errors()->add('principal_email', 'A user with this email already exists.');
+                    }
+                });
+            }
 
             if ($validator->fails()) {
                 return response()->json([
@@ -169,10 +184,20 @@ class EnhancedBranchController extends Controller
 
             DB::beginTransaction();
 
-            $branchData = $request->except(['logo']);
+            $branchAdminPassword = $request->branch_admin_password ?? null;
+            $branchData = $request->except(['logo', 'branch_admin_password']);
             $branchData['code'] = strtoupper($branchData['code']);
             $branchData['status'] = $branchData['status'] ?? 'Active';
             $branchData['current_enrollment'] = 0;
+
+            // Ensure school_id is set: from request, or from parent branch, or from current user's school
+            if (empty($branchData['school_id']) && !empty($branchData['parent_branch_id'])) {
+                $parent = \App\Models\Branch::find($branchData['parent_branch_id']);
+                $branchData['school_id'] = $parent ? $parent->school_id : null;
+            }
+            if (empty($branchData['school_id'])) {
+                $branchData['school_id'] = $this->getCurrentSchoolId($request);
+            }
 
             // Handle logo upload if present
             if ($request->hasFile('logo')) {
@@ -182,6 +207,36 @@ class EnhancedBranchController extends Controller
 
             $branch = Branch::create($branchData);
 
+            $adminUser = null;
+            if ($branchAdminPassword && $branch->principal_name && $branch->principal_email) {
+                $parts = preg_split('/\s+/', trim($branch->principal_name), 2);
+                $firstName = $parts[0] ?? $branch->principal_name;
+                $lastName = $parts[1] ?? '';
+                $adminUser = User::create([
+                    'first_name' => $firstName,
+                    'last_name' => $lastName,
+                    'email' => $branch->principal_email,
+                    'password' => Hash::make($branchAdminPassword),
+                    'role' => 'BranchAdmin',
+                    'user_type' => 'SchoolUser',
+                    'branch_id' => $branch->id,
+                    'is_active' => true,
+                ]);
+                $role = Role::where('slug', 'branch-admin')->first();
+                if ($role) {
+                    $adminUser->roles()->attach($role->id, [
+                        'is_primary' => true,
+                        'branch_id' => $branch->id,
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ]);
+                }
+                Log::info('Branch admin created with branch', [
+                    'branch_id' => $branch->id,
+                    'admin_user_id' => $adminUser->id,
+                ]);
+            }
+
             DB::commit();
 
             Log::info('Branch created', [
@@ -189,11 +244,21 @@ class EnhancedBranchController extends Controller
                 'user_id' => Auth::id()
             ]);
 
-            return response()->json([
+            $response = [
                 'success' => true,
                 'message' => 'Branch created successfully',
-                'data' => $branch->load('parentBranch')
-            ], 201);
+                'data' => $branch->load('parentBranch'),
+            ];
+            if ($adminUser) {
+                $response['branch_admin'] = [
+                    'id' => $adminUser->id,
+                    'name' => trim($adminUser->first_name . ' ' . $adminUser->last_name),
+                    'email' => $adminUser->email,
+                    'role' => $adminUser->role,
+                ];
+            }
+
+            return response()->json($response, 201);
 
         } catch (\Exception $e) {
             DB::rollBack();

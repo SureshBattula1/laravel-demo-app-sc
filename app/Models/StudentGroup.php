@@ -11,10 +11,12 @@ class StudentGroup extends Model
 
     protected $fillable = [
         'branch_id',
+        'school_id',
         'name',
         'code',
         'type',
         'academic_year',
+        'academic_year_id',
         'description',
         'is_active'
     ];
@@ -30,6 +32,11 @@ class StudentGroup extends Model
     public function branch()
     {
         return $this->belongsTo(Branch::class);
+    }
+
+    public function academicYear()
+    {
+        return $this->belongsTo(\App\Models\AcademicYear::class, 'academic_year_id');
     }
 
     public function members()

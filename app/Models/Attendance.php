@@ -14,6 +14,7 @@ class Attendance extends Model
     protected $fillable = [
         'id',
         'branch_id',
+        'school_id',
         'user_id',
         'user_type',
         'attendance_date',
@@ -57,6 +58,11 @@ class Attendance extends Model
         return $this->belongsTo(Branch::class);
     }
 
+    public function school()
+    {
+        return $this->belongsTo(School::class);
+    }
+
     public function user()
     {
         return $this->belongsTo(User::class);
@@ -75,5 +81,11 @@ class Attendance extends Model
     public function updater()
     {
         return $this->belongsTo(User::class, 'updated_by');
+    }
+
+    // Scopes
+    public function scopeForSchool($query, int $schoolId)
+    {
+        return $query->where('school_id', $schoolId);
     }
 }

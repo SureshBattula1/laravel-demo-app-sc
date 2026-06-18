@@ -28,6 +28,11 @@ class BranchAccessMiddleware
             return $next($request);
         }
 
+        // Company admins and support staff have access through company portal
+        if (in_array($user->user_type, ['CompanyAdmin', 'SupportStaff'])) {
+            return $next($request);
+        }
+
         // Get branch ID from request (query param, route param, or body)
         $requestedBranchId = $request->route('branch_id') 
             ?? $request->input('branch_id') 

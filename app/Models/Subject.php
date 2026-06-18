@@ -12,7 +12,7 @@ class Subject extends Model
 
     protected $fillable = [
         'name', 'code', 'description', 'department_id', 'teacher_id',
-        'grade_level', 'credits', 'type', 'branch_id', 'is_active'
+        'grade_level', 'credits', 'type', 'branch_id', 'school_id', 'is_active'
     ];
 
     protected function casts(): array
@@ -37,8 +37,19 @@ class Subject extends Model
         return $this->belongsTo(Branch::class);
     }
 
+    public function school()
+    {
+        return $this->belongsTo(School::class);
+    }
+
     public function exams()
     {
         return $this->hasMany(Exam::class);
+    }
+
+    // Scopes
+    public function scopeForSchool($query, int $schoolId)
+    {
+        return $query->where('school_id', $schoolId);
     }
 }

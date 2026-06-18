@@ -12,11 +12,14 @@ class Exam extends Model
     use HasFactory, SoftDeletes;
 
     protected $fillable = [
-        'id',
+        // 'id', // Not fillable - auto-increment
+        'exam_term_id',
         'branch_id',
+        'school_id',
         'name',
         'exam_type',
         'academic_year',
+        'academic_year_id',
         'start_date',
         'end_date',
         'total_marks',
@@ -28,30 +31,47 @@ class Exam extends Model
     ];
 
     protected $casts = [
-        'start_date' => 'datetime',
-        'end_date' => 'datetime',
+        'start_date' => 'date',
+        'end_date' => 'date',
         'is_active' => 'boolean',
         'total_marks' => 'decimal:2',
         'passing_marks' => 'decimal:2'
     ];
 
-    protected $keyType = 'string';
-    public $incrementing = false;
+    // Note: Currently using integer IDs instead of UUIDs
+    protected $keyType = 'int';
+    public $incrementing = true;
 
-    protected static function boot()
-    {
-        parent::boot();
-        static::creating(function ($model) {
-            if (empty($model->id)) {
-                $model->id = (string) Str::uuid();
-            }
-        });
-    }
+    // Removed UUID boot method since table uses integer IDs
+    // protected static function boot()
+    // {
+    //     parent::boot();
+    //     static::creating(function ($model) {
+    //         if (empty($model->id)) {
+    //             $model->id = (string) Str::uuid();
+    //         }
+    //     });
+    // }
 
     // Relationships
+    public function examTerm()
+    {
+        return $this->belongsTo(ExamTerm::class, 'exam_term_id');
+    }
+
     public function branch()
     {
         return $this->belongsTo(Branch::class);
+    }
+
+    public function school()
+    {
+        return $this->belongsTo(School::class);
+    }
+
+    public function schedules()
+    {
+        return $this->hasMany(ExamSchedule::class);
     }
 
     public function results()
@@ -67,5 +87,11 @@ class Exam extends Model
     public function updater()
     {
         return $this->belongsTo(User::class, 'updated_by');
+    }
+
+    // Scopes
+    public function scopeForSchool($query, int $schoolId)
+    {
+        return $query->where('school_id', $schoolId);
     }
 }

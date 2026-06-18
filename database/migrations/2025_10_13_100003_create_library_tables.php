@@ -7,12 +7,14 @@ use Illuminate\Support\Facades\Schema;
 return new class extends Migration
 {
     /**
-     * Run the migrations.
+     * Run the migrations - Library management tables
      */
     public function up(): void
     {
+        // BOOKS TABLE
         Schema::create('books', function (Blueprint $table) {
             $table->id();
+            $table->foreignId('branch_id')->constrained('branches')->onDelete('cascade');
             $table->string('title');
             $table->string('author');
             $table->string('isbn')->unique();
@@ -27,15 +29,20 @@ return new class extends Migration
             $table->string('location')->nullable();
             $table->text('description')->nullable();
             $table->string('cover_image')->nullable();
-            $table->foreignId('branch_id')->constrained('branches')->onDelete('cascade');
             $table->boolean('is_active')->default(true);
             $table->timestamps();
             $table->softDeletes();
+            
+            $table->index(['branch_id', 'is_active']);
+            $table->index('category');
+            $table->index('isbn');
         });
 
+        // BOOK ISSUES TABLE
         Schema::create('book_issues', function (Blueprint $table) {
             $table->id();
             $table->foreignId('book_id')->constrained('books')->onDelete('cascade');
+            $table->foreignId('branch_id')->constrained('branches')->onDelete('cascade');
             $table->foreignId('student_id')->nullable()->constrained('users')->onDelete('cascade');
             $table->foreignId('teacher_id')->nullable()->constrained('users')->onDelete('cascade');
             $table->enum('borrower_type', ['Student', 'Teacher']);
@@ -45,8 +52,12 @@ return new class extends Migration
             $table->enum('status', ['Issued', 'Returned', 'Overdue', 'Lost'])->default('Issued');
             $table->decimal('fine_amount', 8, 2)->default(0);
             $table->text('remarks')->nullable();
-            $table->foreignId('branch_id')->constrained('branches')->onDelete('cascade');
             $table->timestamps();
+            
+            $table->index(['book_id', 'status']);
+            $table->index(['student_id', 'status']);
+            $table->index(['teacher_id', 'status']);
+            $table->index(['due_date', 'status']);
         });
     }
 
@@ -59,3 +70,4 @@ return new class extends Migration
         Schema::dropIfExists('books');
     }
 };
+

@@ -12,6 +12,7 @@ class Transaction extends Model
 
     protected $fillable = [
         'branch_id',
+        'school_id',
         'category_id',
         'transaction_number',
         'transaction_date',
@@ -48,6 +49,11 @@ class Transaction extends Model
     public function branch()
     {
         return $this->belongsTo(Branch::class);
+    }
+
+    public function school()
+    {
+        return $this->belongsTo(School::class);
     }
 
     public function category()
@@ -101,6 +107,11 @@ class Transaction extends Model
     public function scopeFinancialYear($query, $year)
     {
         return $query->where('financial_year', $year);
+    }
+
+    public function scopeForSchool($query, int $schoolId)
+    {
+        return $query->where('school_id', $schoolId);
     }
 }
 

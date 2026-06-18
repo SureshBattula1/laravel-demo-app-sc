@@ -1,0 +1,10 @@
+.git
+.gitignore
+vendor
+node_modules
+.env
+storage/logs/*.log
+database/database.sqlite
+tests
+*.md
+composer.phar

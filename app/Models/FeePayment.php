@@ -15,6 +15,8 @@ class FeePayment extends Model
         'id',
         'fee_structure_id',
         'student_id',
+        'branch_id',
+        'school_id',
         'amount_paid',
         'payment_date',
         'payment_method',
@@ -24,6 +26,8 @@ class FeePayment extends Model
         'late_fee',
         'total_amount',
         'payment_status',
+        'academic_year',
+        'academic_year_id',
         'remarks',
         'created_by',
         'updated_by'

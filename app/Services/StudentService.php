@@ -89,6 +89,17 @@ class StudentService
                 'branch_id' => $data['branch_id'],
                 'is_active' => true
             ]);
+            
+            // Assign Student role via roles relationship
+            $studentRole = \App\Models\Role::where('slug', 'student')->first();
+            if ($studentRole) {
+                $user->roles()->attach($studentRole->id, [
+                    'is_primary' => true,
+                    'branch_id' => $data['branch_id'],
+                    'created_at' => now(),
+                    'updated_at' => now()
+                ]);
+            }
 
             // Create student record
             $studentData = array_merge($data, [
