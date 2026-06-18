@@ -137,12 +137,17 @@ class CompanyWithSchoolSeeder extends Seeder
         ];
 
         $superAdminRole = Role::where('slug', 'super-admin')->first();
+        $branchAdminRole = Role::where('slug', 'branch-admin')->first();
+
         if (! $superAdminRole) {
             $this->command->warn('  ! Role "super-admin" not found - run the permissions seeder first. Users will still be created.');
         }
+        if (! $branchAdminRole) {
+            $this->command->warn('  ! Role "branch-admin" not found - run the permissions seeder first.');
+        }
 
         foreach ($companies as $data) {
-            DB::transaction(function () use ($data, $superAdminRole) {
+            DB::transaction(function () use ($data, $superAdminRole, $branchAdminRole) {
                 // 1) Company
                 $company = Company::updateOrCreate(
                     ['code' => $data['code']],
@@ -201,7 +206,7 @@ class CompanyWithSchoolSeeder extends Seeder
                 $school->update(['main_branch_id' => $branch->id]);
                 app(BranchGradeService::class)->ensureDefaults((int) $branch->id);
 
-                // 6) School admin user (SuperAdmin role, SchoolUser type, tied to the branch)
+                // 6) School admin user (BranchAdmin role, SchoolUser type, tied to specific branch)
                 $a = $data['admin'];
                 $adminUser = User::updateOrCreate(
                     ['email' => $a['email']],
@@ -210,7 +215,7 @@ class CompanyWithSchoolSeeder extends Seeder
                         'last_name'  => $a['last_name'],
                         'password'   => Hash::make('Admin@123'),
                         'phone'      => $a['phone'],
-                        'role'       => 'SuperAdmin',
+                        'role'       => 'BranchAdmin',
                         'user_type'  => 'SchoolUser',
                         'branch_id'  => $branch->id,
                         'company_id' => $company->id,
@@ -218,10 +223,10 @@ class CompanyWithSchoolSeeder extends Seeder
                     ],
                 );
 
-                // 7) Assign the super-admin role via user_roles (idempotent)
-                if ($superAdminRole) {
+                // 7) Assign the branch-admin role via user_roles (scoped to their branch)
+                if ($branchAdminRole) {
                     $adminUser->roles()->syncWithoutDetaching([
-                        $superAdminRole->id => [
+                        $branchAdminRole->id => [
                             'is_primary' => true,
                             'branch_id'  => $branch->id,
                         ],

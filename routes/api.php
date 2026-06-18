@@ -395,6 +395,12 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
         Route::get('upcoming-exams', [DashboardController::class, 'getUpcomingExams']);
         Route::get('student-results', [DashboardController::class, 'getStudentResults']);
         Route::get('children-performance/{parentId}', [DashboardController::class, 'getChildrenPerformance']);
+        
+        // Role-based overview endpoints
+        Route::get('overview/superadmin', [DashboardController::class, 'getSuperAdminOverview']);
+        Route::get('overview/admin/{branchId}', [DashboardController::class, 'getAdminOverview']);
+        Route::get('overview/teacher', [DashboardController::class, 'getTeacherOverview']);
+        Route::get('overview/student', [DashboardController::class, 'getStudentOverview']);
     });
     
     // Accounts Module Routes - Income & Expense Tracking
