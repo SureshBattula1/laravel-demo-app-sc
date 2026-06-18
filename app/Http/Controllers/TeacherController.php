@@ -45,13 +45,13 @@ class TeacherController extends Controller
                 'nationality',
                 'qualification',
                 'experience_years',
-                'aadhar_number',
-                'pan_number',
+                // NOTE: aadhar_number, pan_number and basic_salary are intentionally NOT
+                // selected for the list — they are sensitive PII/financial fields and belong
+                // only on the detail/View screen, not in a list payload.
                 'city',
                 'state',
                 'emergency_contact_name',
                 'emergency_contact_phone',
-                'basic_salary',
                 'created_at',
                 'updated_at',
                 'deleted_at',
@@ -264,7 +264,8 @@ class TeacherController extends Controller
                 'gender' => 'required|in:Male,Female,Other',
                 'date_of_birth' => 'required|date|before:today',
                 'place_of_birth' => 'nullable|string|max:255',
-                'pan_number' => 'required|string|max:20|regex:/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/',
+                // PAN is optional on create; format is only enforced when provided.
+                'pan_number' => 'nullable|string|max:20|regex:/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/',
                 'aadhaar_number' => 'nullable|string|size:12|regex:/^[0-9]{12}$/',
                 'passport_number' => 'nullable|string|max:50',
                 'passport_expiry' => 'nullable|date|after:today',
