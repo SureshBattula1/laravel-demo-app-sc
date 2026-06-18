@@ -498,6 +498,7 @@ class DatabaseSeeder extends Seeder
         $teacher = Role::where('slug', 'teacher')->first();
         $teacherPerms = Permission::whereIn('slug', [
             'dashboard.view',
+            'teachers.view', 'teachers.edit', // own record only (scoped in TeacherController)
             'students.view',
             'student_attendance.view', 'student_attendance.create', 'student_attendance.mark',
             'exams.view', 'exams.results',
@@ -545,15 +546,12 @@ class DatabaseSeeder extends Seeder
         $accountant->permissions()->sync($accountantPerms);
         $this->command->info("   ✓ Accountant: " . count($accountantPerms) . " permissions");
 
-        // Student - Limited view access
+        // Student - Limited access: dashboard, read-only holidays, and own profile (view + edit)
         $student = Role::where('slug', 'student')->first();
         $studentPerms = Permission::whereIn('slug', [
             'dashboard.view',
-            'student_attendance.view',
-            'exams.view',
-            'fees.view',
-            'holidays.view',
-            'leaves.view', 'leaves.create', // Students can view and create their own leaves
+            'holidays.view',                 // read-only (no create/edit/delete granted)
+            'students.view', 'students.edit', // own record only (scoped in StudentController)
         ])->pluck('id')->toArray();
         $student->permissions()->sync($studentPerms);
         $this->command->info("   ✓ Student: " . count($studentPerms) . " permissions");

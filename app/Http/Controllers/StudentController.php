@@ -124,8 +124,14 @@ class StudentController extends Controller
 
             // 🔥 APPLY BRANCH FILTERING - This restricts data based on user's branch access
             $user = $request->user();
+
+            // 🔒 A Student may only ever see their OWN record (own-record isolation)
+            if ($user && $user->role === 'Student') {
+                $query->where('students.user_id', $user->id);
+            }
+
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
-            
+
             if ($accessibleBranchIds !== 'all') {
                 if (!empty($accessibleBranchIds)) {
                     $query->whereIn('students.branch_id', $accessibleBranchIds);
@@ -308,7 +314,13 @@ class StudentController extends Controller
 
             $query
                 ->where('students.id', $id);
-            
+
+            // 🔒 A Student may only ever view their OWN record (own-record isolation)
+            $user = $request->user();
+            if ($user && $user->role === 'Student') {
+                $query->where('students.user_id', $user->id);
+            }
+
             // 🔥 APPLY BRANCH FILTERING - Prevent access to other branches
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
             if ($accessibleBranchIds !== 'all') {
@@ -632,6 +644,15 @@ class StudentController extends Controller
                     'success' => false,
                     'message' => 'Student not found'
                 ], 404);
+            }
+
+            // 🔒 A Student may only ever update their OWN record (own-record isolation)
+            $user = $request->user();
+            if ($user && $user->role === 'Student' && (int) $student->user_id !== (int) $user->id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Access denied'
+                ], 403);
             }
 
             $validator = Validator::make($request->all(), [

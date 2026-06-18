@@ -131,7 +131,8 @@ class GradeController extends Controller
                 if ($user && $user->role === 'SuperAdmin' && !empty($user->company_id)) {
                     $query->where('schools.company_id', (int) $user->company_id);
                 } elseif ($accessibleBranchIds === 'all') {
-                    // SuperAdmin: show all branches within the current school by default.
+                    // SuperAdmin: scope to the current school's branches if a school context exists;
+                    // otherwise (global SuperAdmin with no school/company context) show grades across ALL branches.
                     $schoolId = $this->getCurrentSchoolId($request);
                     if ($schoolId) {
                         $branchIds = DB::table('branches')
@@ -144,9 +145,8 @@ class GradeController extends Controller
                         } else {
                             $query->whereRaw('1 = 0');
                         }
-                    } else {
-                        $query->whereRaw('1 = 0');
                     }
+                    // No school context for a global SuperAdmin: no branch restriction (show all grades).
                 } else {
                     // Other users: show all branches they can access.
                     if (!empty($accessibleBranchIds)) {

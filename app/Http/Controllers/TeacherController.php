@@ -71,6 +71,12 @@ class TeacherController extends Controller
             // 🔥 APPLY BRANCH FILTERING - Restrict to accessible branches
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
             $user = $request->user();
+
+            // 🔒 A Teacher may only ever see their OWN record (own-record isolation)
+            if ($user && $user->role === 'Teacher') {
+                $query->where('user_id', $user->id);
+            }
+
             if ($user && $user->role === 'SuperAdmin' && !empty($user->company_id) && !$request->filled('branch_id')) {
                 // SuperAdmin company context: filter by company via SQL subquery (fast, avoids big whereIn lists).
                 $query->whereIn('branch_id', function ($q) use ($user) {
@@ -197,7 +203,16 @@ class TeacherController extends Controller
             }
 
             $teacher = Teacher::with(['user', 'branch', 'department'])->findOrFail($id);
-            
+
+            // 🔒 A Teacher may only ever view their OWN record (own-record isolation)
+            $authUser = auth()->user();
+            if ($authUser && $authUser->role === 'Teacher' && (int) $teacher->user_id !== (int) $authUser->id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Teacher not found'
+                ], 404);
+            }
+
             return response()->json([
                 'success' => true,
                 'data' => $teacher
@@ -577,6 +592,15 @@ class TeacherController extends Controller
             }
 
             $teacher = Teacher::with(['user', 'branch', 'department'])->findOrFail($id);
+
+            // 🔒 A Teacher may only ever update their OWN record (own-record isolation)
+            $authUser = $request->user();
+            if ($authUser && $authUser->role === 'Teacher' && (int) $teacher->user_id !== (int) $authUser->id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Access denied'
+                ], 403);
+            }
 
             $validator = Validator::make($request->all(), [
                 // Basic Information
