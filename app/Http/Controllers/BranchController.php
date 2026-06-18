@@ -37,9 +37,11 @@ class BranchController extends Controller
                 'current_enrollment', 'established_date', 'created_at', 'updated_at',
                 'phone', 'email', 'principal_name', 'principal_contact', 'principal_email', 'logo'
             ])
+            // NOTE: childBranches is intentionally NOT eager-loaded for the list — the UI
+            // never reads it, and `has_children` is derived from the single childCounts
+            // query below. Eager-loading it just adds a query + payload that nobody uses.
             ->with([
-                'parentBranch:id,name,code',
-                'childBranches:id,name,code,parent_branch_id,is_active'
+                'parentBranch:id,name,code'
             ]);
 
             // Filter by active status
@@ -323,21 +325,22 @@ class BranchController extends Controller
                 });
             }
 
-            // Clean up logo field before validation passes data
-            $validatedData = $validator->validated();
-            
-            // Handle logo field properly
-            if (isset($validatedData['logo'])) {
-                if ($validatedData['logo'] === '' || $validatedData['logo'] === 'null') {
-                    $validatedData['logo'] = null;
-                }
-            }
-
+            // Return structured 422 BEFORE calling validated() — validated() throws on a
+            // failed validator, which would otherwise surface as a generic 500.
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
                     'errors' => $validator->errors()
                 ], 422);
+            }
+
+            $validatedData = $validator->validated();
+
+            // Handle logo field properly
+            if (isset($validatedData['logo'])) {
+                if ($validatedData['logo'] === '' || $validatedData['logo'] === 'null') {
+                    $validatedData['logo'] = null;
+                }
             }
 
             DB::beginTransaction();
@@ -532,16 +535,16 @@ class BranchController extends Controller
                 'fax' => 'nullable|string|max:20',
                 'emergency_contact' => 'nullable|string|max:20',
                 
-                // Principal Information
-                'principal_name' => 'required|string|max:255',
-                'principal_contact' => 'required|string|max:20',
-                'principal_email' => 'required|email|max:255',
-                
+                // Principal Information (partial update: only validate when present)
+                'principal_name' => 'sometimes|string|max:255',
+                'principal_contact' => 'sometimes|string|max:20',
+                'principal_email' => 'sometimes|email|max:255',
+
                 // Dates
                 'established_date' => 'nullable|date|before_or_equal:today',
                 'opening_date' => 'nullable|date',
                 'closing_date' => 'nullable|date|after:opening_date',
-                
+
                 // Academic Information
                 'board' => 'nullable|string|max:100',
                 'affiliation_number' => 'nullable|string|max:100',
@@ -550,7 +553,7 @@ class BranchController extends Controller
                 'academic_year_start' => 'nullable|string|max:5',
                 'academic_year_end' => 'nullable|string|max:5',
                 'current_academic_year' => 'nullable|string|max:20',
-                
+
                 // Capacity
                 'total_capacity' => 'nullable|integer|min:0',
                 'current_enrollment' => 'nullable|integer|min:0',
