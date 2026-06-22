@@ -55,15 +55,29 @@ class DecodeHashids
         $patterns = (array) config('hashids.route_param_patterns', []);
 
         foreach ($route->parameters() as $name => $value) {
-            if (! $this->keyMatches($name, $patterns)) {
+            // Only consider non-numeric string tokens; leave raw integers alone.
+            if (! is_string($value) || $value === '' || ctype_digit($value)) {
                 continue;
             }
-            // Only decode non-numeric tokens; leave raw integers alone.
-            if (is_string($value) && ! ctype_digit($value)) {
-                $decoded = $this->hasher->decode($value);
-                if ($decoded !== null) {
-                    $route->setParameter($name, $decoded);
-                }
+
+            $decoded = $this->hasher->decode($value);
+            if ($decoded === null) {
+                continue;
+            }
+
+            if ($this->keyMatches($name, $patterns)) {
+                // id-like param name (id / *Id / *_id): decode any valid token.
+                $route->setParameter($name, $decoded);
+                continue;
+            }
+
+            // Other param names — e.g. apiResource singular params like {attendance},
+            // {department}, {exam}, {leave}. These don't match the id-name patterns, so
+            // only decode when the value round-trips as a genuine hashid token. This
+            // leaves real string params (grade "LKG", section "A") untouched, since
+            // they never round-trip to themselves.
+            if ((string) $this->hasher->encode($decoded) === $value) {
+                $route->setParameter($name, $decoded);
             }
         }
     }

@@ -333,25 +333,78 @@ class ClassController extends Controller
     }
 
     /**
+     * Resolve the requested branch_id to an integer.
+     *
+     * The DecodeHashids middleware normally rewrites the hashid token to an int
+     * before we get here, but a stale token (minted under a different salt) can
+     * arrive undecoded. Casting such a string with (int) silently yields 0 and
+     * makes every branch-scoped query return nothing. Decode defensively instead.
+     */
+    private function resolveBranchId(Request $request): ?int
+    {
+        $raw = $request->query('branch_id') ?? $request->input('branch_id');
+
+        if ($raw === null || $raw === '') {
+            return null;
+        }
+
+        if (is_string($raw) && ! ctype_digit($raw)) {
+            $decoded = app(\App\Support\IdHasher::class)->decode($raw);
+            return $decoded ?: null;
+        }
+
+        return (int) $raw ?: null;
+    }
+
+    /**
      * Get available grades with statistics
      * OPTIMIZED: Reduced from O(N) queries to O(1) using aggregation
      */
     public function getGrades(Request $request)
     {
         try {
-            $branchId = $request->query('branch_id');
+            $branchId = $this->resolveBranchId($request);
             $schoolId = $this->getCurrentSchoolId($request);
-            
-            // Get grades from the grades table
-            $gradesFromDb = DB::table('grades')
-                ->when($branchId, function ($q) use ($branchId) {
-                    $q->where('branch_id', (int) $branchId);
-                }, function ($q) use ($schoolId) {
-                    $q->where('school_id', $schoolId)->whereNull('branch_id');
-                })
-                ->where('is_active', true)
-                ->orderBy('value', 'asc')
-                ->get();
+
+            // Grades are tiered: branch-specific -> school-level -> global template.
+            // Resolve the selected branch's school so we can fall back to the
+            // school's grades when the branch has no branch-specific rows yet
+            // (e.g. a newly created branch, or one created before the backfill).
+            $branchSchoolId = $schoolId;
+            if ($branchId) {
+                $branchSchoolId = DB::table('branches')->where('id', $branchId)->value('school_id') ?: $schoolId;
+            }
+
+            $gradesFromDb = collect();
+
+            // 1. Branch-specific grades (when a branch is selected).
+            if ($branchId) {
+                $gradesFromDb = DB::table('grades')
+                    ->where('branch_id', $branchId)
+                    ->where('is_active', true)
+                    ->orderBy('value', 'asc')
+                    ->get();
+            }
+
+            // 2. Fall back to the school's grades (branch had none, or no branch given).
+            if ($gradesFromDb->isEmpty() && $branchSchoolId) {
+                $gradesFromDb = DB::table('grades')
+                    ->where('school_id', $branchSchoolId)
+                    ->whereNull('branch_id')
+                    ->where('is_active', true)
+                    ->orderBy('value', 'asc')
+                    ->get();
+            }
+
+            // 3. Final fall back to global template grades (no school, no branch).
+            if ($gradesFromDb->isEmpty()) {
+                $gradesFromDb = DB::table('grades')
+                    ->whereNull('school_id')
+                    ->whereNull('branch_id')
+                    ->where('is_active', true)
+                    ->orderBy('value', 'asc')
+                    ->get();
+            }
             
             // OPTIMIZATION: Get all student counts in ONE query instead of N queries
             $studentCountsQuery = DB::table('students')
@@ -529,7 +582,7 @@ class ClassController extends Controller
     {
         try {
             $grade = $request->query('grade');
-            $branchId = $request->query('branch_id');
+            $branchId = $this->resolveBranchId($request);
 
             // If grade and/or branch specified, return sections from existing data
             if ($grade || $branchId) {

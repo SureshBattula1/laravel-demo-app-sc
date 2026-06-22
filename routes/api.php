@@ -352,7 +352,11 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
         Route::get('class/{grade}/{section}', [AttendanceController::class, 'getClassAttendance']);
         Route::get('report/{studentId}', [AttendanceController::class, 'generateReport']);
     });
-    Route::apiResource('attendance', AttendanceController::class);
+    // Param renamed to {id} so the DecodeHashids middleware (which only decodes
+    // id/*Id/*_id route params) converts the hashid token back to an integer for
+    // show/update/destroy. Without this the apiResource param {attendance} stays
+    // a raw hashid and the controller's where('id', ...) misses → 404.
+    Route::apiResource('attendance', AttendanceController::class)->parameters(['attendance' => 'id']);
     
     // Leave Routes (specific routes MUST come before apiResource)
     Route::get('leaves/student/{studentId}', [LeaveController::class, 'getStudentLeaves']);

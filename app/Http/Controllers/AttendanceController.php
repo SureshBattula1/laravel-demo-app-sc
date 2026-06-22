@@ -1507,6 +1507,9 @@ class AttendanceController extends Controller
                 DB::raw('COUNT(*) as total'),
                 DB::raw('SUM(CASE WHEN sa.status = "Present" THEN 1 ELSE 0 END) as present'),
                 DB::raw('SUM(CASE WHEN sa.status = "Absent" THEN 1 ELSE 0 END) as absent'),
+                DB::raw('SUM(CASE WHEN sa.status = "Late" THEN 1 ELSE 0 END) as late'),
+                DB::raw('SUM(CASE WHEN sa.status = "Sick Leave" THEN 1 ELSE 0 END) as sick_leave'),
+                DB::raw('SUM(CASE WHEN sa.status = "Leave" THEN 1 ELSE 0 END) as leave_count'),
                 DB::raw('COUNT(DISTINCT sa.student_id) as student_count')
             )
             ->whereNotNull('s.grade')
@@ -1517,13 +1520,16 @@ class AttendanceController extends Controller
                 $total = (int) $item->total;
                 $present = (int) $item->present;
                 $attendancePercentage = $total > 0 ? round(($present / $total) * 100, 2) : 0;
-                
+
                 return [
                     'grade' => $item->grade,
                     'grade_label' => $item->grade_label,
                     'total' => $total,
                     'present' => $present,
                     'absent' => (int) $item->absent,
+                    'late' => (int) $item->late,
+                    'sick_leave' => (int) $item->sick_leave,
+                    'leave' => (int) $item->leave_count,
                     'student_count' => (int) $item->student_count,
                     'attendance_percentage' => $attendancePercentage
                 ];
@@ -1538,6 +1544,9 @@ class AttendanceController extends Controller
                 DB::raw('COUNT(*) as total'),
                 DB::raw('SUM(CASE WHEN sa.status = "Present" THEN 1 ELSE 0 END) as present'),
                 DB::raw('SUM(CASE WHEN sa.status = "Absent" THEN 1 ELSE 0 END) as absent'),
+                DB::raw('SUM(CASE WHEN sa.status = "Late" THEN 1 ELSE 0 END) as late'),
+                DB::raw('SUM(CASE WHEN sa.status = "Sick Leave" THEN 1 ELSE 0 END) as sick_leave'),
+                DB::raw('SUM(CASE WHEN sa.status = "Leave" THEN 1 ELSE 0 END) as leave_count'),
                 DB::raw('COUNT(DISTINCT sa.student_id) as student_count')
             )
             ->whereNotNull('s.grade')
@@ -1550,7 +1559,7 @@ class AttendanceController extends Controller
                 $total = (int) $item->total;
                 $present = (int) $item->present;
                 $attendancePercentage = $total > 0 ? round(($present / $total) * 100, 2) : 0;
-                
+
                 return [
                     'grade' => $item->grade,
                     'grade_label' => $item->grade_label,
@@ -1558,6 +1567,9 @@ class AttendanceController extends Controller
                     'total' => $total,
                     'present' => $present,
                     'absent' => (int) $item->absent,
+                    'late' => (int) $item->late,
+                    'sick_leave' => (int) $item->sick_leave,
+                    'leave' => (int) $item->leave_count,
                     'student_count' => (int) $item->student_count,
                     'attendance_percentage' => $attendancePercentage
                 ];
@@ -1596,6 +1608,7 @@ class AttendanceController extends Controller
                     's.user_id as student_id',
                     'u.first_name',
                     'u.last_name',
+                    'u.phone',
                     's.admission_number',
                     's.roll_number'
                 )
@@ -1692,6 +1705,7 @@ class AttendanceController extends Controller
                     'student_id' => $sid,
                     'first_name' => $student->first_name,
                     'last_name' => $student->last_name,
+                    'phone' => $student->phone,
                     'admission_number' => $student->admission_number,
                     'roll_number' => $student->roll_number,
                     'total_records' => $totalRecords,
@@ -1932,6 +1946,7 @@ class AttendanceController extends Controller
                     'u.first_name',
                     'u.last_name',
                     'u.email',
+                    'u.phone',
                     't.employee_id',
                     't.designation',
                     DB::raw('COALESCE(d.name, "No Department") as department_name')
@@ -2005,6 +2020,7 @@ class AttendanceController extends Controller
                     'first_name' => $teacher->first_name,
                     'last_name' => $teacher->last_name,
                     'email' => $teacher->email,
+                    'phone' => $teacher->phone,
                     'employee_id' => $teacher->employee_id,
                     'designation' => $teacher->designation,
                     'department_name' => $teacher->department_name,
