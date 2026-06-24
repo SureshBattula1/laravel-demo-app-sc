@@ -21,19 +21,17 @@ class SectionSubjectController extends Controller
     public function getSectionSubjects(Request $request, $sectionId)
     {
         try {
-            // Prefer explicit inputs; otherwise use academic year context from middleware/header.
-            $academicYearId = $request->input('academic_year_id') ?? $request->attributes->get('academic_year_id');
-            $academicYearName = $request->input('academic_year') ?? null;
+            [$academicYearId, $academicYearName] = $this->resolveAcademicYear($request);
 
-            if (!$academicYearId && !$academicYearName) {
-                $academicYearId = AcademicYear::current()->value('id');
-                $academicYearName = $academicYearId
-                    ? AcademicYear::whereKey($academicYearId)->value('name')
-                    : (date('Y') . '-' . (date('Y') + 1));
-            } elseif ($academicYearId && !$academicYearName) {
-                $academicYearName = AcademicYear::whereKey($academicYearId)->value('name');
+            // Tenant guard: only read a section the user can access.
+            $sectionBranchId = Section::whereKey($sectionId)->value('branch_id');
+            if ($sectionBranchId === null || !$this->canAccessBranch($request, (int) $sectionBranchId)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Section not found'
+                ], 404);
             }
-            
+
             $section = Section::with([
                 'sectionSubjects' => function($query) use ($academicYearId, $academicYearName) {
                     if ($academicYearId) {
@@ -223,13 +221,23 @@ class SectionSubjectController extends Controller
                 ], 422);
             }
 
+            // Tenant guard: user must manage the branch, and the section must belong to it.
+            if (!$this->canManageBranch($request, (int) $request->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You do not have access to this branch'
+                ], 403);
+            }
+            if ((int) Section::whereKey($request->section_id)->value('branch_id') !== (int) $request->branch_id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Section does not belong to the selected branch'
+                ], 422);
+            }
+
             DB::beginTransaction();
 
-            $academicYearId = $request->input('academic_year_id');
-            $academicYearName = $request->input('academic_year');
-            if ($academicYearId) {
-                $academicYearName = AcademicYear::whereKey($academicYearId)->value('name') ?? $academicYearName;
-            }
+            [$academicYearId, $academicYearName] = $this->resolveAcademicYear($request);
 
             // Check if already assigned
             $exists = SectionSubject::where('section_id', $request->section_id)
@@ -304,15 +312,25 @@ class SectionSubjectController extends Controller
                 ], 422);
             }
 
-            DB::beginTransaction();
-
-            $academicYearId = $request->input('academic_year_id');
-            $academicYearName = $request->input('academic_year');
-            if ($academicYearId) {
-                $academicYearName = AcademicYear::whereKey($academicYearId)->value('name') ?? $academicYearName;
+            // Tenant guard: user must manage the branch, and the section must belong to it.
+            if (!$this->canManageBranch($request, (int) $request->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You do not have access to this branch'
+                ], 403);
+            }
+            if ((int) Section::whereKey($request->section_id)->value('branch_id') !== (int) $request->branch_id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Section does not belong to the selected branch'
+                ], 422);
             }
 
-            $assigned = [];
+            DB::beginTransaction();
+
+            [$academicYearId, $academicYearName] = $this->resolveAcademicYear($request);
+
+            $createdIds = [];
             $skipped = [];
 
             // OPTIMIZED: Get all existing assignments once
@@ -343,13 +361,18 @@ class SectionSubjectController extends Controller
                     'is_active' => true
                 ]);
 
-                $assigned[] = $assignment->load(['section', 'subject', 'teacher']);
-                
+                $createdIds[] = $assignment->id;
+
                 // Add to existing list to prevent duplicates
                 $existingSubjectIds[] = $subjectData['subject_id'];
             }
 
             DB::commit();
+
+            // Eager-load all created rows in ONE query (avoids N+1 in the loop above).
+            $assigned = SectionSubject::with(['section', 'subject', 'teacher'])
+                ->whereIn('id', $createdIds)
+                ->get();
 
             Log::info('Bulk subjects assigned', [
                 'section_id' => $request->section_id,
@@ -398,13 +421,18 @@ class SectionSubjectController extends Controller
                 ], 422);
             }
 
+            // Tenant guard: can the user read the source section?
+            $fromBranchId = Section::whereKey($request->from_section_id)->value('branch_id');
+            if ($fromBranchId === null || !$this->canAccessBranch($request, (int) $fromBranchId)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Source section not found'
+                ], 404);
+            }
+
             DB::beginTransaction();
 
-            $academicYearId = $request->input('academic_year_id');
-            $academicYearName = $request->input('academic_year');
-            if ($academicYearId) {
-                $academicYearName = AcademicYear::whereKey($academicYearId)->value('name') ?? $academicYearName;
-            }
+            [$academicYearId, $academicYearName] = $this->resolveAcademicYear($request);
 
             // Get source section's subjects
             $sourceSubjects = SectionSubject::where('section_id', $request->from_section_id)
@@ -414,6 +442,7 @@ class SectionSubjectController extends Controller
                 ->get();
 
             if ($sourceSubjects->isEmpty()) {
+                DB::rollBack();
                 return response()->json([
                     'success' => false,
                     'message' => 'Source section has no subjects assigned'
@@ -423,31 +452,55 @@ class SectionSubjectController extends Controller
             $copyTeachers = $request->copy_teachers ?? false;
             $totalCopied = 0;
 
-            foreach ($request->to_section_ids as $toSectionId) {
-                $targetSection = Section::find($toSectionId);
-                
-                foreach ($sourceSubjects as $sourceSubject) {
-                    // Check if already exists
-                    $exists = SectionSubject::where('section_id', $toSectionId)
-                        ->where('subject_id', $sourceSubject->subject_id)
-                        ->when($academicYearId, fn($q) => $q->where('academic_year_id', $academicYearId))
-                        ->when(!$academicYearId, fn($q) => $q->where('academic_year', $academicYearName))
-                        ->exists();
+            // Load all target sections at once and pre-fetch existing assignments to avoid
+            // an exists() query per (section x subject) pair.
+            $targetSections = Section::whereIn('id', $request->to_section_ids)->get()->keyBy('id');
 
-                    if (!$exists) {
-                        SectionSubject::create([
-                            'section_id' => $toSectionId,
-                            'subject_id' => $sourceSubject->subject_id,
-                            'teacher_id' => $copyTeachers ? $sourceSubject->teacher_id : null,
-                            'branch_id' => $targetSection->branch_id,
-                            'school_id' => $targetSection->school_id,
-                            'academic_year_id' => $academicYearId,
-                            'academic_year' => $academicYearName,
-                            'is_active' => true
-                        ]);
-                        $totalCopied++;
-                    }
+            $existingPairs = SectionSubject::whereIn('section_id', $request->to_section_ids)
+                ->when($academicYearId, fn($q) => $q->where('academic_year_id', $academicYearId))
+                ->when(!$academicYearId, fn($q) => $q->where('academic_year', $academicYearName))
+                ->get(['section_id', 'subject_id'])
+                ->map(fn($r) => $r->section_id . ':' . $r->subject_id)
+                ->flip();
+
+            $now = now();
+            $rows = [];
+
+            foreach ($request->to_section_ids as $toSectionId) {
+                $targetSection = $targetSections->get($toSectionId);
+                if (!$targetSection) {
+                    continue;
                 }
+                // Tenant guard per target section.
+                if (!$this->canManageBranch($request, (int) $targetSection->branch_id)) {
+                    continue;
+                }
+
+                foreach ($sourceSubjects as $sourceSubject) {
+                    $key = $toSectionId . ':' . $sourceSubject->subject_id;
+                    if ($existingPairs->has($key)) {
+                        continue;
+                    }
+
+                    $rows[] = [
+                        'section_id' => $toSectionId,
+                        'subject_id' => $sourceSubject->subject_id,
+                        'teacher_id' => $copyTeachers ? $sourceSubject->teacher_id : null,
+                        'branch_id' => $targetSection->branch_id,
+                        'school_id' => $targetSection->school_id,
+                        'academic_year_id' => $academicYearId,
+                        'academic_year' => $academicYearName,
+                        'is_active' => true,
+                        'created_at' => $now,
+                        'updated_at' => $now,
+                    ];
+                    $existingPairs->put($key, true); // guard against dup target sections in the request
+                    $totalCopied++;
+                }
+            }
+
+            if (!empty($rows)) {
+                SectionSubject::insert($rows);
             }
 
             DB::commit();
@@ -482,12 +535,22 @@ class SectionSubjectController extends Controller
     /**
      * Remove subject from section
      */
-    public function removeSubject($id)
+    public function removeSubject(Request $request, $id)
     {
         try {
             DB::beginTransaction();
 
             $assignment = SectionSubject::findOrFail($id);
+
+            // Tenant guard: only remove assignments in branches the user can manage.
+            if (!$this->canManageBranch($request, (int) $assignment->branch_id)) {
+                DB::rollBack();
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Assignment not found'
+                ], 404);
+            }
+
             $assignment->delete();
 
             DB::commit();
@@ -531,6 +594,16 @@ class SectionSubjectController extends Controller
             DB::beginTransaction();
 
             $assignment = SectionSubject::findOrFail($id);
+
+            // Tenant guard: only update assignments in branches the user can manage.
+            if (!$this->canManageBranch($request, (int) $assignment->branch_id)) {
+                DB::rollBack();
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Assignment not found'
+                ], 404);
+            }
+
             $assignment->update($request->only(['teacher_id', 'is_active']));
 
             DB::commit();
@@ -552,6 +625,38 @@ class SectionSubjectController extends Controller
                 'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
             ], 500);
         }
+    }
+
+    /**
+     * Resolve [academic_year_id, academic_year_name] from request inputs, falling back
+     * to the academic-year context injected by middleware, then to the current year.
+     *
+     * Crucially this always derives the id from the name (and vice-versa) so writes never
+     * persist a null academic_year_id — null rows are invisible to the default, context-scoped
+     * list endpoint, which made assignments silently "disappear" from the UI.
+     */
+    private function resolveAcademicYear(Request $request): array
+    {
+        $id = $request->input('academic_year_id') ?? $request->attributes->get('academic_year_id');
+        $name = $request->input('academic_year');
+
+        if ($id) {
+            $name = AcademicYear::whereKey($id)->value('name') ?? $name;
+        } elseif ($name) {
+            $id = AcademicYear::where('name', $name)->value('id');
+        }
+
+        if (!$id && !$name) {
+            $current = AcademicYear::current()->first();
+            if ($current) {
+                $id = $current->id;
+                $name = $current->name;
+            } else {
+                $name = date('Y') . '-' . (date('Y') + 1);
+            }
+        }
+
+        return [$id, $name];
     }
 }
 

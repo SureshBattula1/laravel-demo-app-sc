@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Validation\Rule;
 
 class SubjectController extends Controller
 {
@@ -159,7 +160,12 @@ class SubjectController extends Controller
         try {
             $validator = Validator::make($request->all(), [
                 'name' => 'required|string|max:255|regex:/^[a-zA-Z0-9\s\-&]+$/',
-                'code' => 'required|string|max:50|unique:subjects|regex:/^[a-zA-Z0-9\-_]+$/', // Allow both uppercase and lowercase
+                // Code is unique per branch (multi-tenant), not globally; ignore soft-deleted rows.
+                'code' => [
+                    'required', 'string', 'max:50', 'regex:/^[a-zA-Z0-9\-_]+$/',
+                    Rule::unique('subjects', 'code')
+                        ->where(fn ($q) => $q->where('branch_id', $request->branch_id)->whereNull('deleted_at')),
+                ],
                 'department_id' => 'required|exists:departments,id',
                 'grade_level' => 'required|string|exists:grades,value',
                 'type' => 'required|in:Core,Elective,Language,Lab,Activity',
@@ -174,6 +180,14 @@ class SubjectController extends Controller
                     'success' => false,
                     'errors' => $validator->errors()
                 ], 422);
+            }
+
+            // Tenant guard: user must be allowed to manage the target branch.
+            if (!$this->canManageBranch($request, (int) $request->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You do not have access to this branch'
+                ], 403);
             }
 
             DB::beginTransaction();
@@ -217,7 +231,7 @@ class SubjectController extends Controller
         }
     }
 
-    public function show($id)
+    public function show(Request $request, $id)
     {
         try {
             if (!is_numeric($id)) {
@@ -228,7 +242,15 @@ class SubjectController extends Controller
             }
 
             $subject = Subject::with(['department', 'teacher', 'branch', 'exams'])->findOrFail($id);
-            
+
+            // Tenant guard: don't leak subjects from branches the user can't access.
+            if (!$this->canAccessBranch($request, (int) $subject->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Subject not found'
+                ], 404);
+            }
+
             return response()->json([
                 'success' => true,
                 'data' => $subject
@@ -262,11 +284,26 @@ class SubjectController extends Controller
 
             $subject = Subject::findOrFail($id);
 
+            // Tenant guard: only manage subjects in branches the user can manage.
+            if (!$this->canManageBranch($request, (int) $subject->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Subject not found'
+                ], 404);
+            }
+
             $validator = Validator::make($request->all(), [
                 'name' => 'sometimes|string|max:255|regex:/^[a-zA-Z0-9\s\-&]+$/',
-                'code' => 'sometimes|string|max:50|unique:subjects,code,' . $id . '|regex:/^[a-zA-Z0-9\-_]+$/', // Allow both uppercase and lowercase
+                // Unique per branch (the subject's own branch), ignoring this row and soft-deleted rows.
+                'code' => [
+                    'sometimes', 'string', 'max:50', 'regex:/^[a-zA-Z0-9\-_]+$/',
+                    Rule::unique('subjects', 'code')
+                        ->ignore($subject->id)
+                        ->where(fn ($q) => $q->where('branch_id', $subject->branch_id)->whereNull('deleted_at')),
+                ],
                 'department_id' => 'sometimes|exists:departments,id',
-                'grade_level' => 'sometimes|string|in:1,2,3,4,5,6,7,8,9,10,11,12',
+                // Data-driven, consistent with store(); supports non-numeric grades (e.g. KG).
+                'grade_level' => 'sometimes|string|exists:grades,value',
                 'type' => 'sometimes|in:Core,Elective,Language,Lab,Activity',
                 'teacher_id' => 'nullable|exists:users,id',
                 'credits' => 'nullable|integer|min:0|max:10',
@@ -328,7 +365,7 @@ class SubjectController extends Controller
         }
     }
 
-    public function destroy($id)
+    public function destroy(Request $request, $id)
     {
         try {
             if (!is_numeric($id)) {
@@ -341,7 +378,16 @@ class SubjectController extends Controller
             DB::beginTransaction();
 
             $subject = Subject::findOrFail($id);
-            
+
+            // Tenant guard: only delete subjects in branches the user can manage.
+            if (!$this->canManageBranch($request, (int) $subject->branch_id)) {
+                DB::rollBack();
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Subject not found'
+                ], 404);
+            }
+
             // Check if subject has exams
             if ($subject->exams()->count() > 0) {
                 DB::rollBack();
@@ -374,6 +420,65 @@ class SubjectController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to delete subject',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * List active subjects for a grade level (tenant-scoped).
+     */
+    public function byGrade(Request $request, $grade)
+    {
+        return $this->scopedList($request, fn ($q) => $q->where('grade_level', strip_tags((string) $grade)));
+    }
+
+    /**
+     * List active subjects for a department (tenant-scoped).
+     */
+    public function byDepartment(Request $request, $departmentId)
+    {
+        return $this->scopedList($request, fn ($q) => $q->where('department_id', $departmentId));
+    }
+
+    /**
+     * Shared, tenant-scoped subject lookup used by byGrade/byDepartment.
+     */
+    private function scopedList(Request $request, \Closure $filter)
+    {
+        try {
+            $query = Subject::query()
+                ->with(['department:id,name', 'teacher:id,first_name,last_name', 'branch:id,name,code'])
+                ->where('is_active', true);
+
+            $filter($query);
+
+            // School isolation
+            if ($schoolId = $this->getCurrentSchoolId($request)) {
+                $query->where('school_id', $schoolId);
+            }
+
+            // Branch isolation
+            $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+            if ($accessibleBranchIds !== 'all') {
+                if (!empty($accessibleBranchIds)) {
+                    $query->whereIn('branch_id', $accessibleBranchIds);
+                } else {
+                    $query->whereRaw('1 = 0');
+                }
+            }
+
+            $subjects = $query->orderBy('name')->get();
+
+            return response()->json([
+                'success' => true,
+                'data' => $subjects
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Scoped subject list error', ['error' => $e->getMessage()]);
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch subjects',
                 'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
             ], 500);
         }
