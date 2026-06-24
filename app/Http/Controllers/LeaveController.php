@@ -22,7 +22,7 @@ class LeaveController extends Controller
     public function index(Request $request)
     {
         try {
-            $type = $request->get('type', 'student'); // student or teacher
+            $type = $this->leaveType($request); // 'student' or 'teacher' (clamped)
             $studentHasAcademicYear = $this->tableHasAcademicYearId('student_leaves');
             $teacherHasAcademicYear = $this->tableHasAcademicYearId('teacher_leaves');
             
@@ -75,6 +75,9 @@ class LeaveController extends Controller
                     $query->addSelect(DB::raw('NULL as academic_year_name'));
                 }
             }
+
+            // Exclude soft-deleted rows (the query builder bypasses the model's SoftDeletes scope).
+            $query->whereNull($type . '_leaves.deleted_at');
 
             // Apply branch filtering
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
@@ -224,10 +227,10 @@ class LeaveController extends Controller
     {
         DB::beginTransaction();
         try {
-            $type = $request->get('type', 'student');
+            $type = $this->leaveType($request);
             $studentHasAcademicYear = $this->tableHasAcademicYearId('student_leaves');
             $teacherHasAcademicYear = $this->tableHasAcademicYearId('teacher_leaves');
-            
+
             if ($type === 'student') {
                 $rules = [
                     'student_id' => 'required|exists:users,id',
@@ -250,11 +253,20 @@ class LeaveController extends Controller
                     ], 422);
                 }
 
+                // Derive branch from the student when not supplied, so the leave is visible
+                // in the branch-scoped list — and verify the user may manage that branch.
+                $branchId = $request->branch_id
+                    ?: DB::table('users')->where('id', $request->student_id)->value('branch_id');
+                if (!$this->canManageBranch($request, (int) $branchId)) {
+                    DB::rollBack();
+                    return response()->json(['success' => false, 'message' => 'You do not have access to this branch'], 403);
+                }
+
                 $totalDays = $this->calculateTotalDays($request->from_date, $request->to_date);
 
                 $insertData = [
                     'student_id' => $request->student_id,
-                    'branch_id' => $request->branch_id,
+                    'branch_id' => $branchId,
                     'from_date' => $request->from_date,
                     'to_date' => $request->to_date,
                     'total_days' => $totalDays,
@@ -267,13 +279,15 @@ class LeaveController extends Controller
                     'updated_at' => now()
                 ];
                 if ($studentHasAcademicYear) {
-                    $insertData['academic_year_id'] = $request->academic_year_id;
+                    // Default to the toolbar academic-year context so the leave isn't hidden
+                    // from the year-scoped student tab when the client omits it.
+                    $insertData['academic_year_id'] = $request->academic_year_id
+                        ?? $request->attributes->get('academic_year_id');
                 }
                 if (Schema::hasColumn('student_leaves', 'school_id')) {
-                    $schoolId = $request->branch_id
-                        ? DB::table('branches')->where('id', $request->branch_id)->value('school_id')
+                    $insertData['school_id'] = $branchId
+                        ? DB::table('branches')->where('id', $branchId)->value('school_id')
                         : null;
-                    $insertData['school_id'] = $schoolId;
                 }
                 DB::table('student_leaves')->insert($insertData);
             } else {
@@ -299,11 +313,18 @@ class LeaveController extends Controller
                     ], 422);
                 }
 
+                $branchId = $request->branch_id
+                    ?: DB::table('users')->where('id', $request->teacher_id)->value('branch_id');
+                if (!$this->canManageBranch($request, (int) $branchId)) {
+                    DB::rollBack();
+                    return response()->json(['success' => false, 'message' => 'You do not have access to this branch'], 403);
+                }
+
                 $totalDays = $this->calculateTotalDays($request->from_date, $request->to_date);
 
                 $insertData = [
                     'teacher_id' => $request->teacher_id,
-                    'branch_id' => $request->branch_id,
+                    'branch_id' => $branchId,
                     'from_date' => $request->from_date,
                     'to_date' => $request->to_date,
                     'total_days' => $totalDays,
@@ -317,7 +338,13 @@ class LeaveController extends Controller
                     'updated_at' => now()
                 ];
                 if ($teacherHasAcademicYear) {
-                    $insertData['academic_year_id'] = $request->academic_year_id;
+                    $insertData['academic_year_id'] = $request->academic_year_id
+                        ?? $request->attributes->get('academic_year_id');
+                }
+                if (Schema::hasColumn('teacher_leaves', 'school_id')) {
+                    $insertData['school_id'] = $branchId
+                        ? DB::table('branches')->where('id', $branchId)->value('school_id')
+                        : null;
                 }
                 DB::table('teacher_leaves')->insert($insertData);
             }
@@ -346,10 +373,10 @@ class LeaveController extends Controller
     public function show($id)
     {
         try {
-            $type = request()->get('type', 'student');
+            $type = $this->leaveType(request());
             $studentHasAcademicYear = $this->tableHasAcademicYearId('student_leaves');
             $teacherHasAcademicYear = $this->tableHasAcademicYearId('teacher_leaves');
-            
+
             if ($type === 'student') {
                 $leave = DB::table('student_leaves')
                     ->join('users', 'student_leaves.student_id', '=', 'users.id')
@@ -361,6 +388,7 @@ class LeaveController extends Controller
                     })
                     ->leftJoin('branches', 'student_leaves.branch_id', '=', 'branches.id')
                     ->where('student_leaves.id', $id)
+                    ->whereNull('student_leaves.deleted_at')
                     ->select(
                         'student_leaves.*',
                         'users.first_name',
@@ -391,6 +419,7 @@ class LeaveController extends Controller
                     ->leftJoin('teachers', 'users.id', '=', 'teachers.user_id')
                     ->leftJoin('branches', 'teacher_leaves.branch_id', '=', 'branches.id')
                     ->where('teacher_leaves.id', $id)
+                    ->whereNull('teacher_leaves.deleted_at')
                     ->select(
                         'teacher_leaves.*',
                         'users.first_name',
@@ -414,6 +443,14 @@ class LeaveController extends Controller
             }
             
             if (!$leave) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Leave record not found'
+                ], 404);
+            }
+
+            // Tenant guard: don't leak leaves from other branches/schools.
+            if (!$this->canAccessLeaveBranch(request(), isset($leave->branch_id) ? (int) $leave->branch_id : null)) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Leave record not found'
@@ -460,7 +497,7 @@ class LeaveController extends Controller
     public function update(Request $request, $id)
     {
         try {
-            $type = $request->get('type', 'student');
+            $type = $this->leaveType($request);
             $table = $type === 'student' ? 'student_leaves' : 'teacher_leaves';
             $hasAcademicYear = $this->tableHasAcademicYearId($table);
 
@@ -484,9 +521,17 @@ class LeaveController extends Controller
                 ], 422);
             }
 
-            $leave = DB::table($table)->where('id', $id)->first();
+            $leave = DB::table($table)->where('id', $id)->whereNull('deleted_at')->first();
 
             if (!$leave) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Leave record not found'
+                ], 404);
+            }
+
+            // Tenant guard: only manage leaves in branches the user can manage.
+            if (!$this->canManageBranch($request, isset($leave->branch_id) ? (int) $leave->branch_id : 0)) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Leave record not found'
@@ -539,10 +584,27 @@ class LeaveController extends Controller
     {
         try {
             $request = request();
-            $type = $request->get('type', 'student');
+            $type = $this->leaveType($request);
             $table = $type === 'student' ? 'student_leaves' : 'teacher_leaves';
 
-            DB::table($table)->where('id', $id)->delete();
+            $leave = DB::table($table)->where('id', $id)->whereNull('deleted_at')->first();
+            if (!$leave) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Leave record not found'
+                ], 404);
+            }
+
+            // Tenant guard.
+            if (!$this->canManageBranch($request, isset($leave->branch_id) ? (int) $leave->branch_id : 0)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Leave record not found'
+                ], 404);
+            }
+
+            // Soft delete (table has deleted_at and the model uses SoftDeletes).
+            DB::table($table)->where('id', $id)->update(['deleted_at' => now(), 'updated_at' => now()]);
 
             return response()->json([
                 'success' => true,
@@ -564,9 +626,16 @@ class LeaveController extends Controller
     public function getStudentLeaves($studentId)
     {
         try {
+            // Tenant guard: only view leaves of a student in an accessible branch.
+            $studentBranch = DB::table('users')->where('id', $studentId)->value('branch_id');
+            if (!$this->canAccessLeaveBranch(request(), $studentBranch !== null ? (int) $studentBranch : null)) {
+                return response()->json(['success' => false, 'message' => 'Student not found'], 404);
+            }
+
             $hasAcademicYear = $this->tableHasAcademicYearId('student_leaves');
             $baseQuery = DB::table('student_leaves')
-                ->where('student_id', $studentId);
+                ->where('student_id', $studentId)
+                ->whereNull('student_leaves.deleted_at');
 
             $academicYearId = request()->attributes->get('academic_year_id');
             if ($academicYearId && $hasAcademicYear) {
@@ -630,10 +699,23 @@ class LeaveController extends Controller
     public function getTeacherLeaves($teacherId)
     {
         try {
+            // Tenant guard: only view leaves of a teacher in an accessible branch.
+            $teacherBranch = DB::table('users')->where('id', $teacherId)->value('branch_id');
+            if (!$this->canAccessLeaveBranch(request(), $teacherBranch !== null ? (int) $teacherBranch : null)) {
+                return response()->json(['success' => false, 'message' => 'Teacher not found'], 404);
+            }
+
             $hasAcademicYear = $this->tableHasAcademicYearId('teacher_leaves');
             $baseQuery = DB::table('teacher_leaves')
-                ->where('teacher_id', $teacherId);
-            
+                ->where('teacher_id', $teacherId)
+                ->whereNull('teacher_leaves.deleted_at');
+
+            // Match student behaviour: scope to the toolbar academic year when present.
+            $academicYearId = request()->attributes->get('academic_year_id');
+            if ($academicYearId && $hasAcademicYear) {
+                $baseQuery->where('teacher_leaves.academic_year_id', (int) $academicYearId);
+            }
+
             if (request()->has('from_date')) {
                 $baseQuery->whereDate('from_date', '>=', request('from_date'));
             }
@@ -733,6 +815,31 @@ class LeaveController extends Controller
         } catch (\Throwable $e) {
             return false;
         }
+    }
+
+    /**
+     * Whether the current user can access a given branch's leaves (tenant scoping).
+     */
+    private function canAccessLeaveBranch(Request $request, ?int $branchId): bool
+    {
+        $accessible = $this->getAccessibleBranchIds($request);
+        if ($accessible === 'all') {
+            $schoolId = $this->getCurrentSchoolId($request);
+            if (!$schoolId || $branchId === null) {
+                return true;
+            }
+            $branchSchool = DB::table('branches')->where('id', $branchId)->value('school_id');
+            return (int) $branchSchool === (int) $schoolId;
+        }
+        return $branchId !== null && in_array((int) $branchId, array_map('intval', (array) $accessible), true);
+    }
+
+    /**
+     * Normalize the leave type param to exactly 'student' or 'teacher'.
+     */
+    private function leaveType(Request $request): string
+    {
+        return $request->get('type') === 'teacher' ? 'teacher' : 'student';
     }
 }
 

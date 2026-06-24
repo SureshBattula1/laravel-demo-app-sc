@@ -54,9 +54,9 @@ class ExamController extends Controller
                 $query->where('academic_year_id', (int) $academicYearId);
             }
 
-            // Filter by exam type (DB column is 'type')
+            // Filter by exam type
             if ($request->has('exam_type')) {
-                $query->where('type', $request->exam_type);
+                $query->where('exam_type', $request->exam_type);
             }
 
             // OPTIMIZED Search by name - prefix search for better index usage
@@ -64,7 +64,7 @@ class ExamController extends Controller
                 $search = strip_tags($request->search);
                 $query->where(function($q) use ($search) {
                     $q->where('name', 'like', "{$search}%")  // ✅ Can use index
-                      ->orWhere('type', 'like', "{$search}%")
+                      ->orWhere('exam_type', 'like', "{$search}%")
                       ->orWhere('academic_year', 'like', "{$search}%")
                       ->orWhereHas('branch', function($q) use ($search) {
                           $q->where('name', 'like', "{$search}%")
@@ -166,6 +166,14 @@ class ExamController extends Controller
                 ], 422);
             }
 
+            // Tenant guard: user must be allowed to manage the target branch.
+            if (!$this->canManageBranch($request, (int) $request->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You do not have access to this branch'
+                ], 403);
+            }
+
             // Prepare data with proper date formatting
             $examData = $request->only([
                 'exam_term_id', 'branch_id', 'name', 'exam_type', 'description'
@@ -217,10 +225,18 @@ class ExamController extends Controller
     /**
      * Display the specified exam
      */
-    public function show(string $id)
+    public function show(Request $request, string $id)
     {
         try {
             $exam = Exam::with(['branch', 'examTerm', 'results.student', 'creator', 'updater'])->findOrFail($id);
+
+            // Tenant guard: don't leak exams from branches the user can't access.
+            if (!$this->canAccessBranch($request, (int) $exam->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Exam not found'
+                ], 404);
+            }
 
             return response()->json([
                 'success' => true,
@@ -246,6 +262,15 @@ class ExamController extends Controller
         DB::beginTransaction();
         try {
             $exam = Exam::findOrFail($id);
+
+            // Tenant guard: only manage exams in branches the user can manage.
+            if (!$this->canManageBranch($request, (int) $exam->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Exam not found'
+                ], 404);
+            }
+
             $academicYearId = $this->academicYearContext->id(false);
             $academicYearName = $academicYearId
                 ? (\App\Models\AcademicYear::query()->where('id', (int) $academicYearId)->value('name') ?? null)
@@ -312,12 +337,20 @@ class ExamController extends Controller
     /**
      * Remove the specified exam
      */
-    public function destroy(string $id)
+    public function destroy(Request $request, string $id)
     {
         DB::beginTransaction();
         try {
             $exam = Exam::findOrFail($id);
-            
+
+            // Tenant guard: only delete exams in branches the user can manage.
+            if (!$this->canManageBranch($request, (int) $exam->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Exam not found'
+                ], 404);
+            }
+
             // Check if exam has results
             if ($exam->results()->count() > 0) {
                 return response()->json([
@@ -348,10 +381,18 @@ class ExamController extends Controller
     /**
      * Get exam statistics - OPTIMIZED with single query
      */
-    public function statistics(string $id)
+    public function statistics(Request $request, string $id)
     {
         try {
             $exam = Exam::findOrFail($id);
+
+            // Tenant guard.
+            if (!$this->canAccessBranch($request, (int) $exam->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Exam not found'
+                ], 404);
+            }
 
             // OPTIMIZED: Single aggregated query instead of 5 separate queries
             $stats = DB::table('exam_results')
@@ -409,11 +450,9 @@ class ExamController extends Controller
             $validator = Validator::make($request->all(), [
                 'exam_id' => 'required|exists:exams,id',
                 'student_id' => 'required|exists:users,id',
-                'subject_id' => 'required|exists:subjects,id',
                 'marks_obtained' => 'required|numeric|min:0',
                 'grade' => 'nullable|string|max:5',
                 'remarks' => 'nullable|string|max:500',
-                'attendance' => 'nullable|string|in:Present,Absent',
             ]);
 
             if ($validator->fails()) {
@@ -425,44 +464,55 @@ class ExamController extends Controller
 
             $exam = Exam::findOrFail($request->exam_id);
 
-            // Validate marks don't exceed total marks
-            if ($request->marks_obtained > $exam->total_marks) {
+            // Tenant guard.
+            if (!$this->canManageBranch($request, (int) $exam->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Exam not found'
+                ], 404);
+            }
+
+            // The exam must have a total_marks set before results can be recorded
+            // (avoids divide-by-zero and a 0-total "cannot exceed" trap).
+            $totalMarks = (float) $exam->total_marks;
+            if ($totalMarks <= 0) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Set the exam total marks before recording results'
+                ], 422);
+            }
+
+            if ($request->marks_obtained > $totalMarks) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Marks obtained cannot exceed total marks'
                 ], 422);
             }
 
-            // Calculate grade if not provided
-            $grade = $request->grade;
-            if (!$grade) {
-                $percentage = ($request->marks_obtained / $exam->total_marks) * 100;
-                $grade = $this->calculateGrade($percentage);
-            }
+            $percentage = round(($request->marks_obtained / $totalMarks) * 100, 2);
+            $grade = $request->grade ?: $this->calculateGrade($percentage);
+            $isPass = $request->marks_obtained >= (float) $exam->passing_marks;
 
-            // Determine pass/fail status
-            $status = $request->marks_obtained >= $exam->passing_marks ? 'Pass' : 'Fail';
-
-            $result = \App\Models\ExamResult::create([
-                'exam_id' => $request->exam_id,
-                'student_id' => $request->student_id,
-                'subject_id' => $request->subject_id,
-                'marks_obtained' => $request->marks_obtained,
-                'grade' => $grade,
-                'status' => $status,
-                'remarks' => strip_tags($request->remarks ?? ''),
-                'attendance' => $request->attendance ?? 'Present',
-                'created_by' => $request->user()->id
-            ]);
+            // Only persist columns that actually exist on exam_results.
+            $result = \App\Models\ExamResult::updateOrCreate(
+                ['exam_id' => $request->exam_id, 'student_id' => $request->student_id],
+                [
+                    'marks_obtained' => $request->marks_obtained,
+                    'grade' => $grade,
+                    'percentage' => $percentage,
+                    'is_pass' => $isPass,
+                    'remarks' => strip_tags($request->remarks ?? ''),
+                ]
+            );
 
             DB::commit();
 
-            Log::info('Exam result created', ['result_id' => $result->id]);
+            Log::info('Exam result recorded', ['result_id' => $result->id]);
 
             return response()->json([
                 'success' => true,
                 'message' => 'Result recorded successfully',
-                'data' => $result->load(['exam', 'student', 'subject'])
+                'data' => $result->load(['exam', 'student'])
             ], 201);
 
         } catch (\Exception $e) {
@@ -480,12 +530,22 @@ class ExamController extends Controller
     /**
      * Get results for a specific exam
      */
-    public function getResults(string $id)
+    public function getResults(Request $request, string $id)
     {
         try {
             $exam = Exam::findOrFail($id);
+
+            // Tenant guard.
+            if (!$this->canAccessBranch($request, (int) $exam->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Exam not found'
+                ], 404);
+            }
+
+            // Note: exam_results has no subject_id column — don't eager-load a 'subject' relation here.
             $results = $exam->results()
-                ->with(['student', 'subject'])
+                ->with(['student'])
                 ->orderBy('marks_obtained', 'desc')
                 ->get();
 
@@ -516,7 +576,7 @@ class ExamController extends Controller
         try {
             // Get student's academic year for filtering
             $student = \App\Models\Student::where('user_id', $studentId)->first();
-            $academicYear = $student->academic_year ?? request('academic_year');
+            $academicYear = ($student?->academic_year) ?? request('academic_year');
             
             $resultsQuery = \App\Models\ExamResult::where('exam_results.student_id', $studentId)
                 ->join('exams', 'exam_results.exam_id', '=', 'exams.id');

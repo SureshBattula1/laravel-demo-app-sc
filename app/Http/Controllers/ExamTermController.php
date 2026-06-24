@@ -8,6 +8,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\Rule;
 
 class ExamTermController extends Controller
 {
@@ -78,7 +79,11 @@ class ExamTermController extends Controller
     {
         $validator = Validator::make($request->all(), [
             'name' => 'required|string|max:255',
-            'code' => 'required|string|max:50|unique:exam_terms',
+            // Code is unique per branch (multi-tenant), not globally.
+            'code' => [
+                'required', 'string', 'max:50',
+                Rule::unique('exam_terms', 'code')->where(fn ($q) => $q->where('branch_id', $request->branch_id)),
+            ],
             'branch_id' => 'required|exists:branches,id',
             'academic_year' => 'required|string|max:20',
             'start_date' => 'required|date',
@@ -88,6 +93,11 @@ class ExamTermController extends Controller
 
         if ($validator->fails()) {
             return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
+        }
+
+        // Tenant guard.
+        if (!$this->canManageBranch($request, (int) $request->branch_id)) {
+            return response()->json(['success' => false, 'message' => 'You do not have access to this branch'], 403);
         }
 
         DB::beginTransaction();
@@ -105,10 +115,13 @@ class ExamTermController extends Controller
         }
     }
 
-    public function show($id)
+    public function show(Request $request, $id)
     {
         try {
             $term = ExamTerm::with(['branch', 'exams'])->findOrFail($id);
+            if (!$this->canAccessBranch($request, (int) $term->branch_id)) {
+                return response()->json(['success' => false, 'message' => 'Exam term not found'], 404);
+            }
             return response()->json(['success' => true, 'data' => $term]);
         } catch (\Exception $e) {
             return response()->json(['success' => false, 'message' => 'Exam term not found'], 404);
@@ -119,7 +132,11 @@ class ExamTermController extends Controller
     {
         try {
             $term = ExamTerm::findOrFail($id);
-            $term->update($request->all());
+            if (!$this->canManageBranch($request, (int) $term->branch_id)) {
+                return response()->json(['success' => false, 'message' => 'Exam term not found'], 404);
+            }
+            // Don't allow moving a term to another branch via mass-assignment.
+            $term->update($request->except(['branch_id', 'school_id', 'id']));
             return response()->json(['success' => true, 'data' => $term->fresh(['branch']), 'message' => 'Exam term updated']);
         } catch (\Exception $e) {
             Log::error('Update exam term error', ['error' => $e->getMessage()]);
@@ -127,10 +144,13 @@ class ExamTermController extends Controller
         }
     }
 
-    public function destroy($id)
+    public function destroy(Request $request, $id)
     {
         try {
             $term = ExamTerm::findOrFail($id);
+            if (!$this->canManageBranch($request, (int) $term->branch_id)) {
+                return response()->json(['success' => false, 'message' => 'Exam term not found'], 404);
+            }
             if ($term->exams()->count() > 0) {
                 return response()->json(['success' => false, 'message' => 'Cannot delete term with existing exams'], 400);
             }

@@ -169,11 +169,23 @@ class ExamScheduleController extends Controller
 
         DB::beginTransaction();
         try {
-            // Prepare data properly - use only fields that exist in database
+            // Tenant guard: user must be able to manage the parent exam's branch.
+            $exam = \App\Models\Exam::find($request->exam_id);
+            if (!$exam || !$this->canManageBranch($request, (int) $exam->branch_id)) {
+                DB::rollBack();
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You do not have access to this exam'
+                ], 403);
+            }
+
+            // Prepare data properly - use only fields that exist in database.
+            // NB: use ?: (not ||) so we store the grade value, not a boolean.
             $scheduleData = [
                 'exam_id' => $request->exam_id,
                 'subject_id' => $request->subject_id,
-                'grade' => $request->grade_level || $request->grade,
+                'branch_id' => $exam->branch_id,
+                'grade' => $request->grade_level ?: $request->grade,
                 'section' => $request->section,
                 'exam_date' => $request->exam_date,
                 'start_time' => $request->start_time,

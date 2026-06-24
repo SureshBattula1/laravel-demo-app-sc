@@ -16,18 +16,41 @@ class ExamMarkController extends Controller
     /**
      * Get marks for an exam schedule
      */
-    public function getMarks($scheduleId)
+    public function getMarks(Request $request, $scheduleId)
     {
         try {
+            // Tenant guard: only read marks for schedules in an accessible branch.
+            $schedule = \App\Models\ExamSchedule::with('exam')->findOrFail($scheduleId);
+            if (!$this->canAccessScheduleBranch($request, $schedule)) {
+                return response()->json(['success' => false, 'message' => 'Schedule not found'], 404);
+            }
+
             $marks = ExamMark::where('exam_schedule_id', $scheduleId)
                 ->with(['student:id,first_name,last_name', 'subject:id,name'])
                 ->get();
-            
+
             return response()->json(['success' => true, 'data' => $marks]);
         } catch (\Exception $e) {
             Log::error('Get marks error', ['error' => $e->getMessage()]);
             return response()->json(['success' => false, 'message' => 'Failed to fetch marks'], 500);
         }
+    }
+
+    /**
+     * Whether the current user can access the branch of an exam schedule.
+     */
+    protected function canAccessScheduleBranch(Request $request, \App\Models\ExamSchedule $schedule): bool
+    {
+        $exam = $schedule->exam;
+        if (!$exam) {
+            return false;
+        }
+        $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+        if ($accessibleBranchIds === 'all') {
+            $schoolId = $this->getCurrentSchoolId($request);
+            return $schoolId ? ((int) $exam->school_id === (int) $schoolId) : true;
+        }
+        return in_array((int) $exam->branch_id, array_map('intval', (array) $accessibleBranchIds), true);
     }
 
     /**
@@ -49,9 +72,17 @@ class ExamMarkController extends Controller
         DB::beginTransaction();
         try {
             $schedule = \App\Models\ExamSchedule::with('exam')->findOrFail($scheduleId);
-            $totalMarks = $schedule->total_marks;
-            $passingMarks = $schedule->passing_marks || 0;
-            
+
+            // Tenant guard: only enter marks for schedules in a branch the user can manage.
+            if (!$this->canAccessScheduleBranch($request, $schedule)) {
+                DB::rollBack();
+                return response()->json(['success' => false, 'message' => 'Schedule not found'], 404);
+            }
+
+            $totalMarks = (float) $schedule->total_marks;
+            // Use the actual passing marks (|| would coerce to a boolean 1/0).
+            $passingMarks = (float) ($schedule->passing_marks ?? 0);
+
             foreach ($request->marks as $markData) {
                 $marksObtained = $markData['is_absent'] ? 0 : $markData['marks_obtained'];
                 $percentage = $totalMarks > 0 ? ($marksObtained / $totalMarks) * 100 : 0;
@@ -125,11 +156,17 @@ class ExamMarkController extends Controller
             if ($marks->isEmpty()) {
                 return response()->json(['success' => true, 'data' => []]);
             }
-            
+
+            // Eager-load all related schedules in ONE query instead of one per mark (avoids N+1).
+            $schedules = \App\Models\ExamSchedule::with(['exam.examTerm', 'subject'])
+                ->whereIn('id', $marks->pluck('exam_schedule_id')->unique()->all())
+                ->get()
+                ->keyBy('id');
+
             $results = [];
-            
+
             foreach ($marks as $mark) {
-                $schedule = \App\Models\ExamSchedule::with(['exam.examTerm', 'subject'])->find($mark->exam_schedule_id);
+                $schedule = $schedules->get($mark->exam_schedule_id);
                 $passingMarks = isset($schedule->passing_marks) ? (float)$schedule->passing_marks : (float)($schedule?->total_marks ?? 100) * 0.4;
                 $isPass = !$mark->is_absent && (float)$mark->marks_obtained >= $passingMarks;
 
