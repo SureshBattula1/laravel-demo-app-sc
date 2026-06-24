@@ -1346,6 +1346,127 @@ class FeeController extends Controller
     }
 
     /**
+     * Per-student fee details for a Grade & Section (name, phone, paid, due, status).
+     * Mirrors the attendance "Grade & Section" view but for fees.
+     */
+    public function getStudentFeesByClass(Request $request)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'branch_id' => 'required|exists:branches,id',
+                'grade' => 'required|string',
+                'section' => 'nullable|string',
+                'academic_year_id' => 'nullable|integer',
+            ]);
+            if ($validator->fails()) {
+                return response()->json(['success' => false, 'message' => 'Validation failed', 'errors' => $validator->errors()], 422);
+            }
+
+            $branchId = (int) $request->branch_id;
+            if (!$this->canAccessBranch($request, $branchId)) {
+                return response()->json(['success' => false, 'message' => 'You do not have access to this branch'], 403);
+            }
+
+            $grade = (string) $request->grade;
+            $section = $request->filled('section') ? (string) $request->section : null;
+            $academicYearId = $request->filled('academic_year_id')
+                ? (int) $request->academic_year_id
+                : $this->academicYearContext->id(false);
+
+            // Fee structures applicable to this branch + grade (+ academic year). These are shared
+            // by all students in the grade; their total is the expected fee per student.
+            $structQuery = DB::table('fee_structures')
+                ->whereNull('deleted_at')
+                ->where('branch_id', $branchId)
+                ->where('grade', $grade)
+                ->where('is_active', 1);
+            if ($academicYearId) {
+                $structQuery->where('academic_year_id', $academicYearId);
+            }
+            $structures = $structQuery->get(['id', 'amount']);
+            $structureIds = $structures->pluck('id')->all();
+            $totalFee = (float) $structures->sum('amount');
+
+            // Students in this branch/grade(/section)
+            $studentQuery = DB::table('students as s')
+                ->join('users as u', 's.user_id', '=', 'u.id')
+                ->whereNull('s.deleted_at')
+                ->where('s.branch_id', $branchId)
+                ->where('s.grade', $grade);
+            if ($section !== null) {
+                $studentQuery->where('s.section', $section);
+            }
+            // Students' own users.phone/mobile is usually empty; the reachable number lives on
+            // the students record (father/guardian/emergency). Fall back through them.
+            $students = $studentQuery
+                ->select('u.id as student_id', 'u.first_name', 'u.last_name', 's.section',
+                    DB::raw('NULLIF(TRIM(COALESCE(u.mobile, u.phone, s.father_phone, s.guardian_phone, s.mother_phone, s.emergency_contact_phone)), "") as phone'))
+                ->orderBy('u.first_name')
+                ->get();
+
+            // Aggregate each student's paid + discount across the applicable structures (one query).
+            $paidByStudent = [];
+            if (!empty($structureIds) && $students->isNotEmpty()) {
+                $rows = DB::table('fee_payments')
+                    ->whereNull('deleted_at')
+                    ->whereIn('fee_structure_id', $structureIds)
+                    ->whereIn('payment_status', ['Completed', 'Partial'])
+                    ->whereIn('student_id', $students->pluck('student_id')->all())
+                    ->select('student_id',
+                        DB::raw('SUM(COALESCE(amount_paid,0)) as paid'),
+                        DB::raw('SUM(COALESCE(discount_amount,0)) as disc'))
+                    ->groupBy('student_id')
+                    ->get();
+                foreach ($rows as $r) {
+                    $paidByStudent[$r->student_id] = $r;
+                }
+            }
+
+            $totalPaidAll = 0.0;
+            $totalDueAll = 0.0;
+            $data = $students->map(function ($s) use ($paidByStudent, $totalFee, &$totalPaidAll, &$totalDueAll) {
+                $agg = $paidByStudent[$s->student_id] ?? null;
+                $paid = $agg ? (float) $agg->paid : 0.0;
+                $disc = $agg ? (float) $agg->disc : 0.0;
+                $due = max(0, round($totalFee - $paid - $disc, 2));
+                $status = $paid <= 0 ? 'Pending' : ($due > 0 ? 'Partial' : 'Paid');
+                $totalPaidAll += $paid;
+                $totalDueAll += $due;
+                return [
+                    'student_id' => $s->student_id,
+                    'student_name' => trim(($s->first_name ?? '') . ' ' . ($s->last_name ?? '')),
+                    'phone' => $s->phone ?: '-',
+                    'section' => $s->section,
+                    'total_fee' => $totalFee,
+                    'paid_amount' => $paid,
+                    'due_amount' => $due,
+                    'status' => $status,
+                ];
+            });
+
+            return response()->json([
+                'success' => true,
+                'data' => $data,
+                'summary' => [
+                    'student_count' => $students->count(),
+                    'fee_per_student' => $totalFee,
+                    // Expected total across all students so Paid + Due reconciles with it.
+                    'total_fee' => round($totalFee * $students->count(), 2),
+                    'total_paid' => round($totalPaidAll, 2),
+                    'total_due' => round($totalDueAll, 2),
+                ],
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error fetching student fees by class: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Error fetching student fees by class',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+            ], 500);
+        }
+    }
+
+    /**
      * Parse date range from request parameters (similar to DashboardController)
      */
     private function parsePaymentDateRange(Request $request): array

@@ -312,6 +312,7 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
     // Fee Payments Routes - Specific routes MUST come before parameterized routes
     Route::prefix('fee-payments')->group(function () {
         Route::get('today', [FeeController::class, 'getTodayPayments']);
+        Route::get('by-class', [FeeController::class, 'getStudentFeesByClass']);
         Route::get('/', [FeeController::class, 'indexPayments']);
         Route::post('/', [FeeController::class, 'recordPayment']);
         Route::get('{id}/receipt', [FeeController::class, 'downloadReceipt']);
