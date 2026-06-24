@@ -26,6 +26,7 @@ class FeePayment extends Model
         'late_fee',
         'total_amount',
         'payment_status',
+        'status',
         'academic_year',
         'academic_year_id',
         'remarks',

@@ -103,7 +103,11 @@ class FeeTypeController extends Controller
         try {
             $validated = $request->validate([
                 'name' => 'required|string|max:255',
-                'code' => 'required|string|max:50|unique:fee_types,code',
+                // Code is unique per branch (multi-tenant), not globally.
+                'code' => [
+                    'required', 'string', 'max:50',
+                    Rule::unique('fee_types', 'code')->where(fn ($q) => $q->where('branch_id', $request->branch_id)),
+                ],
                 'description' => 'nullable|string',
                 'branch_id' => 'required|exists:branches,id',
                 'academic_year_id' => 'required|exists:academic_years,id',
@@ -111,6 +115,11 @@ class FeeTypeController extends Controller
                 'is_refundable' => 'boolean',
                 'is_active' => 'boolean',
             ]);
+
+            // Tenant guard.
+            if (!$this->canManageBranch($request, (int) $validated['branch_id'])) {
+                return response()->json(['success' => false, 'message' => 'You do not have access to this branch'], 403);
+            }
 
             $branch = \App\Models\Branch::find($validated['branch_id']);
             $validated['school_id'] = $branch ? $branch->school_id : null;
@@ -139,10 +148,14 @@ class FeeTypeController extends Controller
     /**
      * Display the specified fee type
      */
-    public function show(string $id): JsonResponse
+    public function show(Request $request, string $id): JsonResponse
     {
         try {
             $feeType = FeeType::with(['branch', 'academicYear'])->findOrFail($id);
+
+            if (!$this->canAccessBranch($request, (int) $feeType->branch_id)) {
+                return response()->json(['success' => false, 'message' => 'Fee type not found'], 404);
+            }
 
             return response()->json([
                 'success' => true,
@@ -170,6 +183,11 @@ class FeeTypeController extends Controller
         try {
             $feeType = FeeType::findOrFail($id);
 
+            // Tenant guard.
+            if (!$this->canManageBranch($request, (int) $feeType->branch_id)) {
+                return response()->json(['success' => false, 'message' => 'Fee type not found'], 404);
+            }
+
             $validated = $request->validate([
                 'name' => 'sometimes|required|string|max:255',
                 'code' => [
@@ -177,7 +195,9 @@ class FeeTypeController extends Controller
                     'required',
                     'string',
                     'max:50',
+                    // Unique per the fee type's own branch, ignoring itself.
                     Rule::unique('fee_types', 'code')->ignore($feeType->id)
+                        ->where(fn ($q) => $q->where('branch_id', $feeType->branch_id)),
                 ],
                 'description' => 'nullable|string',
                 'branch_id' => 'sometimes|required|exists:branches,id',
@@ -217,13 +237,20 @@ class FeeTypeController extends Controller
     /**
      * Remove the specified fee type
      */
-    public function destroy(string $id): JsonResponse
+    public function destroy(Request $request, string $id): JsonResponse
     {
         try {
             $feeType = FeeType::findOrFail($id);
 
-            // Check if fee type is being used in fee structures (by name match)
-            $structureCount = \App\Models\FeeStructure::where('fee_type', $feeType->name)->count();
+            // Tenant guard.
+            if (!$this->canManageBranch($request, (int) $feeType->branch_id)) {
+                return response()->json(['success' => false, 'message' => 'Fee type not found'], 404);
+            }
+
+            // Check if fee type is being used in fee structures (scoped to the same branch).
+            $structureCount = \App\Models\FeeStructure::where('fee_type', $feeType->name)
+                ->where('branch_id', $feeType->branch_id)
+                ->count();
             if ($structureCount > 0) {
                 return response()->json([
                     'success' => false,
@@ -253,10 +280,15 @@ class FeeTypeController extends Controller
     /**
      * Toggle fee type active status
      */
-    public function toggleStatus(string $id): JsonResponse
+    public function toggleStatus(Request $request, string $id): JsonResponse
     {
         try {
             $feeType = FeeType::findOrFail($id);
+
+            // Tenant guard.
+            if (!$this->canManageBranch($request, (int) $feeType->branch_id)) {
+                return response()->json(['success' => false, 'message' => 'Fee type not found'], 404);
+            }
             // Use deterministic 0/1 toggle to avoid truthy string edge-cases.
             $feeType->is_active = ((int) $feeType->is_active) === 1 ? 0 : 1;
             $feeType->save();

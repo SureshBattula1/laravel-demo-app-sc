@@ -198,6 +198,12 @@ class FeeController extends Controller
                 ], 422);
             }
 
+            // Tenant guard.
+            if (!$this->canManageBranch($request, (int) $request->branch_id)) {
+                DB::rollBack();
+                return response()->json(['success' => false, 'message' => 'You do not have access to this branch'], 403);
+            }
+
             $branch = \App\Models\Branch::find($request->branch_id);
             $structure = FeeStructure::create([
                 ...$request->all(),
@@ -231,6 +237,11 @@ class FeeController extends Controller
         DB::beginTransaction();
         try {
             $structure = FeeStructure::findOrFail($id);
+
+            // Tenant guard.
+            if (!$this->canManageBranch($request, (int) $structure->branch_id)) {
+                return response()->json(['success' => false, 'message' => 'Fee structure not found'], 404);
+            }
 
             // Prevent editing a fee structure once any payments exist for it.
             if ($structure->payments()->count() > 0) {
@@ -308,12 +319,18 @@ class FeeController extends Controller
         }
     }
 
-    public function destroyStructure(string $id)
+    public function destroyStructure(Request $request, string $id)
     {
         DB::beginTransaction();
         try {
             $structure = FeeStructure::findOrFail($id);
-            
+
+            // Tenant guard.
+            if (!$this->canManageBranch($request, (int) $structure->branch_id)) {
+                DB::rollBack();
+                return response()->json(['success' => false, 'message' => 'Fee structure not found'], 404);
+            }
+
             if ($structure->payments()->count() > 0) {
                 return response()->json([
                     'success' => false,
@@ -429,13 +446,17 @@ class FeeController extends Controller
                 $baseQuery->where('fp.payment_method', $request->payment_method);
             }
 
-            // ✅ Get Total Amount Paid (from both Completed and Partial payments)
-            $totalAmount = (float) (clone $baseQuery)->sum('fp.amount_paid');
-            $totalDiscount = (float) (clone $baseQuery)->sum('fp.discount_amount');
-            $totalLateFee = (float) (clone $baseQuery)->sum('fp.late_fee');
-
-            // ✅ Get Total Count (including both Completed and Partial payments)
-            $totalCount = (clone $baseQuery)->count('fp.id');
+            // ✅ Totals in a SINGLE aggregate query (was 4 separate full-join scans).
+            $totals = (clone $baseQuery)->selectRaw(
+                'COALESCE(SUM(fp.amount_paid), 0) as total_amount, '
+                . 'COALESCE(SUM(fp.discount_amount), 0) as total_discount, '
+                . 'COALESCE(SUM(fp.late_fee), 0) as total_late_fee, '
+                . 'COUNT(fp.id) as total_count'
+            )->first();
+            $totalAmount = (float) ($totals->total_amount ?? 0);
+            $totalDiscount = (float) ($totals->total_discount ?? 0);
+            $totalLateFee = (float) ($totals->total_late_fee ?? 0);
+            $totalCount = (int) ($totals->total_count ?? 0);
             
             // ✅ Get breakdown by payment status
             $byStatus = (clone $baseQuery)
@@ -776,14 +797,61 @@ class FeeController extends Controller
             // Apply pagination and sorting (default: created_at desc)
             $payments = $this->paginateAndSort($query, $request, $sortableColumns, 'created_at', 'desc');
 
-            // Map data: ensure fee_type and add branch_name for list display
-            $data = collect($payments->items())->map(function($payment) {
+            // Aggregate paid/discount per (student, fee structure) so each row can show a
+            // fee-settlement status that is consistent with the remaining balance. A single
+            // transaction may be "Completed", but if money is still due on the fee the row
+            // should read "Partial" (not "Completed").
+            $items = collect($payments->items());
+            $aggs = [];
+            $pairs = $items
+                ->map(fn ($p) => ['s' => $p->student_id, 'f' => $p->fee_structure_id])
+                ->unique(fn ($x) => $x['s'] . '|' . $x['f'])
+                ->values();
+            if ($pairs->isNotEmpty()) {
+                $rows = DB::table('fee_payments')
+                    ->whereNull('deleted_at')
+                    ->whereIn('payment_status', ['Completed', 'Partial'])
+                    ->where(function ($w) use ($pairs) {
+                        foreach ($pairs as $p) {
+                            $w->orWhere(function ($x) use ($p) {
+                                $x->where('student_id', $p['s'])->where('fee_structure_id', $p['f']);
+                            });
+                        }
+                    })
+                    ->select('student_id', 'fee_structure_id',
+                        DB::raw('SUM(COALESCE(amount_paid,0)) as paid'),
+                        DB::raw('SUM(COALESCE(discount_amount,0)) as disc'))
+                    ->groupBy('student_id', 'fee_structure_id')
+                    ->get();
+                foreach ($rows as $r) {
+                    $aggs[$r->student_id . '|' . $r->fee_structure_id] = $r;
+                }
+            }
+
+            // Map data: ensure fee_type, branch_name, and the derived fee_status / remaining_amount
+            $data = $items->map(function($payment) use ($aggs) {
                 if ($payment->feeStructure && empty($payment->feeStructure->fee_type)) {
                     $payment->feeStructure->fee_type = 'General Fee';
                 }
                 $payment->branch_name = $payment->feeStructure && $payment->feeStructure->branch
                     ? $payment->feeStructure->branch->name
                     : null;
+
+                $agg = $aggs[$payment->student_id . '|' . $payment->fee_structure_id] ?? null;
+                $feeAmount = (float) ($payment->feeStructure->amount ?? 0);
+                $paid = $agg ? (float) $agg->paid : 0.0;
+                $disc = $agg ? (float) $agg->disc : 0.0;
+                $remaining = max(0, round($feeAmount - $paid - $disc, 2));
+                $payment->remaining_amount = $remaining;
+
+                $txnStatus = $payment->payment_status;
+                if (in_array($txnStatus, ['Failed', 'Refunded'], true)) {
+                    $payment->fee_status = $txnStatus;
+                } elseif ($paid <= 0) {
+                    $payment->fee_status = 'Pending';
+                } else {
+                    $payment->fee_status = $remaining > 0 ? 'Partial' : 'Completed';
+                }
                 return $payment;
             });
 
@@ -842,13 +910,34 @@ class FeeController extends Controller
             }
 
             $feeStructure = FeeStructure::find($request->fee_structure_id);
+
+            // Tenant guard: only record payments against a fee structure in a branch the user can manage.
+            if (!$feeStructure || !$this->canManageBranch($request, (int) $feeStructure->branch_id)) {
+                DB::rollBack();
+                return response()->json(['success' => false, 'message' => 'Fee structure not found'], 404);
+            }
+
+            // Identity guard: the student must belong to the same branch as the fee structure
+            // (prevents attaching a payment to an unrelated student in another branch).
+            $studentRecord = \App\Models\Student::where('user_id', $request->student_id)->first();
+            if ($studentRecord && (int) $studentRecord->branch_id !== (int) $feeStructure->branch_id) {
+                DB::rollBack();
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Student does not belong to the branch of this fee structure'
+                ], 422);
+            }
+
             $lateFee = (float) ($request->late_fee ?? 0);
             $amountPaid = (float) $request->amount_paid;
 
-            // Overpayment validation: Amount Paid must not exceed Remaining + Late Fee (already paid excludes late fee)
+            // Overpayment validation: Amount Paid must not exceed Remaining + Late Fee (already paid excludes late fee).
+            // lockForUpdate serializes concurrent payments for the same (student, structure) so two
+            // requests can't both pass the remaining-balance check and overpay.
             $previousPayments = FeePayment::where('student_id', $request->student_id)
                 ->where('fee_structure_id', $request->fee_structure_id)
                 ->whereIn('payment_status', ['Completed', 'Partial'])
+                ->lockForUpdate()
                 ->get();
             $alreadyPaid = (float) $previousPayments->sum('amount_paid');
             $totalDiscount = (float) $previousPayments->sum('discount_amount') + (float) ($request->discount_amount ?? 0);
@@ -856,6 +945,7 @@ class FeeController extends Controller
             $maxAllowed = $remainingBeforePayment + $lateFee;
 
             if ($amountPaid > $maxAllowed) {
+                DB::rollBack();
                 return response()->json([
                     'success' => false,
                     'message' => 'You entered more than the actual amount. Maximum allowed: ₹' . number_format($maxAllowed, 2) . ' (Remaining: ₹' . number_format($remainingBeforePayment, 2) . ' + Late Fee: ₹' . number_format($lateFee, 2) . ')',
@@ -864,6 +954,18 @@ class FeeController extends Controller
 
             // Total collected in this payment (discount applies to fee amount, not this payment)
             $totalAmount = $amountPaid + $lateFee;
+
+            // Keep the `status` column in sync with `payment_status` (the two enums were drifting:
+            // payment_status stayed correct while status defaulted to 'Pending').
+            $statusMap = [
+                'Completed' => 'Paid',
+                'Partial'   => 'Partial',
+                'Pending'   => 'Pending',
+                'Failed'    => 'Cancelled',
+                'Refunded'  => 'Cancelled',
+            ];
+            $status = $statusMap[$request->payment_status] ?? 'Pending';
+
             $branchId = $feeStructure ? (int) $feeStructure->branch_id : null;
             $schoolId = $feeStructure?->school_id
                 ?? ($branchId ? \App\Models\Branch::find($branchId)?->school_id : null)
@@ -885,6 +987,7 @@ class FeeController extends Controller
                 'late_fee' => $request->late_fee ?? 0,
                 'total_amount' => $totalAmount,
                 'payment_status' => $request->payment_status,
+                'status' => $status,
                 'remarks' => $request->remarks,
                 'academic_year_id' => $academicYearId ? (int) $academicYearId : null,
                 'academic_year' => $academicYearName,
@@ -1065,11 +1168,16 @@ class FeeController extends Controller
     }
 
     // Show single fee structure
-    public function show(string $id)
+    public function show(Request $request, string $id)
     {
         try {
             $structure = FeeStructure::with(['branch', 'creator', 'updater'])->findOrFail($id);
-            
+
+            // Tenant guard.
+            if (!$this->canAccessBranch($request, (int) $structure->branch_id)) {
+                return response()->json(['success' => false, 'message' => 'Fee structure not found'], 404);
+            }
+
             // Ensure fee_type is never empty
             if (empty($structure->fee_type)) {
                 $structure->fee_type = 'General Fee';
@@ -1090,11 +1198,17 @@ class FeeController extends Controller
     }
     
     // Show single fee payment
-    public function showPayment(string $id)
+    public function showPayment(Request $request, string $id)
     {
         try {
             $payment = FeePayment::with(['feeStructure', 'student', 'creator'])->findOrFail($id);
-            
+
+            // Tenant guard (payment branch, falling back to its fee structure's branch).
+            $payBranch = $payment->branch_id ?? $payment->feeStructure?->branch_id;
+            if (!$this->canAccessBranch($request, (int) $payBranch)) {
+                return response()->json(['success' => false, 'message' => 'Fee payment not found'], 404);
+            }
+
             // Ensure fee_type is never empty in feeStructure relationship
             if ($payment->feeStructure && empty($payment->feeStructure->fee_type)) {
                 $payment->feeStructure->fee_type = 'General Fee';
@@ -1146,10 +1260,16 @@ class FeeController extends Controller
     /**
      * Download a single fee payment receipt as PDF.
      */
-    public function downloadReceipt(string $id)
+    public function downloadReceipt(Request $request, string $id)
     {
         try {
             $payment = FeePayment::with(['feeStructure', 'student', 'creator'])->findOrFail($id);
+
+            // Tenant guard — don't leak another school's receipt PDF.
+            $payBranch = $payment->branch_id ?? $payment->feeStructure?->branch_id;
+            if (!$this->canAccessBranch($request, (int) $payBranch)) {
+                return response()->json(['success' => false, 'message' => 'Fee payment not found'], 404);
+            }
 
             if ($payment->feeStructure && empty($payment->feeStructure->fee_type)) {
                 $payment->feeStructure->fee_type = 'General Fee';
@@ -1269,5 +1389,5 @@ class FeeController extends Controller
     public function index() { return $this->indexStructures(request()); }
     public function store(Request $request) { return $this->storeStructure($request); }
     public function update(Request $request, string $id) { return $this->updateStructure($request, $id); }
-    public function destroy(string $id) { return $this->destroyStructure($id); }
+    public function destroy(string $id) { return $this->destroyStructure(request(), $id); }
 }
