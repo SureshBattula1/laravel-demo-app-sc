@@ -470,7 +470,7 @@ class ImportController extends Controller
 
             // Import to production
             if ($entity === 'student') {
-                $result = $this->importService->importStudentsToProduction($batchId, $skipInvalid);
+                $result = $this->importService->importStudentsToProduction($batchId, $skipInvalid, auth()->id());
             } else if ($entity === 'teacher') {
                 $result = $this->importService->importTeachersToProduction($batchId, $skipInvalid);
             }
@@ -649,36 +649,21 @@ class ImportController extends Controller
             // 🔥 For CSV files, getHighestRow() and getHighestColumn() might not detect correctly
             // So we need to manually count rows and columns
             if ($extension === 'csv') {
-                // Use getHighestDataRow() which is more reliable for CSV
-                $actualHighestRow = $worksheet->getHighestDataRow();
-                
-                // If that doesn't work, manually count rows
-                if ($actualHighestRow <= 1) {
-                    $actualHighestRow = 1;
-                    $maxRowsToCheck = 10000; // Reasonable max
-                    for ($r = 1; $r <= $maxRowsToCheck; $r++) {
-                        $hasData = false;
-                        // Check first few columns to see if row has data
-                        for ($c = 1; $c <= 5; $c++) {
-                            $col = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($c);
-                            try {
-                                $cellValue = $worksheet->getCell($col . $r)->getValue();
-                                if (!empty(trim($cellValue))) {
-                                    $hasData = true;
-                                    break;
-                                }
-                            } catch (\Exception $e) {
-                                // Cell doesn't exist, continue
-                                break;
-                            }
-                        }
-                        if ($hasData) {
-                            $actualHighestRow = $r;
-                        } elseif ($r > $actualHighestRow + 10) {
-                            // If we've gone 10 rows without data, stop
-                            break;
-                        }
+                // 🔥 PhpSpreadsheet's getHighestDataRow() is unreliable for CSV and can report
+                // FEWER rows than the file actually has, which made the data loop below stop early
+                // and SILENTLY DROP rows on larger imports. Count rows directly from the file
+                // (the same fgetcsv source used to read the data) so every row is processed.
+                $actualHighestRow = 0;
+                if (($countHandle = fopen($filePath, 'r')) !== false) {
+                    while (fgetcsv($countHandle, 0, ',', '"') !== false) {
+                        $actualHighestRow++;
                     }
+                    fclose($countHandle);
+                }
+
+                // Fall back to PhpSpreadsheet's count only if the direct read found nothing.
+                if ($actualHighestRow <= 0) {
+                    $actualHighestRow = max(1, $worksheet->getHighestDataRow());
                 }
                 $highestRow = $actualHighestRow;
                 
@@ -996,6 +981,9 @@ class ImportController extends Controller
         $normalized = strtolower(trim($header));
         $normalized = preg_replace('/[\s\-]+/', '_', $normalized);
         $normalized = preg_replace('/[^a-z0-9_]/', '', $normalized);
+        // Trim stray underscores so a "Required *" marker in the template header
+        // (e.g. "First Name *" -> "first_name_") still maps exactly to "first_name".
+        $normalized = trim($normalized, '_');
         return $normalized;
     }
 
@@ -1045,18 +1033,25 @@ class ImportController extends Controller
                 'father_email' => ['father_email', 'father_email_address'],
                 'father_occupation' => ['father_occupation', 'father_occ', 'father_occup'],
                 'father_annual_income' => ['father_annual_income', 'father_income', 'father_salary'],
-                
+                'father_qualification' => ['father_qualification', 'father_qual', 'father_education'],
+                'father_organization' => ['father_organization', 'father_org', 'father_company'],
+                'father_designation' => ['father_designation', 'father_desig', 'father_position'],
+
                 // Mother details
                 'mother_name' => ['mother_name', 'mothername', 'mother'],
                 'mother_phone' => ['mother_phone', 'mother_phone_number', 'mother_mobile'],
                 'mother_email' => ['mother_email', 'mother_email_address'],
                 'mother_occupation' => ['mother_occupation', 'mother_occ', 'mother_occup'],
                 'mother_annual_income' => ['mother_annual_income', 'mother_income', 'mother_salary'],
-                
+                'mother_qualification' => ['mother_qualification', 'mother_qual', 'mother_education'],
+                'mother_organization' => ['mother_organization', 'mother_org', 'mother_company'],
+                'mother_designation' => ['mother_designation', 'mother_desig', 'mother_position'],
+
                 // Guardian details
                 'guardian_name' => ['guardian_name', 'guardianname', 'guardian'],
                 'guardian_relation' => ['guardian_relation', 'guardian_relationship'],
                 'guardian_phone' => ['guardian_phone', 'guardian_phone_number', 'guardian_mobile'],
+                'guardian_qualification' => ['guardian_qualification', 'guardian_qual', 'guardian_education'],
                 
                 // Emergency contact
                 'emergency_contact_name' => ['emergency_contact_name', 'emergency_contact', 'emergency_name'],
@@ -1320,18 +1315,30 @@ class ImportController extends Controller
                 'Nationality', 'Mother Tongue',
                 'Current Address', 'Permanent Address', 'City', 'State', 'Country', 'Pincode',
                 'Father Name', 'Father Phone', 'Father Email', 'Father Occupation', 'Father Annual Income',
+                'Father Qualification', 'Father Organization', 'Father Designation',
                 'Mother Name', 'Mother Phone', 'Mother Email', 'Mother Occupation', 'Mother Annual Income',
-                'Guardian Name', 'Guardian Relation', 'Guardian Phone',
+                'Mother Qualification', 'Mother Organization', 'Mother Designation',
+                'Guardian Name', 'Guardian Relation', 'Guardian Phone', 'Guardian Qualification',
                 'Emergency Contact Name', 'Emergency Contact Phone', 'Emergency Contact Relation',
                 'Previous School', 'Previous Grade', 'Previous Percentage', 'Transfer Certificate Number',
                 'Medical History', 'Allergies', 'Medications', 'Height (cm)', 'Weight (kg)',
                 'Password', 'Remarks'
             ];
 
-            // Write headers to first row
+            // Required columns (mirror the API validation). Required headers get a " *"
+            // suffix and a red header fill so users immediately see the mandatory fields.
+            $requiredHeaders = [
+                'First Name', 'Last Name', 'Email', 'Admission Number', 'Admission Date',
+                'Date of Birth', 'Gender', 'Current Address', 'City', 'State', 'Pincode',
+                'Father Name', 'Father Phone', 'Mother Name',
+                'Emergency Contact Name', 'Emergency Contact Phone',
+            ];
+
+            // Write headers to first row (append " *" to required columns)
             $column = 'A';
             foreach ($headers as $header) {
-                $sheet->setCellValue($column . '1', $header);
+                $isRequired = in_array($header, $requiredHeaders, true);
+                $sheet->setCellValue($column . '1', $isRequired ? $header . ' *' : $header);
                 $column++;
             }
 
@@ -1353,6 +1360,18 @@ class ImportController extends Controller
                 ],
             ]);
 
+            // Override required header cells with a red fill (applied AFTER the global
+            // style so it is not overwritten).
+            $reqColIdx = 1;
+            foreach ($headers as $header) {
+                if (in_array($header, $requiredHeaders, true)) {
+                    $reqCol = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($reqColIdx);
+                    $sheet->getStyle($reqCol . '1')->getFill()
+                        ->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('C00000');
+                }
+                $reqColIdx++;
+            }
+
             // Add sample data row
             $sampleData = [
                 'John', 'Doe', 'john.doe@example.com', '9876543210',
@@ -1360,8 +1379,10 @@ class ImportController extends Controller
                 '2014-05-20', 'Male', 'A+', 'Hindu', 'General', 'Indian', 'English',
                 '123 Main Street', '123 Main Street', 'Mumbai', 'Maharashtra', 'India', '400001',
                 'Rajesh Doe', '9876543210', 'rajesh@example.com', 'Engineer', '500000',
+                'B.Tech', 'Infosys', 'Senior Engineer',
                 'Priya Doe', '9876543211', 'priya@example.com', 'Teacher', '300000',
-                '', '', '',
+                'M.Sc', 'DAV School', 'Teacher',
+                '', '', '', '',
                 'Rajesh Doe', '9876543210', 'Father',
                 'ABC School', '4', '85.5', 'TC-001',
                 'No major issues', 'None', 'None', '150', '45',
@@ -1374,9 +1395,14 @@ class ImportController extends Controller
                 $column++;
             }
 
-            // Set column widths
-            foreach (range('A', $column) as $col) {
-                $sheet->getColumnDimension($col)->setAutoSize(true);
+            // Set column widths. Use column indices (not range('A', $column)) because once
+            // there are more than 26 columns $column becomes multi-letter (e.g. "BD") and
+            // range() with a multi-byte end is a fatal error on PHP 8.3+, which previously
+            // made template generation fail and silently fall back to a CSV.
+            $lastColumnIndex = count($headers);
+            for ($colIdx = 1; $colIdx <= $lastColumnIndex; $colIdx++) {
+                $colLetter = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($colIdx);
+                $sheet->getColumnDimension($colLetter)->setAutoSize(true);
             }
 
             // Freeze header row
@@ -1404,13 +1430,24 @@ class ImportController extends Controller
                 'religion', 'category', 'nationality', 'mother_tongue',
                 'current_address', 'permanent_address', 'city', 'state', 'country', 'pincode',
                 'father_name', 'father_phone', 'father_email', 'father_occupation', 'father_annual_income',
+                'father_qualification', 'father_organization', 'father_designation',
                 'mother_name', 'mother_phone', 'mother_email', 'mother_occupation', 'mother_annual_income',
-                'guardian_name', 'guardian_relation', 'guardian_phone',
+                'mother_qualification', 'mother_organization', 'mother_designation',
+                'guardian_name', 'guardian_relation', 'guardian_phone', 'guardian_qualification',
                 'emergency_contact_name', 'emergency_contact_phone', 'emergency_contact_relation',
                 'previous_school', 'previous_grade', 'previous_percentage', 'transfer_certificate_number',
                 'medical_history', 'allergies', 'medications', 'height_cm', 'weight_kg',
                 'password', 'remarks'
             ];
+
+            // Mark required columns with " *" (kept consistent with the Excel template).
+            $requiredCsv = [
+                'first_name', 'last_name', 'email', 'admission_number', 'admission_date',
+                'date_of_birth', 'gender', 'current_address', 'city', 'state', 'pincode',
+                'father_name', 'father_phone', 'mother_name',
+                'emergency_contact_name', 'emergency_contact_phone',
+            ];
+            $headers = array_map(fn ($h) => in_array($h, $requiredCsv, true) ? $h . ' *' : $h, $headers);
 
             $csvContent = implode(',', $headers);
             $fileName = 'student_import_template_' . date('Y-m-d') . '.csv';
@@ -1447,10 +1484,19 @@ class ImportController extends Controller
                 'Password', 'Remarks'
             ];
 
-            // Write headers to first row
+            // Required columns (mirror the API validation). Required headers get a " *"
+            // suffix and a red header fill so users immediately see the mandatory fields.
+            $requiredHeaders = [
+                'First Name', 'Last Name', 'Email', 'Employee ID', 'Joining Date',
+                'Designation', 'Employee Type', 'Date of Birth', 'Gender',
+                'Current Address', 'Basic Salary',
+            ];
+
+            // Write headers to first row (append " *" to required columns)
             $column = 'A';
             foreach ($headers as $header) {
-                $sheet->setCellValue($column . '1', $header);
+                $isRequired = in_array($header, $requiredHeaders, true);
+                $sheet->setCellValue($column . '1', $isRequired ? $header . ' *' : $header);
                 $column++;
             }
 
@@ -1471,6 +1517,18 @@ class ImportController extends Controller
                     'vertical' => Alignment::VERTICAL_CENTER,
                 ],
             ]);
+
+            // Override required header cells with a red fill (applied AFTER the global
+            // style so it is not overwritten).
+            $reqColIdx = 1;
+            foreach ($headers as $header) {
+                if (in_array($header, $requiredHeaders, true)) {
+                    $reqCol = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($reqColIdx);
+                    $sheet->getStyle($reqCol . '1')->getFill()
+                        ->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('C00000');
+                }
+                $reqColIdx++;
+            }
 
             // Add sample data row
             $sampleData = [
@@ -1494,9 +1552,14 @@ class ImportController extends Controller
                 $column++;
             }
 
-            // Set column widths
-            foreach (range('A', $column) as $col) {
-                $sheet->getColumnDimension($col)->setAutoSize(true);
+            // Set column widths. Use column indices (not range('A', $column)) because once
+            // there are more than 26 columns $column becomes multi-letter (e.g. "BD") and
+            // range() with a multi-byte end is a fatal error on PHP 8.3+, which previously
+            // made template generation fail and silently fall back to a CSV.
+            $lastColumnIndex = count($headers);
+            for ($colIdx = 1; $colIdx <= $lastColumnIndex; $colIdx++) {
+                $colLetter = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($colIdx);
+                $sheet->getColumnDimension($colLetter)->setAutoSize(true);
             }
 
             // Freeze header row
@@ -1532,6 +1595,14 @@ class ImportController extends Controller
                 'pan_number', 'aadhar_number',
                 'password', 'remarks'
             ];
+
+            // Mark required columns with " *" (kept consistent with the Excel template).
+            $requiredCsv = [
+                'first_name', 'last_name', 'email', 'employee_id', 'joining_date',
+                'designation', 'employee_type', 'date_of_birth', 'gender',
+                'current_address', 'basic_salary',
+            ];
+            $headers = array_map(fn ($h) => in_array($h, $requiredCsv, true) ? $h . ' *' : $h, $headers);
 
             $csvContent = implode(',', $headers);
             $fileName = 'teacher_import_template_' . date('Y-m-d') . '.csv';

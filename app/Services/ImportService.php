@@ -135,11 +135,11 @@ class ImportService
                 'validation_status' => 'pending',
             ];
 
-            // Handle boolean fields
-            if (isset($row['is_class_teacher'])) {
-                $importData['is_class_teacher'] = $this->convertToBoolean($row['is_class_teacher']);
-                unset($row['is_class_teacher']);
-            }
+            // Handle boolean fields. is_class_teacher is NOT NULL in the staging table,
+            // so always coerce it (defaulting to false when the column is blank/missing) and
+            // remove it from $row so the array_merge below can't reintroduce a null value.
+            $importData['is_class_teacher'] = $this->convertToBoolean($row['is_class_teacher'] ?? false);
+            unset($row['is_class_teacher']);
 
             // Merge Excel row data (all other fields)
             $importData = array_merge($importData, $row);
@@ -454,7 +454,7 @@ class ImportService
     /**
      * Import validated students to production
      */
-    public function importStudentsToProduction(string $batchId, bool $skipInvalid = true): array
+    public function importStudentsToProduction(string $batchId, bool $skipInvalid = true, ?int $createdBy = null): array
     {
         $query = StudentImport::where('batch_id', $batchId)->notImported();
 
@@ -465,6 +465,12 @@ class ImportService
         $records = $query->get();
         $importedCount = 0;
         $failedCount = 0;
+
+        // Memoize branch->school_id and academic-year-name->id lookups so the loop
+        // stays O(1) per row (no N+1) even for large batches.
+        $schoolIdByBranch = [];
+        $academicYearIdByName = [];
+        $hasEnrollments = Schema::hasTable('student_enrollments');
 
         DB::beginTransaction();
 
@@ -495,14 +501,32 @@ class ImportService
                         ]);
                     }
 
+                    // Resolve school_id (from branch) and academic_year_id (from name) the same
+                    // way StudentController::store does, so imported students are properly
+                    // school-scoped and tied to an academic year. Memoized to avoid N+1.
+                    $branchId = $record->branch_id;
+                    if (!array_key_exists($branchId, $schoolIdByBranch)) {
+                        $schoolIdByBranch[$branchId] = DB::table('branches')->where('id', $branchId)->value('school_id');
+                    }
+                    $schoolId = $schoolIdByBranch[$branchId];
+
+                    $ayName = $record->academic_year;
+                    if ($ayName !== null && !array_key_exists($ayName, $academicYearIdByName)) {
+                        $academicYearIdByName[$ayName] = DB::table('academic_years')->where('name', $ayName)->value('id');
+                    }
+                    $academicYearId = $record->academic_year_id ?? ($ayName !== null ? $academicYearIdByName[$ayName] : null);
+
                     // Create student record
                     // ✅ Only include columns that exist in the students table
                     $studentData = [
                         'user_id' => $user->id,
-                        'branch_id' => $record->branch_id,
+                        'branch_id' => $branchId,
+                        'school_id' => $schoolId,
+                        'academic_year_id' => $academicYearId,
                         'admission_number' => $record->admission_number,
                         'admission_date' => $record->admission_date,
                         'roll_number' => $record->roll_number,
+                        'registration_number' => $record->registration_number,
                         'grade' => $record->grade,
                         'section' => $record->section,
                         'academic_year' => $record->academic_year,
@@ -524,26 +548,64 @@ class ImportService
                         'father_phone' => $record->father_phone,
                         'father_email' => $record->father_email,
                         'father_occupation' => $record->father_occupation,
+                        'father_annual_income' => $record->father_annual_income,
+                        'father_qualification' => $record->father_qualification,
+                        'father_organization' => $record->father_organization,
+                        'father_designation' => $record->father_designation,
                         'mother_name' => $record->mother_name,
                         'mother_phone' => $record->mother_phone,
                         'mother_email' => $record->mother_email,
                         'mother_occupation' => $record->mother_occupation,
+                        'mother_annual_income' => $record->mother_annual_income,
+                        'mother_qualification' => $record->mother_qualification,
+                        'mother_organization' => $record->mother_organization,
+                        'mother_designation' => $record->mother_designation,
+                        'guardian_name' => $record->guardian_name,
+                        'guardian_relation' => $record->guardian_relation,
+                        'guardian_phone' => $record->guardian_phone,
+                        'guardian_qualification' => $record->guardian_qualification,
                         'emergency_contact_name' => $record->emergency_contact_name,
                         'emergency_contact_phone' => $record->emergency_contact_phone,
                         'emergency_contact_relation' => $record->emergency_contact_relation,
                         'previous_school' => $record->previous_school,
                         'previous_grade' => $record->previous_grade,
+                        'previous_percentage' => $record->previous_percentage,
+                        'transfer_certificate_number' => $record->transfer_certificate_number,
                         'medical_history' => $record->medical_history,
                         'allergies' => $record->allergies,
+                        'medications' => $record->medications,
+                        'height_cm' => $record->height_cm,
+                        'weight_kg' => $record->weight_kg,
                         'student_status' => 'Active',
                         'created_at' => now(),
                         'updated_at' => now(),
                     ];
-                    
+
                     $studentId = DB::table('students')->insertGetId($studentData);
 
                     // Update user with student ID
                     $user->update(['user_type_id' => $studentId]);
+
+                    // Create the active enrollment row that StudentController::store also creates.
+                    // Grade/section/group/attendance/promotion views read from student_enrollments,
+                    // so without this the imported student is invisible to them.
+                    if ($hasEnrollments && $academicYearId) {
+                        DB::table('student_enrollments')->updateOrInsert(
+                            ['student_id' => $studentId, 'academic_year_id' => (int) $academicYearId],
+                            [
+                                'school_id' => $schoolId,
+                                'branch_id' => $branchId,
+                                'grade' => (string) $record->grade,
+                                'section' => $record->section,
+                                'roll_number' => $record->roll_number,
+                                'status' => 'Active',
+                                'created_by' => $createdBy,
+                                'updated_by' => $createdBy,
+                                'created_at' => now(),
+                                'updated_at' => now(),
+                            ]
+                        );
+                    }
 
                     // Mark as imported
                     $record->update([
@@ -593,6 +655,9 @@ class ImportService
         $importedCount = 0;
         $failedCount = 0;
 
+        // Memoize branch->school_id to avoid N+1 inside the loop.
+        $schoolIdByBranch = [];
+
         DB::beginTransaction();
 
         try {
@@ -624,20 +689,30 @@ class ImportService
 
                     // Create teacher record (if teachers table exists)
                     if (Schema::hasTable('teachers')) {
+                        // Resolve school_id from branch (memoized) so the teacher is school-scoped,
+                        // matching TeacherController::store.
+                        $branchId = $record->branch_id;
+                        if (!array_key_exists($branchId, $schoolIdByBranch)) {
+                            $schoolIdByBranch[$branchId] = DB::table('branches')->where('id', $branchId)->value('school_id');
+                        }
+
                         $teacherId = DB::table('teachers')->insertGetId([
                             'user_id' => $user->id,
-                            'branch_id' => $record->branch_id,
+                            'branch_id' => $branchId,
+                            'school_id' => $schoolIdByBranch[$branchId],
                             'employee_id' => $record->employee_id,
                             'joining_date' => $record->joining_date,
                             'leaving_date' => $record->leaving_date,
                             'designation' => $record->designation,
                             'employee_type' => $record->employee_type,
-                            'qualification' => json_encode($record->qualification),
+                            // qualification is stored as plain text (model accessor handles JSON legacy),
+                            // matching the create flow; subjects/classes_assigned are JSON arrays.
+                            'qualification' => $record->qualification,
                             'experience_years' => $record->experience_years ?? 0,
                             'specialization' => $record->specialization,
                             'registration_number' => $record->registration_number,
-                            'subjects' => json_encode($record->subjects),
-                            'classes_assigned' => json_encode($record->classes_assigned),
+                            'subjects' => json_encode($this->toList($record->subjects)),
+                            'classes_assigned' => json_encode($this->toList($record->classes_assigned)),
                             'is_class_teacher' => $record->is_class_teacher ?? false,
                             'class_teacher_of_grade' => $record->class_teacher_of_grade,
                             'class_teacher_of_section' => $record->class_teacher_of_section,
@@ -702,6 +777,24 @@ class ImportService
             Log::error('Import transaction failed', ['error' => $e->getMessage()]);
             throw $e;
         }
+    }
+
+    /**
+     * Normalize a value into a list for JSON array columns (subjects, classes_assigned).
+     * Accepts an array, a comma/semicolon/pipe-separated string, or null.
+     *
+     * @return array<int, string>
+     */
+    private function toList($value): array
+    {
+        if (is_array($value)) {
+            return array_values(array_filter(array_map(fn ($v) => is_string($v) ? trim($v) : $v, $value), fn ($v) => $v !== null && $v !== ''));
+        }
+        if ($value === null || $value === '') {
+            return [];
+        }
+        $parts = preg_split('/[,;|]/', (string) $value);
+        return array_values(array_filter(array_map('trim', $parts), fn ($v) => $v !== ''));
     }
 
     /**
