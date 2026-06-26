@@ -181,8 +181,9 @@ class StudentController extends Controller
             }
 
             // Academic year filter - skip when for_group_membership (e.g. add member dropdown)
-            // so we show all active students in the branch regardless of enrollment year
-            if ($academicYearId && !$request->boolean('for_group_membership')) {
+            // or all_academic_years (e.g. promotion class selection), so we show all active
+            // students in the selected branch/grade/section regardless of their enrollment year.
+            if ($academicYearId && !$request->boolean('for_group_membership') && !$request->boolean('all_academic_years')) {
                 if ($hasEnrollments) {
                     $query->whereRaw('COALESCE(se.academic_year_id, students.academic_year_id) = ?', [$academicYearId]);
                 } else {
@@ -824,6 +825,36 @@ class StudentController extends Controller
     }
 
     /**
+     * Restrict a list of student ids to those in the current user's accessible branches.
+     * Prevents cross-branch promote/revert/history (a tenant write/read leak) — student_ids
+     * are only validated as `exists:students,id` globally, so they must be scoped here.
+     *
+     * @param  array<int|string>  $studentIds
+     * @return array<int>
+     */
+    private function filterAccessibleStudentIds(Request $request, array $studentIds): array
+    {
+        if (empty($studentIds)) {
+            return [];
+        }
+
+        $accessible = $this->getAccessibleBranchIds($request);
+        if ($accessible === 'all') {
+            return array_values(array_map('intval', $studentIds));
+        }
+        if (empty($accessible)) {
+            return [];
+        }
+
+        return DB::table('students')
+            ->whereIn('id', $studentIds)
+            ->whereIn('branch_id', $accessible)
+            ->pluck('id')
+            ->map(fn ($v) => (int) $v)
+            ->all();
+    }
+
+    /**
      * Promote students to next grade
      */
     public function promote(Request $request)
@@ -848,6 +879,15 @@ class StudentController extends Controller
                 ], 422);
             }
 
+            // Tenant guard: only operate on students within accessible branches.
+            $studentIds = $this->filterAccessibleStudentIds($request, $request->student_ids);
+            if (empty($studentIds)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No accessible students in the selection for your branch.'
+                ], 403);
+            }
+
             DB::beginTransaction();
 
             $fromAcademicYearId = $this->academicYearContext->id(false);
@@ -859,7 +899,7 @@ class StudentController extends Controller
             $fromSection = $request->filled('from_section') ? (string) $request->from_section : null;
             $toSection = $request->filled('to_section') ? (string) $request->to_section : null;
 
-            foreach ($request->student_ids as $studentId) {
+            foreach ($studentIds as $studentId) {
                 $student = \App\Models\Student::find($studentId);
                 if (!$student || !$promotionService->studentMatchesForPromotion($student, (string) $request->from_grade, $fromAcademicYearId, $fromSection)) {
                     continue;
@@ -985,8 +1025,17 @@ class StudentController extends Controller
                 ], 422);
             }
 
+            // Tenant guard: only operate on students within accessible branches.
+            $studentIds = $this->filterAccessibleStudentIds($request, $request->student_ids);
+            if (empty($studentIds)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No accessible students in the selection for your branch.'
+                ], 403);
+            }
+
             $result = $promotionService->promoteStudentsWithFeeHandling(
-                $request->student_ids,
+                $studentIds,
                 $request->from_grade,
                 $request->to_grade,
                 (int) $request->to_academic_year_id,
@@ -1069,7 +1118,10 @@ class StudentController extends Controller
 
             $fromSection = $request->filled('from_section') ? (string) $request->from_section : null;
 
-            foreach ($request->student_ids as $studentId) {
+            // Tenant guard: only preview students within accessible branches.
+            $studentIds = $this->filterAccessibleStudentIds($request, $request->student_ids);
+
+            foreach ($studentIds as $studentId) {
                 $student = \App\Models\Student::with('user')->find($studentId);
 
                 if (!$student || !$promotionService->studentMatchesForPromotion($student, (string) $request->from_grade, $fromAcademicYearId, $fromSection)) {
@@ -1140,9 +1192,18 @@ class StudentController extends Controller
                 return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
             }
 
+            // Tenant guard: only revert students within accessible branches.
+            $studentIds = $this->filterAccessibleStudentIds($request, $request->student_ids);
+            if (empty($studentIds)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No accessible students in the selection for your branch.'
+                ], 403);
+            }
+
             $promotionService = app(\App\Services\StudentPromotionService::class);
             $result = $promotionService->revertPromotion(
-                $request->student_ids,
+                $studentIds,
                 (string) $request->from_grade,
                 (string) $request->to_grade,
                 (int) $request->academic_year_id,
@@ -1169,11 +1230,19 @@ class StudentController extends Controller
     /**
      * Get promotion history for a student
      */
-    public function getPromotionHistory($id)
+    public function getPromotionHistory(Request $request, $id)
     {
         try {
             $student = \App\Models\Student::findOrFail($id);
-            
+
+            // Tenant guard: don't expose history for students outside accessible branches.
+            if (!$this->canAccessBranch($request, (int) $student->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Student not found'
+                ], 404);
+            }
+
             $history = \App\Models\ClassUpgrade::where('student_id', $student->id)
                 ->with('approvedBy')
                 ->orderBy('created_at', 'desc')
