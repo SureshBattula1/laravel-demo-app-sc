@@ -29,9 +29,27 @@ class ImportController extends Controller
     /**
      * Get available import modules
      */
-    public function getModules()
+    public function getModules(Request $request)
     {
         try {
+            // Scope the record counts to the branches the current user can access (role-wise),
+            // matching the rest of the app — a BranchAdmin should see their own totals, not the
+            // global figure across every school. SuperAdmin (=> 'all') still sees everything.
+            $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+
+            $studentQuery = \DB::table('students')->whereNull('deleted_at');
+            $teacherQuery = \DB::table('teachers')->whereNull('deleted_at');
+
+            if ($accessibleBranchIds !== 'all') {
+                if (!empty($accessibleBranchIds)) {
+                    $studentQuery->whereIn('branch_id', $accessibleBranchIds);
+                    $teacherQuery->whereIn('branch_id', $accessibleBranchIds);
+                } else {
+                    $studentQuery->whereRaw('1 = 0');
+                    $teacherQuery->whereRaw('1 = 0');
+                }
+            }
+
             $modules = [
                 [
                     'id' => 'student',
@@ -44,7 +62,7 @@ class ImportController extends Controller
                         ->where('status', 'completed')
                         ->latest()
                         ->value('created_at'),
-                    'totalRecords' => \DB::table('students')->count(),
+                    'totalRecords' => $studentQuery->count(),
                 ],
                 [
                     'id' => 'teacher',
@@ -57,7 +75,9 @@ class ImportController extends Controller
                         ->where('status', 'completed')
                         ->latest()
                         ->value('created_at'),
-                    'totalRecords' => \DB::table('users')->where('role', 'Teacher')->count(),
+                    // Count the teachers table (not users.role) so the figure is consistent with
+                    // the students count and includes every teacher/staff record for the branch.
+                    'totalRecords' => $teacherQuery->count(),
                 ],
             ];
 
