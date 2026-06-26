@@ -254,6 +254,14 @@ class AdmissionController extends Controller
                 ], 422);
             }
 
+            // Tenant guard: can't create an application in a branch the user can't access.
+            if (!$this->canAccessBranch($request, (int) $request->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You do not have access to the selected branch'
+                ], 403);
+            }
+
             DB::beginTransaction();
 
             // Generate application number
@@ -271,6 +279,7 @@ class AdmissionController extends Controller
 
             $application = AdmissionApplication::create([
                 'branch_id' => $request->branch_id,
+                'school_id' => $branch->school_id ?? $this->getCurrentSchoolId($request),
                 'application_number' => $applicationNumber,
                 'application_date' => now(),
                 'academic_year_id' => $academicYearId,
@@ -283,7 +292,8 @@ class AdmissionController extends Controller
                 'gender' => $request->gender,
                 'blood_group' => $request->blood_group,
                 'religion' => $request->religion,
-                'nationality' => $request->nationality,
+                // nationality is NOT NULL in the DB; default to 'Indian' when not provided.
+                'nationality' => $request->nationality ?: 'Indian',
                 'category' => $request->category,
                 'mother_tongue' => $request->mother_tongue,
                 'email' => $request->email,
@@ -358,11 +368,19 @@ class AdmissionController extends Controller
     /**
      * Get single admission application
      */
-    public function show($id)
+    public function show(Request $request, $id)
     {
         try {
             $application = AdmissionApplication::with(['branch', 'student', 'createdBy', 'updatedBy'])
                 ->findOrFail($id);
+
+            // Tenant guard: hide applications outside the user's accessible branches.
+            if (!$this->canAccessBranch($request, (int) $application->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Admission application not found'
+                ], 404);
+            }
 
             // Resolve grade label (e.g. "Grade 1") from applying_for_grade value
             $gradeLabel = null;
@@ -398,6 +416,14 @@ class AdmissionController extends Controller
     {
         try {
             $application = AdmissionApplication::findOrFail($id);
+
+            // Tenant guard: can't edit an application outside accessible branches.
+            if (!$this->canAccessBranch($request, (int) $application->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Admission application not found'
+                ], 404);
+            }
 
             $validator = Validator::make($request->all(), [
                 'first_name' => 'sometimes|required|string|max:100',
@@ -506,7 +532,7 @@ class AdmissionController extends Controller
     /**
      * Delete admission application
      */
-    public function destroy($id)
+    public function destroy(Request $request, $id)
     {
         try {
             // Include soft-deleted so we can handle already-deleted records
@@ -517,6 +543,14 @@ class AdmissionController extends Controller
                     'success' => false,
                     'message' => 'Admission application not found',
                     'error' => 'Application with ID ' . $id . ' does not exist'
+                ], 404);
+            }
+
+            // Tenant guard: can't delete an application outside accessible branches.
+            if (!$this->canAccessBranch($request, (int) $application->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Admission application not found'
                 ], 404);
             }
 
@@ -550,6 +584,14 @@ class AdmissionController extends Controller
     {
         try {
             $application = AdmissionApplication::findOrFail($id);
+
+            // Tenant guard: can't change status of an application outside accessible branches.
+            if (!$this->canAccessBranch($request, (int) $application->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Admission application not found'
+                ], 404);
+            }
 
             $validator = Validator::make($request->all(), [
                 'status' => 'required|in:Applied,Shortlisted,Rejected,Admitted,Waitlisted',
@@ -593,7 +635,15 @@ class AdmissionController extends Controller
     {
         try {
             $application = AdmissionApplication::findOrFail($id);
-            
+
+            // Tenant guard: can't convert an application outside accessible branches.
+            if (!$this->canAccessBranch($request, (int) $application->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Admission application not found'
+                ], 404);
+            }
+
             // Check 1: Verify application status (must be "Admitted" or "Approved")
             if ($application->application_status !== 'Admitted' && $application->admission_decision !== 'Approved') {
                 return response()->json([
@@ -747,9 +797,29 @@ class AdmissionController extends Controller
             ];
             
             $studentId = DB::table('students')->insertGetId($studentData);
-            
+
             // Link user to student (user_type_id points to student record)
             $user->update(['user_type_id' => $studentId]);
+
+            // Create the active enrollment row (same as StudentController::store). Grade/section/
+            // group/attendance/promotion views read student_enrollments, so without this the
+            // converted student would be invisible to them.
+            if (\Illuminate\Support\Facades\Schema::hasTable('student_enrollments') && $academicYearId) {
+                DB::table('student_enrollments')->updateOrInsert(
+                    ['student_id' => $studentId, 'academic_year_id' => (int) $academicYearId],
+                    [
+                        'school_id' => $studentData['school_id'],
+                        'branch_id' => $application->branch_id,
+                        'grade' => (string) $grade,
+                        'section' => $section,
+                        'status' => 'Active',
+                        'created_by' => $request->user()->id,
+                        'updated_by' => $request->user()->id,
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ]
+                );
+            }
             
             // Step 5: Link application to student
             // Step 6: Update application status
@@ -842,6 +912,16 @@ class AdmissionController extends Controller
     {
         try {
             $query = AdmissionApplication::query();
+
+            // Tenant guard: restrict export to the user's accessible branches (was leaking all).
+            $accessibleBranchIds = $this->getAccessibleBranchIds($request);
+            if ($accessibleBranchIds !== 'all') {
+                if (!empty($accessibleBranchIds)) {
+                    $query->whereIn('branch_id', $accessibleBranchIds);
+                } else {
+                    $query->whereRaw('1 = 0');
+                }
+            }
 
             // Apply same filters as index
             if ($request->has('status')) {

@@ -12,6 +12,7 @@ class AdmissionApplication extends Model
 
     protected $fillable = [
         'branch_id',
+        'school_id',
         'application_number',
         'application_date',
         'academic_year',
