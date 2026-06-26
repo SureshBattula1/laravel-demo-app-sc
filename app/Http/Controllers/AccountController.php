@@ -256,12 +256,12 @@ class AccountController extends Controller
     /**
      * Get single account category - INDEX OPTIMIZED
      */
-    public function getCategory($id)
+    public function getCategory(Request $request, $id)
     {
         try {
             // OPTIMIZED: Load only necessary transaction fields
             $category = AccountCategory::select([
-                'id', 'branch_id', 'name', 'code', 'type', 'sub_type', 'academic_year_id',
+                'id', 'branch_id', 'school_id', 'name', 'code', 'type', 'sub_type', 'academic_year_id',
                 'description', 'is_active', 'created_at', 'updated_at'
             ])
             ->with([
@@ -278,6 +278,11 @@ class AccountController extends Controller
             ])
             ->findOrFail($id);
 
+            // Tenant guard.
+            if (!$this->canAccessCategory($request, $category)) {
+                return response()->json(['success' => false, 'message' => 'Category not found'], 404);
+            }
+
             return response()->json([
                 'success' => true,
                 'data' => $category
@@ -285,7 +290,7 @@ class AccountController extends Controller
 
         } catch (\Exception $e) {
             Log::error('Get category error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Category not found',
@@ -323,6 +328,14 @@ class AccountController extends Controller
                 $branchId = $user && $user->branch_id ? $user->branch_id : null;
             }
             $validated['branch_id'] = $branchId;
+
+            // Tenant guard: when a branch is targeted, the user must be able to manage it.
+            if ($branchId && !$this->canManageBranch($request, (int) $branchId)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You do not have access to this branch'
+                ], 403);
+            }
 
             $schoolId = null;
             if ($branchId) {
@@ -405,6 +418,11 @@ class AccountController extends Controller
         DB::beginTransaction();
         try {
             $category = AccountCategory::findOrFail($id);
+
+            // Tenant guard: can't edit a category outside the user's scope.
+            if (!$this->canAccessCategory($request, $category)) {
+                return response()->json(['success' => false, 'message' => 'Category not found'], 404);
+            }
 
             $validated = $request->validate([
                 'branch_id' => 'nullable|exists:branches,id',
@@ -492,11 +510,16 @@ class AccountController extends Controller
     /**
      * Delete account category
      */
-    public function deleteCategory($id)
+    public function deleteCategory(Request $request, $id)
     {
         DB::beginTransaction();
         try {
             $category = AccountCategory::findOrFail($id);
+
+            // Tenant guard.
+            if (!$this->canAccessCategory($request, $category)) {
+                return response()->json(['success' => false, 'message' => 'Category not found'], 404);
+            }
 
             // Check if category has transactions
             if ($category->transactions()->count() > 0) {
@@ -530,11 +553,17 @@ class AccountController extends Controller
     /**
      * Toggle category status
      */
-    public function toggleCategoryStatus($id)
+    public function toggleCategoryStatus(Request $request, $id)
     {
         DB::beginTransaction();
         try {
             $category = AccountCategory::findOrFail($id);
+
+            // Tenant guard.
+            if (!$this->canAccessCategory($request, $category)) {
+                return response()->json(['success' => false, 'message' => 'Category not found'], 404);
+            }
+
             $category->is_active = !$category->is_active;
             $category->save();
 
@@ -556,6 +585,22 @@ class AccountController extends Controller
                 'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
             ], 500);
         }
+    }
+
+    /**
+     * Whether the current user can access a given category (tenant scoping).
+     * Branch-bound categories follow branch access; global (null-branch) ones follow school.
+     */
+    private function canAccessCategory(Request $request, AccountCategory $category): bool
+    {
+        if ($category->branch_id !== null) {
+            return $this->canAccessBranch($request, (int) $category->branch_id);
+        }
+        $schoolId = $this->getCurrentSchoolId($request);
+        if ($schoolId && $category->school_id) {
+            return (int) $category->school_id === (int) $schoolId;
+        }
+        return true;
     }
 
     /**

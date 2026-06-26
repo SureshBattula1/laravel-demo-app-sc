@@ -194,6 +194,32 @@ class TransactionController extends Controller
                 ], 422);
             }
 
+            // Tenant guard: user must be able to manage the target branch.
+            if (!$this->canManageBranch($request, (int) $request->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You do not have access to this branch'
+                ], 403);
+            }
+
+            // Category must belong to the same branch (or be a global category) and match the type.
+            $category = \App\Models\AccountCategory::find($request->category_id);
+            if (!$category) {
+                return response()->json(['success' => false, 'message' => 'Account category not found'], 404);
+            }
+            if ($category->branch_id !== null && (int) $category->branch_id !== (int) $request->branch_id) {
+                return response()->json([
+                    'success' => false,
+                    'errors' => ['category_id' => ['The selected category does not belong to this branch.']]
+                ], 422);
+            }
+            if ($category->type !== $request->type) {
+                return response()->json([
+                    'success' => false,
+                    'errors' => ['category_id' => ["The selected category is for {$category->type}, not {$request->type}."]]
+                ], 422);
+            }
+
             DB::beginTransaction();
 
             // Generate transaction number
@@ -257,16 +283,21 @@ class TransactionController extends Controller
     /**
      * Get single transaction
      */
-    public function show($id)
+    public function show(Request $request, $id)
     {
         try {
             $transaction = Transaction::with([
-                'category', 
-                'branch', 
-                'createdBy', 
-                'approvedBy', 
+                'category',
+                'branch',
+                'createdBy',
+                'approvedBy',
                 'salaryPayment.employee'
             ])->findOrFail($id);
+
+            // Tenant guard.
+            if (!$this->canAccessBranch($request, (int) $transaction->branch_id)) {
+                return response()->json(['success' => false, 'message' => 'Transaction not found'], 404);
+            }
 
             return response()->json([
                 'success' => true,
@@ -288,6 +319,11 @@ class TransactionController extends Controller
     {
         try {
             $transaction = Transaction::findOrFail($id);
+
+            // Tenant guard.
+            if (!$this->canManageBranch($request, (int) $transaction->branch_id)) {
+                return response()->json(['success' => false, 'message' => 'Transaction not found'], 404);
+            }
 
             // Only pending transactions can be edited
             if ($transaction->status !== 'Pending') {
@@ -351,12 +387,27 @@ class TransactionController extends Controller
     /**
      * Approve transaction
      */
-    public function approve($id)
+    public function approve(Request $request, $id)
     {
         try {
             DB::beginTransaction();
 
             $transaction = Transaction::findOrFail($id);
+
+            // Tenant guard.
+            if (!$this->canManageBranch($request, (int) $transaction->branch_id)) {
+                DB::rollBack();
+                return response()->json(['success' => false, 'message' => 'Transaction not found'], 404);
+            }
+
+            // Only pending transactions can be approved.
+            if ($transaction->status !== 'Pending') {
+                DB::rollBack();
+                return response()->json([
+                    'success' => false,
+                    'message' => "Only pending transactions can be approved (current status: {$transaction->status})."
+                ], 422);
+            }
 
             $transaction->update([
                 'status' => 'Approved',
@@ -384,10 +435,24 @@ class TransactionController extends Controller
     /**
      * Reject transaction
      */
-    public function reject($id)
+    public function reject(Request $request, $id)
     {
         try {
             $transaction = Transaction::findOrFail($id);
+
+            // Tenant guard.
+            if (!$this->canManageBranch($request, (int) $transaction->branch_id)) {
+                return response()->json(['success' => false, 'message' => 'Transaction not found'], 404);
+            }
+
+            // Only pending transactions can be rejected.
+            if ($transaction->status !== 'Pending') {
+                return response()->json([
+                    'success' => false,
+                    'message' => "Only pending transactions can be rejected (current status: {$transaction->status})."
+                ], 422);
+            }
+
             $transaction->update(['status' => 'Rejected']);
 
             return response()->json([
@@ -406,10 +471,15 @@ class TransactionController extends Controller
     /**
      * Download transaction receipt as PDF (approved transactions only)
      */
-    public function downloadReceipt(string $id)
+    public function downloadReceipt(Request $request, string $id)
     {
         try {
             $transaction = Transaction::with(['category', 'branch', 'createdBy', 'approvedBy'])->findOrFail($id);
+
+            // Tenant guard — don't leak another school's receipt PDF.
+            if (!$this->canAccessBranch($request, (int) $transaction->branch_id)) {
+                return response()->json(['success' => false, 'message' => 'Transaction not found'], 404);
+            }
 
             if ($transaction->status !== 'Approved') {
                 return response()->json([
@@ -454,10 +524,15 @@ class TransactionController extends Controller
     /**
      * Delete transaction
      */
-    public function destroy($id)
+    public function destroy(Request $request, $id)
     {
         try {
             $transaction = Transaction::findOrFail($id);
+
+            // Tenant guard.
+            if (!$this->canManageBranch($request, (int) $transaction->branch_id)) {
+                return response()->json(['success' => false, 'message' => 'Transaction not found'], 404);
+            }
 
             if ($transaction->status === 'Approved') {
                 return response()->json([
@@ -617,7 +692,14 @@ class TransactionController extends Controller
     {
         $query = Transaction::with(['category', 'branch', 'createdBy', 'approvedBy']);
 
-        // Filter by branch
+        // 🔒 TENANT SCOPING — must mirror index(), otherwise export leaks every school's data.
+        $schoolId = $this->getCurrentSchoolId($request);
+        if ($schoolId) {
+            $query->where('transactions.school_id', $schoolId);
+        }
+        $this->applyBranchFilter($query, $request, 'transactions.branch_id', 'transactions.school_id');
+
+        // Filter by branch (only within the accessible set above)
         if ($request->has('branch_id') && $request->branch_id !== '') {
             $query->where('branch_id', $request->branch_id);
         }
