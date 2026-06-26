@@ -56,12 +56,14 @@ class StudentGroupController extends Controller
                 $query->where('type', $request->type);
             }
 
-            // Filter by academic year: prefer academic_year_id (from query or X-Academic-Year-Id header)
+            // Filter by academic year: prefer academic_year_id (from query or X-Academic-Year-Id header).
+            // Only apply when it's a genuine positive integer id. A stale/undecodable hashid token
+            // would otherwise cast to 0 via (int) and silently hide EVERY group (where academic_year_id = 0).
             $academicYearId = $request->query('academic_year_id')
                 ?? $request->header('X-Academic-Year-Id');
-            if ($academicYearId !== null && $academicYearId !== '') {
+            if (is_numeric($academicYearId) && (int) $academicYearId > 0) {
                 $query->where('academic_year_id', (int) $academicYearId);
-            } elseif ($request->has('academic_year')) {
+            } elseif ($request->filled('academic_year')) {
                 $query->where('academic_year', $request->academic_year);
             }
 
@@ -143,6 +145,14 @@ class StudentGroupController extends Controller
                 ], 422);
             }
 
+            // Tenant guard: can't create a group in a branch the user can't access.
+            if (!$this->canAccessBranch($request, (int) $request->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You do not have access to the selected branch'
+                ], 403);
+            }
+
             DB::beginTransaction();
 
             $branch = \App\Models\Branch::find($request->branch_id);
@@ -190,6 +200,15 @@ class StudentGroupController extends Controller
         try {
             $group = StudentGroup::with(['branch', 'members.student', 'members.studentRecord'])
                 ->findOrFail($id);
+
+            // Tenant guard: hide groups outside the user's accessible branches.
+            // 404 (not 403) so we don't reveal that the group exists.
+            if (!$this->canAccessBranch($request, (int) $group->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Student group not found'
+                ], 404);
+            }
 
             $group->member_count = $group->members->where('is_active', true)->count();
 
@@ -252,7 +271,7 @@ class StudentGroupController extends Controller
                 if ($branchId && \Illuminate\Support\Facades\Schema::hasColumn('grades', 'branch_id')) {
                     $gradesQuery->where(function ($q) use ($branchId) {
                         $q->where('branch_id', $branchId)->orWhereNull('branch_id');
-                    })->orderByRaw('branch_id IS NOT NULL DESC'); // prefer branch-specific
+                    })->orderByRaw('branch_id IS NULL DESC'); // NULL (global) first so branch-specific rows come last and win in pluck()
                 }
                 $gradeLabels = $gradesQuery->pluck('label', 'value')->toArray();
             }
@@ -308,6 +327,14 @@ class StudentGroupController extends Controller
     {
         try {
             $group = StudentGroup::findOrFail($id);
+
+            // Tenant guard: can't edit a group outside the user's accessible branches.
+            if (!$this->canAccessBranch($request, (int) $group->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Student group not found'
+                ], 404);
+            }
 
             $validator = Validator::make($request->all(), [
                 'name' => 'sometimes|string|max:255',
@@ -374,12 +401,21 @@ class StudentGroupController extends Controller
     /**
      * Delete student group
      */
-    public function destroy($id)
+    public function destroy(Request $request, $id)
     {
         try {
+            $group = StudentGroup::findOrFail($id);
+
+            // Tenant guard: can't delete a group outside the user's accessible branches.
+            if (!$this->canAccessBranch($request, (int) $group->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Student group not found'
+                ], 404);
+            }
+
             DB::beginTransaction();
 
-            $group = StudentGroup::findOrFail($id);
             $group->delete();
 
             DB::commit();
@@ -428,6 +464,14 @@ class StudentGroupController extends Controller
 
             $group = StudentGroup::findOrFail($id);
 
+            // Tenant guard: can't modify members of a group outside accessible branches.
+            if (!$this->canAccessBranch($request, (int) $group->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Student group not found'
+                ], 404);
+            }
+
             // Ensure student belongs to the group's branch
             $student = \App\Models\Student::find($request->student_id);
             if (!$student || $student->branch_id != $group->branch_id) {
@@ -467,9 +511,14 @@ class StudentGroupController extends Controller
                 'message' => 'Student added to group successfully'
             ]);
 
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Student group not found'
+            ], 404);
         } catch (\Exception $e) {
             Log::error('Add group member error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to add student to group'
@@ -480,9 +529,19 @@ class StudentGroupController extends Controller
     /**
      * Remove student from group
      */
-    public function removeMember($id, $studentId)
+    public function removeMember(Request $request, $id, $studentId)
     {
         try {
+            $group = StudentGroup::findOrFail($id);
+
+            // Tenant guard: can't modify members of a group outside accessible branches.
+            if (!$this->canAccessBranch($request, (int) $group->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Student group not found'
+                ], 404);
+            }
+
             DB::table('student_group_members')
                 ->where('group_id', $id)
                 ->where('student_id', $studentId)
@@ -495,6 +554,11 @@ class StudentGroupController extends Controller
                 'message' => 'Student removed from group successfully'
             ]);
 
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Student group not found'
+            ], 404);
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
