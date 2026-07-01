@@ -1,0 +1,16 @@
+#!/bin/sh
+# Fast local style check before commit. Full test suite runs in CI, not here.
+# Activated automatically by `composer install`/`composer update` (see composer.json
+# post-install-cmd/post-update-cmd), which run `git config core.hooksPath .githooks`.
+
+echo "Running Laravel Pint on staged PHP files..."
+./vendor/bin/pint --dirty --test
+
+if [ $? -ne 0 ]; then
+  echo ""
+  echo "Pint found style issues in staged files."
+  echo "Run: ./vendor/bin/pint --dirty   (then re-stage and commit again)"
+  exit 1
+fi
+
+exit 0

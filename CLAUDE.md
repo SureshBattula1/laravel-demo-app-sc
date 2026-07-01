@@ -65,6 +65,27 @@ Notes:
 - `.dockerignore` excludes `vendor`, `.env`, and the SQLite file; the image runs
   `composer install` itself. `entrypoint.sh` must keep **LF** line endings.
 
+## CI & pre-commit automation
+
+- **CI** (`.github/workflows/ci.yml`): on every push/PR, installs Composer deps, runs
+  `./vendor/bin/pint --test` (style) and `php artisan test` (PHPUnit, against the sqlite
+  `:memory:` DB already configured in `phpunit.xml` — no DB service container needed).
+- **Pre-commit hook** (`.githooks/pre-commit`, plain shell — no extra Composer package):
+  runs `./vendor/bin/pint --dirty --test` on staged files only. Activated automatically by
+  `composer install`/`composer update` (`post-install-cmd`/`post-update-cmd` run
+  `git config core.hooksPath .githooks`); safe to re-run, and a no-op (`|| true`) anywhere
+  `.git` isn't present (e.g. the Docker build, which already runs Composer with
+  `--no-scripts` anyway).
+- **`tests/Unit/ControllerTenantGuardTest.php`** is a static (no DB/app boot) architecture
+  test: it reflects into a curated list of controllers and asserts their single-record
+  action methods (`show`/`update`/`destroy`/...) call a branch-access guard
+  (`canAccessBranch`/`canManageBranch`/similar). **When you add a new tenant-scoped
+  controller with single-record actions, add it to `CHECKED_CONTROLLERS` in that test** —
+  this is what would have caught the `DepartmentController` gap automatically. It also
+  caught a live one while being built: `BranchTransferController` had no branch check at
+  all on `show`/`approve`/`reject`/`complete`/`cancel` (its model, `BranchTransfer`, spans
+  two branches and was never `BelongsToTenant`-scoped) — now fixed the same way.
+
 ## Architecture & conventions
 
 **Multi-tenancy hierarchy — this is the most important concept:**
@@ -127,6 +148,8 @@ Before shipping a new endpoint or controller method, check all of these — the
    an explicit `canAccessBranch($request, $record->branch_id)` (or equivalent) check in
    `show`/`update`/`destroy`/custom actions. `AdmissionController` and `StudentGroupController`
    are the reference implementations — every method checks, not just the list endpoint.
+   **Add the controller to `tests/Unit/ControllerTenantGuardTest.php`** so CI enforces this
+   automatically instead of relying on review.
 2. **Validation via Form Request**, not another inline `Validator::make()` block — the codebase
    is mid-migration to Form Requests (`StoreStudentRequest`, `StoreBranchRequest`); add to that
    pattern rather than the inline one.
