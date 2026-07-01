@@ -199,7 +199,7 @@ class BranchTransferController extends Controller
     /**
      * Show transfer details
      */
-    public function show($id)
+    public function show(Request $request, $id)
     {
         try {
             $transfer = BranchTransfer::with([
@@ -210,6 +210,15 @@ class BranchTransferController extends Controller
                 'approver'
             ])->findOrFail($id);
 
+            // Tenant guard: BranchTransfer has no BelongsToTenant scope (it spans two
+            // branches), so accessible-branch membership must be checked explicitly here.
+            if (!$this->canTransferBranch($request, $transfer)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Transfer not found'
+                ], 404);
+            }
+
             return response()->json([
                 'success' => true,
                 'data' => $transfer
@@ -217,12 +226,22 @@ class BranchTransferController extends Controller
 
         } catch (\Exception $e) {
             Log::error('Get transfer details error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Transfer not found'
             ], 404);
         }
+    }
+
+    /**
+     * Whether the current user can access this transfer — true if they can access
+     * either the source or destination branch (they may be admin of either side).
+     */
+    private function canTransferBranch(Request $request, BranchTransfer $transfer): bool
+    {
+        return $this->canAccessBranch($request, (int) $transfer->from_branch_id)
+            || $this->canAccessBranch($request, (int) $transfer->to_branch_id);
     }
 
     /**
@@ -243,6 +262,13 @@ class BranchTransferController extends Controller
             }
 
             $transfer = BranchTransfer::findOrFail($id);
+
+            if (!$this->canTransferBranch($request, $transfer)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Transfer not found'
+                ], 404);
+            }
 
             if (!$transfer->canBeApproved()) {
                 return response()->json([
@@ -312,6 +338,13 @@ class BranchTransferController extends Controller
 
             $transfer = BranchTransfer::findOrFail($id);
 
+            if (!$this->canTransferBranch($request, $transfer)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Transfer not found'
+                ], 404);
+            }
+
             if (!$transfer->canBeApproved()) {
                 return response()->json([
                     'success' => false,
@@ -364,10 +397,17 @@ class BranchTransferController extends Controller
     /**
      * Complete/Execute transfer (move user to new branch)
      */
-    public function complete($id)
+    public function complete(Request $request, $id)
     {
         try {
             $transfer = BranchTransfer::with(['user', 'fromBranch', 'toBranch'])->findOrFail($id);
+
+            if (!$this->canTransferBranch($request, $transfer)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Transfer not found'
+                ], 404);
+            }
 
             if ($transfer->status !== 'Approved') {
                 return response()->json([
@@ -430,10 +470,17 @@ class BranchTransferController extends Controller
     /**
      * Cancel transfer request
      */
-    public function cancel($id)
+    public function cancel(Request $request, $id)
     {
         try {
             $transfer = BranchTransfer::findOrFail($id);
+
+            if (!$this->canTransferBranch($request, $transfer)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Transfer not found'
+                ], 404);
+            }
 
             if (!$transfer->canBeCancelled()) {
                 return response()->json([

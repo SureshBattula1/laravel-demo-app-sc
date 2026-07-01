@@ -190,7 +190,7 @@ class DepartmentController extends Controller
     /**
      * Display specific department
      */
-    public function show($id)
+    public function show(Request $request, $id)
     {
         try {
             if (!is_numeric($id)) {
@@ -201,7 +201,16 @@ class DepartmentController extends Controller
             }
 
             $department = Department::with(['branch', 'headOfDepartment', 'subjects'])->findOrFail($id);
-            
+
+            // Tenant guard: hide departments outside the user's accessible branches.
+            // 404 (not 403) so we don't reveal that the department exists.
+            if (!$this->canAccessBranch($request, (int) $department->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Department not found'
+                ], 404);
+            }
+
             return response()->json([
                 'success' => true,
                 'data' => $department
@@ -237,6 +246,14 @@ class DepartmentController extends Controller
             }
 
             $department = Department::findOrFail($id);
+
+            // Tenant guard: hide departments outside the user's accessible branches.
+            if (!$this->canAccessBranch($request, (int) $department->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Department not found'
+                ], 404);
+            }
 
             $validator = Validator::make($request->all(), [
                 'name' => 'sometimes|string|max:255|regex:/^[a-zA-Z0-9\s\-&]+$/',
@@ -307,7 +324,7 @@ class DepartmentController extends Controller
     /**
      * Delete department (soft delete)
      */
-    public function destroy($id)
+    public function destroy(Request $request, $id)
     {
         try {
             if (!is_numeric($id)) {
@@ -320,7 +337,16 @@ class DepartmentController extends Controller
             DB::beginTransaction();
 
             $department = Department::findOrFail($id);
-            
+
+            // Tenant guard: hide departments outside the user's accessible branches.
+            if (!$this->canAccessBranch($request, (int) $department->branch_id)) {
+                DB::rollBack();
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Department not found'
+                ], 404);
+            }
+
             // Check if department has subjects
             if ($department->subjects()->count() > 0) {
                 DB::rollBack();
@@ -361,7 +387,7 @@ class DepartmentController extends Controller
     /**
      * Toggle department active status
      */
-    public function toggleStatus($id)
+    public function toggleStatus(Request $request, $id)
     {
         try {
             if (!is_numeric($id)) {
@@ -374,6 +400,16 @@ class DepartmentController extends Controller
             DB::beginTransaction();
 
             $department = Department::findOrFail($id);
+
+            // Tenant guard: hide departments outside the user's accessible branches.
+            if (!$this->canAccessBranch($request, (int) $department->branch_id)) {
+                DB::rollBack();
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Department not found'
+                ], 404);
+            }
+
             $department->is_active = !$department->is_active;
             $department->save();
 
