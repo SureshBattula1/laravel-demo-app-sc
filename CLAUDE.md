@@ -116,6 +116,34 @@ class in this codebase.
 > base controllers. Confirm which is actually routed before editing — they may be
 > parallel/legacy implementations.
 
+## New feature checklist
+
+Before shipping a new endpoint or controller method, check all of these — the
+`DepartmentController` gap (branch scoping fixed on `index`/`store` but missing on
+`show`/`update`/`destroy`/`toggleStatus`) is the cautionary example for #1:
+
+1. **Tenant scoping on every single-record method, not just `index()`.** Any model holding
+   tenant data should use `BelongsToTenant`, but that's defense-in-depth, not a substitute for
+   an explicit `canAccessBranch($request, $record->branch_id)` (or equivalent) check in
+   `show`/`update`/`destroy`/custom actions. `AdmissionController` and `StudentGroupController`
+   are the reference implementations — every method checks, not just the list endpoint.
+2. **Validation via Form Request**, not another inline `Validator::make()` block — the codebase
+   is mid-migration to Form Requests (`StoreStudentRequest`, `StoreBranchRequest`); add to that
+   pattern rather than the inline one.
+3. **Performance-sensitive list endpoints** use the query builder (`DB::table`) with explicit
+   joins/column selection, and the `PaginatesAndSorts` trait for pagination/sorting — see
+   `StudentController::index`.
+4. **Multi-table writes go in a DB transaction** (`DB::beginTransaction`/`commit`/`rollBack`),
+   matching `StudentPromotionService` and `ImportService`.
+5. **Route it behind `permission:<module>.<action>`** with a slug that matches exactly what the
+   UI's route `data.permissions` and `*hasPermission` directive expect — a mismatch silently
+   hides the feature client-side rather than erroring.
+6. **Add a feature test.** Coverage is thin — this is the main safety net against regressions
+   like the tenant-scoping gap above.
+7. **Response shape** should match existing conventions: the standard paginated envelope, and
+   hashid-encoded IDs if `HASHIDS_ENABLED=true` (don't return raw ints on one endpoint and
+   hashids on another).
+
 ## Gotchas
 
 - `SMS_BULK_DISPATCH_SYNC=true` runs bulk SMS jobs inside the HTTP request (no worker
