@@ -173,11 +173,16 @@ class StudentService
      */
     public function getStudentStats($branchId = null)
     {
-        $cacheKey = "student:stats:" . ($branchId ?? 'all');
-        
+        // Key the cache by the caller's tenant scope as well, otherwise the
+        // scopedToTenant() filter below would let one tenant read another
+        // tenant's cached stats.
+        $scope = app(\App\Services\TenantContext::class)->accessibleBranchIds();
+        $scopeKey = is_array($scope) ? implode('-', $scope) : (string) $scope;
+        $cacheKey = "student:stats:" . ($branchId ?? 'all') . ":" . $scopeKey;
+
         return Cache::remember($cacheKey, 600, function () use ($branchId) {
-            $query = DB::table('students');
-            
+            $query = DB::table('students')->scopedToTenant('branch_id');
+
             if ($branchId) {
                 $query->where('branch_id', $branchId);
             }

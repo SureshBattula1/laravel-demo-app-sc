@@ -400,7 +400,7 @@ class StudentController extends Controller
     /**
      * Get student by user_id (for logged-in student to view their own profile)
      */
-    public function getByUserId($userId)
+    public function getByUserId(Request $request, $userId)
     {
         try {
             $student = DB::table('students')
@@ -414,6 +414,7 @@ class StudentController extends Controller
                     }
                 })
                 ->where('students.user_id', $userId)
+                ->scopedToTenant('students.branch_id')
                 ->select(
                     'students.id',
                     'students.user_id',

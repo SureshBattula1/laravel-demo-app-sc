@@ -778,6 +778,7 @@ class AttendanceController extends Controller
                 ->where('students.section', $section)
                 ->whereNull('students.deleted_at') // ✅ ONLY ACTIVE STUDENTS
                 ->whereDate('student_attendance.date', $date)
+                ->scopedToTenant('student_attendance.branch_id')
                 ->select(
                     'student_attendance.*',
                     'users.first_name',
@@ -795,6 +796,7 @@ class AttendanceController extends Controller
                 ->where('students.section', $section)
                 ->whereNull('students.deleted_at') // ✅ ONLY ACTIVE STUDENTS
                 ->whereDate('student_attendance.date', $date)
+                ->scopedToTenant('student_attendance.branch_id')
                 ->select(
                     DB::raw('COUNT(*) as total'),
                     DB::raw('SUM(CASE WHEN student_attendance.status = "Present" THEN 1 ELSE 0 END) as present'),
@@ -850,7 +852,8 @@ class AttendanceController extends Controller
             $table = $type . '_attendance';
 
             $query = DB::table($table)
-                ->whereBetween('date', [$request->from_date, $request->to_date]);
+                ->whereBetween('date', [$request->from_date, $request->to_date])
+                ->scopedToTenant('branch_id');
 
             if ($request->has('branch_id')) {
                 $query->where('branch_id', $request->branch_id);
@@ -868,7 +871,8 @@ class AttendanceController extends Controller
 
             // OPTIMIZED: Calculate summary using SQL aggregation
             $summaryQuery = (clone DB::table($table)
-                ->whereBetween('date', [$request->from_date, $request->to_date]));
+                ->whereBetween('date', [$request->from_date, $request->to_date])
+                ->scopedToTenant('branch_id'));
 
             if ($request->has('branch_id')) {
                 $summaryQuery->where('branch_id', $request->branch_id);
@@ -933,6 +937,7 @@ class AttendanceController extends Controller
             $attendance = DB::table('student_attendance')
                 ->where('student_id', $studentId)
                 ->whereBetween('date', [$from_date, $to_date])
+                ->scopedToTenant('branch_id')
                 ->orderBy('date', 'desc')
                 ->get();
 
@@ -940,6 +945,7 @@ class AttendanceController extends Controller
             $summaryQuery = DB::table('student_attendance')
                 ->where('student_id', $studentId)
                 ->whereBetween('date', [$from_date, $to_date])
+                ->scopedToTenant('branch_id')
                 ->select(
                     DB::raw('COUNT(*) as total_days'),
                     DB::raw('SUM(CASE WHEN status = "Present" THEN 1 ELSE 0 END) as present'),

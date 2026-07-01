@@ -2,11 +2,13 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToTenant;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class SmsTemplate extends Model
 {
+    use BelongsToTenant;
     public const AUDIENCE_STUDENT = 'student';
 
     public const AUDIENCE_TEACHER = 'teacher';

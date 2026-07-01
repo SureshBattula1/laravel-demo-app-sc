@@ -14,29 +14,8 @@ abstract class Controller
      */
     protected function getCurrentSchoolId(Request $request): ?int
     {
-        $user = $request->user();
-        
-        if (!$user) {
-            return null;
-        }
-
-        // Get school_id from user's branch
-        if ($user->branch_id) {
-            $branch = \App\Models\Branch::find($user->branch_id);
-            return $branch ? $branch->school_id : null;
-        }
-
-        // SuperAdmin in company context: default to a school in that company
-        if ($user->role === 'SuperAdmin' && !empty($user->company_id)) {
-            $schoolId = \Illuminate\Support\Facades\DB::table('schools')
-                ->where('company_id', $user->company_id)
-                ->whereNull('deleted_at')
-                ->orderBy('id', 'asc')
-                ->value('id');
-            return $schoolId ? (int) $schoolId : null;
-        }
-
-        return null;
+        // Delegates to TenantContext — the single source of truth for tenant scoping.
+        return app(\App\Services\TenantContext::class)->currentSchoolId();
     }
 
     /**
@@ -69,106 +48,10 @@ abstract class Controller
      */
     protected function getAccessibleBranchIds(Request $request): array|string
     {
-        $user = $request->user();
-        
-        if (!$user) {
-            return [];
-        }
-        
-        // SuperAdmin: if user has company_id or branch_id, limit to those (e.g. Company Portal)
-        if ($user->role === 'SuperAdmin') {
-            if (!empty($user->company_id)) {
-                return $this->getBranchIdsForCompany($user->company_id);
-            }
-            if (!empty($user->branch_id)) {
-                return [$user->branch_id];
-            }
-            return 'all';
-        }
-
-        // Get school context
-        $schoolId = $this->getCurrentSchoolId($request);
-        
-        // ✅ OPTIMIZED: Check role first before expensive permission checks
-        // BranchAdmin can access their branch + descendants within same school
-        if ($user->role === 'BranchAdmin') {
-            if (!$user->branch_id) {
-                return [];
-            }
-            
-            // ✅ OPTIMIZED: Use raw query to get descendant IDs without loading model
-            // This avoids loading the Branch model and directly executes the CTE
-            $params = [$user->branch_id];
-            $sql = "
-                WITH RECURSIVE branch_tree AS (
-                    SELECT id, parent_branch_id, school_id
-                    FROM branches
-                    WHERE parent_branch_id = ?
-                    AND deleted_at IS NULL";
-            
-            if ($schoolId) {
-                $sql .= " AND school_id = ?";
-                $params[] = $schoolId;
-            }
-            
-            $sql .= "
-                    UNION ALL
-                    
-                    SELECT b.id, b.parent_branch_id, b.school_id
-                    FROM branches b
-                    INNER JOIN branch_tree bt ON b.parent_branch_id = bt.id
-                    WHERE b.deleted_at IS NULL";
-            
-            if ($schoolId) {
-                $sql .= " AND b.school_id = ?";
-                $params[] = $schoolId;
-            }
-            
-            $sql .= "
-                )
-                SELECT id FROM branch_tree
-            ";
-            
-            $descendants = \Illuminate\Support\Facades\DB::select($sql, $params);
-            
-            $ids = collect($descendants)->pluck('id')->toArray();
-            array_unshift($ids, $user->branch_id); // Include self
-            
-            return $ids;
-        }
-        
-        // ✅ OPTIMIZED: Check for cross-branch access permission with single optimized query
-        // Check permissions directly without method call overhead
-        $hasCrossBranch = \Illuminate\Support\Facades\DB::table('user_roles')
-            ->join('role_permissions', 'user_roles.role_id', '=', 'role_permissions.role_id')
-            ->join('permissions', 'role_permissions.permission_id', '=', 'permissions.id')
-            ->where('user_roles.user_id', $user->id)
-            ->whereIn('permissions.slug', [
-                'system.cross_branch_access',
-                'system.manage_all_branches',
-                'system.view_all_branches'
-            ])
-            ->exists();
-        
-        if ($hasCrossBranch) {
-            // If user has cross-branch access but is in a school context, limit to school branches
-            if ($schoolId) {
-                $branchIds = \Illuminate\Support\Facades\DB::table('branches')
-                    ->where('school_id', $schoolId)
-                    ->where('is_active', true)
-                    ->pluck('id')
-                    ->toArray();
-                return $branchIds;
-            }
-            // Company Portal: limit to company's branches when user has company_id
-            if (!empty($user->company_id)) {
-                return $this->getBranchIdsForCompany($user->company_id);
-            }
-            return 'all';
-        }
-        
-        // All other roles: only their assigned branch (fastest - no DB query)
-        return $user->branch_id ? [$user->branch_id] : [];
+        // Delegates to TenantContext — the single source of truth for tenant scoping.
+        // (Equivalent to the previous inline logic; in an authenticated controller
+        // route $request->user() is always present.)
+        return app(\App\Services\TenantContext::class)->accessibleBranchIds();
     }
     
     /**

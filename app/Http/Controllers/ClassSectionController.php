@@ -24,7 +24,8 @@ class ClassSectionController extends Controller
                     DB::raw('COUNT(*) as student_count'),
                     DB::raw("CONCAT(grade, ' ', COALESCE(section, '')) as class_name")
                 )
-                ->groupBy('branch_id', 'grade', 'section', 'academic_year');
+                ->groupBy('branch_id', 'grade', 'section', 'academic_year')
+                ->scopedToTenant('branch_id');
 
             // Filters
             if ($request->has('branch_id')) {
@@ -76,7 +77,8 @@ class ClassSectionController extends Controller
         try {
             $query = DB::table('students')
                 ->join('users', 'students.user_id', '=', 'users.id')
-                ->where('students.grade', $grade);
+                ->where('students.grade', $grade)
+                ->scopedToTenant('students.branch_id');
 
             if ($section && $section !== 'null') {
                 $query->where('students.section', $section);
@@ -113,7 +115,8 @@ class ClassSectionController extends Controller
         try {
             $query = DB::table('students')
                 ->select('grade', DB::raw('COUNT(*) as count'))
-                ->groupBy('grade');
+                ->groupBy('grade')
+                ->scopedToTenant('branch_id');
 
             if ($request->has('branch_id')) {
                 $query->where('branch_id', $request->branch_id);
@@ -144,7 +147,8 @@ class ClassSectionController extends Controller
                 ->select('section', DB::raw('COUNT(*) as count'))
                 ->where('grade', $grade)
                 ->whereNotNull('section')
-                ->groupBy('section');
+                ->groupBy('section')
+                ->scopedToTenant('branch_id');
 
             if ($request->has('branch_id')) {
                 $query->where('branch_id', $request->branch_id);

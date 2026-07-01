@@ -633,17 +633,23 @@ class DashboardController extends Controller
             // Upcoming exams (next 7 days from today)
             $upcomingExams = 0;
             if (Schema::hasTable('exams')) {
-                $upcomingExams = DB::table('exams')
+                $upcomingExamsQuery = DB::table('exams')
                     ->where('date', '>=', Carbon::today())
-                    ->where('date', '<=', Carbon::today()->addDays(7))
-                    ->count();
+                    ->where('date', '<=', Carbon::today()->addDays(7));
+                if ($branchIds !== 'all' && !empty($branchIds)) {
+                    $upcomingExamsQuery->whereIn('branch_id', $branchIds);
+                }
+                $upcomingExams = $upcomingExamsQuery->count();
             }
-            
+
             // Teachers on leave today
-            $teachersOnLeave = DB::table('teacher_attendance')
+            $teachersOnLeaveQuery = DB::table('teacher_attendance')
                 ->where('date', Carbon::today())
-                ->whereIn('status', ['Leave', 'Sick Leave', 'Half-Day'])
-                ->count();
+                ->whereIn('status', ['Leave', 'Sick Leave', 'Half-Day']);
+            if ($branchIds !== 'all' && !empty($branchIds)) {
+                $teachersOnLeaveQuery->whereIn('branch_id', $branchIds);
+            }
+            $teachersOnLeave = $teachersOnLeaveQuery->count();
             
             return [
                 'new_admissions' => $newAdmissions,

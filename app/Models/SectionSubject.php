@@ -2,11 +2,13 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToTenant;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class SectionSubject extends Model
 {
+    use BelongsToTenant;
     protected $fillable = [
         'section_id',
         'subject_id',
