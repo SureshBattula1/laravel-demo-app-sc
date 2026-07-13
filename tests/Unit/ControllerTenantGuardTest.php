@@ -7,6 +7,10 @@ use App\Http\Controllers\BranchTransferController;
 use App\Http\Controllers\DepartmentController;
 use App\Http\Controllers\LibraryController;
 use App\Http\Controllers\StudentGroupController;
+use App\Http\Controllers\StudentTransportController;
+use App\Http\Controllers\TransportDriverController;
+use App\Http\Controllers\TransportRouteController;
+use App\Http\Controllers\VehicleController;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use ReflectionMethod;
@@ -36,6 +40,10 @@ class ControllerTenantGuardTest extends TestCase
         AdmissionController::class => ['show', 'update', 'destroy', 'updateStatus', 'convertToStudent'],
         BranchTransferController::class => ['show', 'approve', 'reject', 'complete', 'cancel'],
         LibraryController::class => ['show', 'update', 'destroy', 'issueBook', 'returnBook', 'getBookHistory'],
+        VehicleController::class => ['show', 'update', 'destroy'],
+        TransportDriverController::class => ['show', 'update', 'destroy'],
+        TransportRouteController::class => ['show', 'update', 'destroy', 'getRouteStops', 'getRouteStudents'],
+        StudentTransportController::class => ['show', 'update', 'destroy'],
     ];
 
     /** Method-body substrings that count as an explicit branch-access guard. */

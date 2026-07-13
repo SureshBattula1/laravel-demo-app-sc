@@ -178,4 +178,24 @@ abstract class Controller
     {
         return $this->getCurrentSchoolId($request);
     }
+
+    /**
+     * Standard 403 for a branch a user may not access.
+     */
+    protected function forbiddenResponse(string $message = 'You do not have access to this branch')
+    {
+        return response()->json(['success' => false, 'message' => $message], 403);
+    }
+
+    /**
+     * Standard 500 (exposes the message only in local).
+     */
+    protected function serverErrorResponse(string $message, \Throwable $e)
+    {
+        return response()->json([
+            'success' => false,
+            'message' => $message,
+            'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+        ], 500);
+    }
 }

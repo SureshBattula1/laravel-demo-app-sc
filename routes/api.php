@@ -17,6 +17,10 @@ use App\Http\Controllers\AttendanceController;
 use App\Http\Controllers\LeaveController;
 use App\Http\Controllers\LibraryController;
 use App\Http\Controllers\TransportController;
+use App\Http\Controllers\VehicleController;
+use App\Http\Controllers\TransportDriverController;
+use App\Http\Controllers\TransportRouteController;
+use App\Http\Controllers\StudentTransportController;
 use App\Http\Controllers\EventController;
 use App\Http\Controllers\TimetableController;
 use App\Http\Controllers\TeacherController;
@@ -387,10 +391,31 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
     Route::put('books/{id}', [LibraryController::class, 'update'])->middleware('permission:library.edit');
     Route::delete('books/{id}', [LibraryController::class, 'destroy'])->middleware('permission:library.delete');
     
-    // Transport Routes
-    Route::apiResource('transport-routes', TransportController::class);
-    Route::apiResource('vehicles', TransportController::class);
-    Route::get('transport-routes/{id}/students', [TransportController::class, 'getRouteStudents']);
+    // Transport (Phase 1: management) — permission-gated; literal routes before {id} routes
+    Route::get('transport-drivers', [TransportDriverController::class, 'index'])->middleware('permission:transport.view');
+    Route::post('transport-drivers', [TransportDriverController::class, 'store'])->middleware('permission:transport.create');
+    Route::get('transport-drivers/{id}', [TransportDriverController::class, 'show'])->middleware('permission:transport.view');
+    Route::put('transport-drivers/{id}', [TransportDriverController::class, 'update'])->middleware('permission:transport.edit');
+    Route::delete('transport-drivers/{id}', [TransportDriverController::class, 'destroy'])->middleware('permission:transport.delete');
+
+    Route::get('vehicles', [VehicleController::class, 'index'])->middleware('permission:transport.view');
+    Route::post('vehicles', [VehicleController::class, 'store'])->middleware('permission:transport.create');
+    Route::get('vehicles/{id}', [VehicleController::class, 'show'])->middleware('permission:transport.view');
+    Route::put('vehicles/{id}', [VehicleController::class, 'update'])->middleware('permission:transport.edit');
+    Route::delete('vehicles/{id}', [VehicleController::class, 'destroy'])->middleware('permission:transport.delete');
+
+    Route::get('transport-routes/{id}/stops', [TransportRouteController::class, 'getRouteStops'])->middleware('permission:transport.view');
+    Route::get('transport-routes/{id}/students', [TransportRouteController::class, 'getRouteStudents'])->middleware('permission:transport.view');
+    Route::get('transport-routes', [TransportRouteController::class, 'index'])->middleware('permission:transport.view');
+    Route::post('transport-routes', [TransportRouteController::class, 'store'])->middleware('permission:transport.create');
+    Route::get('transport-routes/{id}', [TransportRouteController::class, 'show'])->middleware('permission:transport.view');
+    Route::put('transport-routes/{id}', [TransportRouteController::class, 'update'])->middleware('permission:transport.edit');
+    Route::delete('transport-routes/{id}', [TransportRouteController::class, 'destroy'])->middleware('permission:transport.delete');
+
+    Route::post('student-transport', [StudentTransportController::class, 'store'])->middleware('permission:transport.assign');
+    Route::get('student-transport/{id}', [StudentTransportController::class, 'show'])->middleware('permission:transport.view');
+    Route::put('student-transport/{id}', [StudentTransportController::class, 'update'])->middleware('permission:transport.assign');
+    Route::delete('student-transport/{id}', [StudentTransportController::class, 'destroy'])->middleware('permission:transport.assign');
     
     // Event Routes
     Route::apiResource('events', EventController::class);

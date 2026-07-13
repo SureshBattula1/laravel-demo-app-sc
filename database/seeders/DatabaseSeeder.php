@@ -460,6 +460,14 @@ class DatabaseSeeder extends Seeder
                 'route' => '/library',
                 'order' => 27,
                 'permissions' => ['view', 'create', 'edit', 'delete', 'issue', 'return', 'export']
+            ],
+            [
+                'name' => 'Transport',
+                'slug' => 'transport',
+                'icon' => 'directions_bus',
+                'route' => '/transport',
+                'order' => 28,
+                'permissions' => ['view', 'create', 'edit', 'delete', 'assign', 'export']
             ]
         ];
 
@@ -542,6 +550,8 @@ class DatabaseSeeder extends Seeder
             'search.global',
             'library.view', 'library.create', 'library.edit', 'library.delete',
             'library.issue', 'library.return', 'library.export',
+            'transport.view', 'transport.create', 'transport.edit', 'transport.delete',
+            'transport.assign', 'transport.export',
         ])->pluck('id')->toArray();
         $branchAdmin->permissions()->sync($branchAdminPerms);
         $this->command->info("   ✓ Branch Admin: " . count($branchAdminPerms) . " permissions");
@@ -564,6 +574,7 @@ class DatabaseSeeder extends Seeder
             'import.view', 'import.template', // Teachers can view imports and download templates
             'search.global',
             'library.view',
+            'transport.view',
         ])->pluck('id')->toArray();
         $teacher->permissions()->sync($teacherPerms);
         $this->command->info("   ✓ Teacher: " . count($teacherPerms) . " permissions");
@@ -583,6 +594,7 @@ class DatabaseSeeder extends Seeder
             'leaves.view', 'leaves.create', 'leaves.edit', 'leaves.approve', 'leaves.reject', // Staff can manage leaves
             'import.view', 'import.upload', 'import.validate', 'import.commit', 'import.cancel', 'import.template', // Staff can manage imports
             'library.view', 'library.issue', 'library.return', // Staff run the library desk
+            'transport.view', 'transport.create', 'transport.edit', 'transport.assign', // Staff manage transport
         ])->pluck('id')->toArray();
         $staff->permissions()->sync($staffPerms);
         $this->command->info("   ✓ Staff: " . count($staffPerms) . " permissions");
