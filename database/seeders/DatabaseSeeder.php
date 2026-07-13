@@ -452,6 +452,14 @@ class DatabaseSeeder extends Seeder
                 'route' => '/search',
                 'order' => 26,
                 'permissions' => ['global']
+            ],
+            [
+                'name' => 'Library',
+                'slug' => 'library',
+                'icon' => 'local_library',
+                'route' => '/library',
+                'order' => 27,
+                'permissions' => ['view', 'create', 'edit', 'delete', 'issue', 'return', 'export']
             ]
         ];
 
@@ -532,6 +540,8 @@ class DatabaseSeeder extends Seeder
             'settings.view',
             'users.view',
             'search.global',
+            'library.view', 'library.create', 'library.edit', 'library.delete',
+            'library.issue', 'library.return', 'library.export',
         ])->pluck('id')->toArray();
         $branchAdmin->permissions()->sync($branchAdminPerms);
         $this->command->info("   ✓ Branch Admin: " . count($branchAdminPerms) . " permissions");
@@ -553,6 +563,7 @@ class DatabaseSeeder extends Seeder
             'leaves.view', 'leaves.create', // Teachers can view and create their own leaves
             'import.view', 'import.template', // Teachers can view imports and download templates
             'search.global',
+            'library.view',
         ])->pluck('id')->toArray();
         $teacher->permissions()->sync($teacherPerms);
         $this->command->info("   ✓ Teacher: " . count($teacherPerms) . " permissions");
@@ -571,6 +582,7 @@ class DatabaseSeeder extends Seeder
             'bulk_management.view', 'bulk_management.create', 'bulk_management.edit',
             'leaves.view', 'leaves.create', 'leaves.edit', 'leaves.approve', 'leaves.reject', // Staff can manage leaves
             'import.view', 'import.upload', 'import.validate', 'import.commit', 'import.cancel', 'import.template', // Staff can manage imports
+            'library.view', 'library.issue', 'library.return', // Staff run the library desk
         ])->pluck('id')->toArray();
         $staff->permissions()->sync($staffPerms);
         $this->command->info("   ✓ Staff: " . count($staffPerms) . " permissions");

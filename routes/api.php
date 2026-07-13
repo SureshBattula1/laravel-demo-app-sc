@@ -372,13 +372,20 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
     Route::get('leaves/teacher/{teacherId}', [LeaveController::class, 'getTeacherLeaves']);
     Route::apiResource('leaves', LeaveController::class);
     
-    // Library Routes
-    Route::apiResource('books', LibraryController::class);
-    Route::post('books/{id}/issue', [LibraryController::class, 'issueBook']);
-    Route::post('book-issues/{id}/return', [LibraryController::class, 'returnBook']);
-    Route::get('book-issues/active', [LibraryController::class, 'getActiveIssues']);
-    Route::get('book-issues/overdue', [LibraryController::class, 'getOverdueIssues']);
-    Route::get('students/{studentId}/book-issues', [LibraryController::class, 'getStudentIssues']);
+    // Library Routes (permission-gated; literal routes before {id} routes so
+    // DecodeHashids resolves ids and there is no route conflict)
+    Route::get('book-issues/active', [LibraryController::class, 'getActiveIssues'])->middleware('permission:library.view');
+    Route::get('book-issues/overdue', [LibraryController::class, 'getOverdueIssues'])->middleware('permission:library.view');
+    Route::post('book-issues/{id}/return', [LibraryController::class, 'returnBook'])->middleware('permission:library.return');
+    Route::get('students/{studentId}/book-issues', [LibraryController::class, 'getStudentIssues'])->middleware('permission:library.view');
+
+    Route::get('books', [LibraryController::class, 'index'])->middleware('permission:library.view');
+    Route::post('books', [LibraryController::class, 'store'])->middleware('permission:library.create');
+    Route::post('books/{id}/issue', [LibraryController::class, 'issueBook'])->middleware('permission:library.issue');
+    Route::get('books/{id}/history', [LibraryController::class, 'getBookHistory'])->middleware('permission:library.view');
+    Route::get('books/{id}', [LibraryController::class, 'show'])->middleware('permission:library.view');
+    Route::put('books/{id}', [LibraryController::class, 'update'])->middleware('permission:library.edit');
+    Route::delete('books/{id}', [LibraryController::class, 'destroy'])->middleware('permission:library.delete');
     
     // Transport Routes
     Route::apiResource('transport-routes', TransportController::class);

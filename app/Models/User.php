@@ -160,7 +160,8 @@ class User extends Authenticatable
         $userOverride = DB::table('user_permissions')
             ->where('user_id', $this->id)
             ->where('permission_id', $permissionId)
-            ->when($branchId, fn($q) => $q->where('branch_id', $branchId))
+            // A null branch_id grant applies to all branches (see the branch role query below).
+            ->when($branchId, fn($q) => $q->where(fn($qq) => $qq->whereNull('branch_id')->orWhere('branch_id', $branchId)))
             ->first();
 
         // If user has explicit override, use it (granted=true means YES, granted=false means NO)
@@ -173,7 +174,8 @@ class User extends Authenticatable
             ->join('role_permissions', 'user_roles.role_id', '=', 'role_permissions.role_id')
             ->where('user_roles.user_id', $this->id)
             ->where('role_permissions.permission_id', $permissionId)
-            ->when($branchId, fn($q) => $q->where('user_roles.branch_id', $branchId))
+            // Grant is satisfied by an all-branches assignment (branch_id null) OR the specific branch.
+            ->when($branchId, fn($q) => $q->where(fn($qq) => $qq->whereNull('user_roles.branch_id')->orWhere('user_roles.branch_id', $branchId)))
             ->exists();
     }
 
@@ -201,7 +203,7 @@ class User extends Authenticatable
         $userOverride = DB::table('user_permissions')
             ->where('user_id', $this->id)
             ->whereIn('permission_id', $permissionIds)
-            ->when($branchId, fn($q) => $q->where('branch_id', $branchId))
+            ->when($branchId, fn($q) => $q->where(fn($qq) => $qq->whereNull('branch_id')->orWhere('branch_id', $branchId)))
             ->where('granted', true)
             ->exists();
 
@@ -213,7 +215,7 @@ class User extends Authenticatable
         $deniedPermission = DB::table('user_permissions')
             ->where('user_id', $this->id)
             ->whereIn('permission_id', $permissionIds)
-            ->when($branchId, fn($q) => $q->where('branch_id', $branchId))
+            ->when($branchId, fn($q) => $q->where(fn($qq) => $qq->whereNull('branch_id')->orWhere('branch_id', $branchId)))
             ->where('granted', false)
             ->pluck('permission_id')
             ->toArray();
@@ -230,7 +232,7 @@ class User extends Authenticatable
             ->join('role_permissions', 'user_roles.role_id', '=', 'role_permissions.role_id')
             ->where('user_roles.user_id', $this->id)
             ->whereIn('role_permissions.permission_id', $allowedPermissionIds)
-            ->when($branchId, fn($q) => $q->where('user_roles.branch_id', $branchId))
+            ->when($branchId, fn($q) => $q->where(fn($qq) => $qq->whereNull('user_roles.branch_id')->orWhere('user_roles.branch_id', $branchId)))
             ->exists();
     }
 
