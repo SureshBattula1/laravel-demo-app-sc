@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Models\Role;
 use App\Models\Module;
 use App\Models\Permission;
+use App\Models\AcademicYear;
 
 class DatabaseSeeder extends Seeder
 {
@@ -39,8 +40,11 @@ class DatabaseSeeder extends Seeder
             
             // Step 4: Create Super Admin Users
             $this->createSuperAdmins();
-            
-            // Step 5: Create Company Portal (Company and Company Admin)
+
+            // Step 5: Create Academic Years (global table shared across all tenants)
+            $this->createAcademicYears();
+
+            // Step 6: Create Company Portal (Company and Company Admin)
             $this->call(CompanyPortalSeeder::class);
             
             DB::commit();
@@ -203,7 +207,35 @@ class DatabaseSeeder extends Seeder
             }
         }
     }
-    
+
+    /**
+     * Create academic years. This is a GLOBAL table (no tenant scoping) shared by
+     * every school/branch; the app resolves the working year via is_current = true.
+     * Without at least one current year the UI reports "academic year not assigned".
+     */
+    private function createAcademicYears(): void
+    {
+        $this->command->info('📅 Creating academic years...');
+
+        $years = [
+            ['name' => '2024-2025', 'start_date' => '2024-06-01', 'end_date' => '2025-04-30', 'is_current' => false, 'is_active' => true],
+            ['name' => '2025-2026', 'start_date' => '2025-06-01', 'end_date' => '2026-04-30', 'is_current' => false, 'is_active' => true],
+            ['name' => '2026-2027', 'start_date' => '2026-06-01', 'end_date' => '2027-04-30', 'is_current' => true,  'is_active' => true],
+        ];
+
+        foreach ($years as $year) {
+            AcademicYear::firstOrCreate(['name' => $year['name']], $year);
+        }
+
+        // Guarantee exactly one current year even if the rows already existed.
+        if (AcademicYear::where('is_current', true)->count() !== 1) {
+            AcademicYear::query()->update(['is_current' => false]);
+            AcademicYear::where('name', '2026-2027')->update(['is_current' => true]);
+        }
+
+        $this->command->info('   ✓ Academic years ready (current: 2026-2027)');
+    }
+
     /**
      * Create modules with their permissions (for sidebar menus)
      */
@@ -411,6 +443,15 @@ class DatabaseSeeder extends Seeder
                 'route' => '/settings',
                 'order' => 25,
                 'permissions' => ['view', 'edit']
+            ],
+            [
+                // Global people search (header search box). Not a sidebar item.
+                'name' => 'Global Search',
+                'slug' => 'search',
+                'icon' => 'search',
+                'route' => '/search',
+                'order' => 26,
+                'permissions' => ['global']
             ]
         ];
 
@@ -490,6 +531,7 @@ class DatabaseSeeder extends Seeder
             'reports.view', 'reports.generate', 'reports.export',
             'settings.view',
             'users.view',
+            'search.global',
         ])->pluck('id')->toArray();
         $branchAdmin->permissions()->sync($branchAdminPerms);
         $this->command->info("   ✓ Branch Admin: " . count($branchAdminPerms) . " permissions");
@@ -510,6 +552,7 @@ class DatabaseSeeder extends Seeder
             'bulk_management.view',
             'leaves.view', 'leaves.create', // Teachers can view and create their own leaves
             'import.view', 'import.template', // Teachers can view imports and download templates
+            'search.global',
         ])->pluck('id')->toArray();
         $teacher->permissions()->sync($teacherPerms);
         $this->command->info("   ✓ Teacher: " . count($teacherPerms) . " permissions");

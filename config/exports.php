@@ -11,6 +11,36 @@ return [
     |
     */
 
+    'global_search' => [
+        'columns' => [
+            'branch_name' => [
+                'label' => 'Branch',
+                'enabled' => true,
+                'width' => 28,
+            ],
+            'name' => [
+                'label' => 'Name',
+                'enabled' => true,
+                'width' => 24,
+            ],
+            'category' => [
+                'label' => 'Category',
+                'enabled' => true,
+                'width' => 16,
+            ],
+            'phone' => [
+                'label' => 'Phone',
+                'enabled' => true,
+                'width' => 18,
+            ],
+            'email' => [
+                'label' => 'Email',
+                'enabled' => true,
+                'width' => 30,
+            ],
+        ],
+    ],
+
     'students' => [
         'columns' => [
             'id' => [

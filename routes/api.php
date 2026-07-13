@@ -38,6 +38,7 @@ use App\Http\Controllers\SectionSubjectController;
 use App\Http\Controllers\ExamTermController;
 use App\Http\Controllers\ExamScheduleController;
 use App\Http\Controllers\GlobalUploadController;
+use App\Http\Controllers\GlobalSearchController;
 use App\Http\Controllers\ExamMarkController;
 use App\Http\Controllers\UserPreferenceController;
 use App\Http\Controllers\AdmissionController;
@@ -183,6 +184,12 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
     Route::get('subjects/by-grade/{grade}', [SubjectController::class, 'byGrade']);
     Route::get('subjects/by-department/{departmentId}', [SubjectController::class, 'byDepartment']);
     
+    // Global people search (students + teachers/accountants/staff), branch-scoped
+    Route::get('global-search/export', [GlobalSearchController::class, 'export'])
+        ->middleware('permission:search.global');
+    Route::get('global-search', [GlobalSearchController::class, 'index'])
+        ->middleware('permission:search.global');
+
     // Teacher Routes
     Route::get('teachers', [TeacherController::class, 'index']);
     Route::post('teachers', [TeacherController::class, 'store']);
