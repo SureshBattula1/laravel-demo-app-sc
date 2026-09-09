@@ -64,6 +64,9 @@ class AuthController extends Controller
 
             Log::info('User registered successfully', ['user_id' => $user->id, 'email' => $user->email]);
 
+            // Inject effective permissions
+            $user->permissions = $user->getPermissionSlugs($user->branch_id);
+
             return response()->json([
                 'success' => true,
                 'message' => 'User registered successfully',
@@ -76,7 +79,7 @@ class AuthController extends Controller
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Registration failed', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Registration failed. Please try again.',
@@ -121,10 +124,10 @@ class AuthController extends Controller
 
             // Sanitize input
             $login = strip_tags($loginInput);
-            
+
             // Determine if login is email or phone
             $loginField = filter_var($login, FILTER_VALIDATE_EMAIL) ? 'email' : 'phone';
-            
+
             // OPTIMIZED: Select only needed columns first
             $user = User::where($loginField, $login)
                 ->select('id', $loginField, 'password', 'role', 'branch_id', 'is_active', 'first_name', 'last_name', 'avatar')
@@ -132,12 +135,12 @@ class AuthController extends Controller
 
             if (!$user || !Hash::check($request->password, $user->password)) {
                 RateLimiter::hit($key, 300); // 5 minutes
-                
+
                 Log::warning('Failed login attempt', [
                     'login' => $login,
                     'ip' => $request->ip()
                 ]);
-                
+
                 return response()->json([
                     'success' => false,
                     'message' => 'Invalid credentials'
@@ -155,7 +158,7 @@ class AuthController extends Controller
 
             // OPTIMIZED: Update last_login without loading full model again
             DB::table('users')->where('id', $user->id)->update(['last_login' => now()]);
-            
+
             // Create token
             $token = $user->createToken('auth_token', ['*'], now()->addDays(30))->plainTextToken;
 
@@ -167,6 +170,9 @@ class AuthController extends Controller
 
             // OPTIMIZED: Load branch only when needed
             $user->load('branch');
+
+            // Inject effective permissions for the frontend
+            $user->permissions = $user->getPermissionSlugs($user->branch_id);
 
             return response()->json([
                 'success' => true,
@@ -180,7 +186,7 @@ class AuthController extends Controller
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Login error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Login failed. Please try again.',
@@ -206,7 +212,7 @@ class AuthController extends Controller
 
         } catch (\Exception $e) {
             Log::error('Logout error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Logout failed',
@@ -241,7 +247,7 @@ class AuthController extends Controller
             $user->update(['remember_token' => $resetToken]);
 
             DB::commit();
-            
+
             // Verify token was saved
             $user->refresh();
             Log::info('Reset token saved', [
@@ -273,7 +279,7 @@ class AuthController extends Controller
                         'from' => config('mail.from.address')
                     ]
                 ]);
-                
+
                 // Return error if in local environment so user knows
                 if (app()->environment('local')) {
                     return response()->json([
@@ -282,7 +288,7 @@ class AuthController extends Controller
                         'reset_token' => $resetToken // Provide token for manual testing
                     ], 500);
                 }
-                
+
                 // In production, don't reveal email errors but user still has token
             }
 
@@ -297,7 +303,7 @@ class AuthController extends Controller
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Forgot password error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Request failed. Please try again.',
@@ -340,7 +346,7 @@ class AuthController extends Controller
                     'token_length' => strlen($request->token),
                     'users_with_tokens' => $tokenExists
                 ]);
-                
+
                 return response()->json([
                     'success' => false,
                     'message' => 'Invalid or expired reset token',
@@ -374,7 +380,7 @@ class AuthController extends Controller
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Reset password error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Password reset failed',
@@ -389,13 +395,16 @@ class AuthController extends Controller
     public function me(Request $request)
     {
         try {
+            $user = $request->user()->load('branch');
+            $user->permissions = $user->getPermissionSlugs($user->branch_id);
+
             return response()->json([
                 'success' => true,
-                'data' => $request->user()->load('branch')
+                'data' => $user
             ]);
         } catch (\Exception $e) {
             Log::error('Get user error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch user data'
@@ -463,7 +472,7 @@ class AuthController extends Controller
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Update profile error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Profile update failed',
@@ -525,7 +534,7 @@ class AuthController extends Controller
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Change password error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Password change failed',
