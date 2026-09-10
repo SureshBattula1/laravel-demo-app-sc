@@ -345,6 +345,7 @@ class StudentController extends Controller
                     'users.email',
                     'users.phone',
                     'users.is_active',
+                    'users.avatar as user_avatar',
                     DB::raw('JSON_OBJECT("id", branches.id, "name", branches.name, "code", branches.code) as branch')
                 )
                 ->first();
@@ -358,6 +359,10 @@ class StudentController extends Controller
 
             // Convert to array and ensure all fields are present
             $studentData = (array) $student;
+            $studentData['profile_picture'] = $this->resolvePublicStorageUrl(
+                $studentData['profile_picture'] ?? $studentData['user_avatar'] ?? null
+            );
+            unset($studentData['user_avatar']);
             
             // Parse JSON branch field
             if (isset($studentData['branch']) && is_string($studentData['branch'])) {
@@ -450,6 +455,7 @@ class StudentController extends Controller
                     'students.medical_history',
                     'students.allergies',
                     'students.student_status',
+                    'students.profile_picture',
                     'students.created_at',
                     'students.updated_at',
                     'users.first_name',
@@ -457,6 +463,7 @@ class StudentController extends Controller
                     'users.email',
                     'users.phone',
                     'users.is_active',
+                    'users.avatar as user_avatar',
                     DB::raw('JSON_OBJECT("id", branches.id, "name", branches.name, "code", branches.code) as branch')
                 )
                 ->first();
@@ -470,6 +477,10 @@ class StudentController extends Controller
 
             // Convert to array and parse JSON fields
             $studentData = (array) $student;
+            $studentData['profile_picture'] = $this->resolvePublicStorageUrl(
+                $studentData['profile_picture'] ?? $studentData['user_avatar'] ?? null
+            );
+            unset($studentData['user_avatar']);
             
             if (isset($studentData['branch']) && is_string($studentData['branch'])) {
                 $studentData['branch'] = json_decode($studentData['branch']);
@@ -2004,6 +2015,34 @@ class StudentController extends Controller
         if (!empty($userUpdate)) {
             User::where('id', $userId)->update($userUpdate);
         }
+    }
+
+    /**
+     * Convert a stored file path into a public URL for profile images.
+     */
+    private function resolvePublicStorageUrl(?string $value): ?string
+    {
+        if (!$value) {
+            return null;
+        }
+
+        if (str_starts_with($value, 'http')) {
+            return $value;
+        }
+
+        try {
+            if (\Storage::disk('public')->exists($value)) {
+                return \Storage::disk('public')->url($value);
+            }
+        } catch (\Exception $e) {
+            // Fall through to manual URL construction.
+        }
+
+        if (str_starts_with($value, 'storage/')) {
+            return url($value);
+        }
+
+        return url('storage/' . ltrim($value, '/'));
     }
 
     /**

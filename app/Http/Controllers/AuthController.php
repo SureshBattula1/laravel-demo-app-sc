@@ -130,7 +130,7 @@ class AuthController extends Controller
 
             // OPTIMIZED: Select only needed columns first
             $user = User::where($loginField, $login)
-                ->select('id', $loginField, 'password', 'role', 'branch_id', 'is_active', 'first_name', 'last_name', 'avatar')
+                ->select('id', $loginField, 'password', 'role', 'branch_id', 'is_active', 'first_name', 'last_name', 'avatar', 'user_type_id')
                 ->first();
 
             if (!$user || !Hash::check($request->password, $user->password)) {

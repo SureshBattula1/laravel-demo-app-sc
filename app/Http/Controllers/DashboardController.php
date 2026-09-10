@@ -77,6 +77,8 @@ class DashboardController extends Controller
                 'financial' => $this->getFinancialStats($accessibleBranchIds, $fromDate, $toDate)
             ];
 
+            $stats = $this->applyRoleDashboardContext($stats, $user);
+
             return response()->json([
                 'success' => true,
                 'data' => $stats
@@ -215,28 +217,182 @@ class DashboardController extends Controller
         
         $studentTotal = $studentStats->total_records ?? 0;
         $teacherTotal = $teacherStats->total_records ?? 0;
-        
+        $studentRate = $studentTotal > 0
+            ? round((($studentStats->present ?? 0) / $studentTotal) * 100, 2)
+            : 0;
+        $teacherRate = $teacherTotal > 0
+            ? round((($teacherStats->present ?? 0) / $teacherTotal) * 100, 2)
+            : 0;
+
         return [
             'students' => [
                 'total_records' => (int) $studentTotal,
+                'total_days' => (int) $studentTotal,
                 'present' => (int) ($studentStats->present ?? 0),
+                'present_days' => (int) ($studentStats->present ?? 0),
                 'absent' => (int) ($studentStats->absent ?? 0),
+                'absent_days' => (int) ($studentStats->absent ?? 0),
                 'late' => (int) ($studentStats->late ?? 0),
+                'late_days' => (int) ($studentStats->late ?? 0),
                 'leaves' => (int) ($studentStats->leaves ?? 0),
-                'rate' => $studentTotal > 0 
-                    ? round((($studentStats->present ?? 0) / $studentTotal) * 100, 2) 
-                    : 0
+                'leave_days' => (int) ($studentStats->leaves ?? 0),
+                'rate' => $studentRate,
+                'percentage' => (float) $studentRate,
             ],
             'teachers' => [
                 'total_records' => (int) $teacherTotal,
+                'total_days' => (int) $teacherTotal,
                 'present' => (int) ($teacherStats->present ?? 0),
+                'present_days' => (int) ($teacherStats->present ?? 0),
                 'absent' => (int) ($teacherStats->absent ?? 0),
+                'absent_days' => (int) ($teacherStats->absent ?? 0),
                 'leaves' => (int) ($teacherStats->leaves ?? 0),
-                'rate' => $teacherTotal > 0 
-                    ? round((($teacherStats->present ?? 0) / $teacherTotal) * 100, 2) 
-                    : 0
+                'leave_days' => (int) ($teacherStats->leaves ?? 0),
+                'rate' => $teacherRate,
+                'percentage' => (float) $teacherRate,
             ]
         ];
+    }
+
+    /**
+     * Mobile dashboard expects personal stats for Student/Parent (attendance %, pending fees).
+     */
+    private function applyRoleDashboardContext(array $stats, $user): array
+    {
+        $role = $user->role ?? '';
+
+        if ($role === 'Student') {
+            $personal = $this->buildStudentPersonalDashboardStats($user);
+            $stats['attendance']['students'] = $personal['attendance'];
+            $stats['fees']['total_pending'] = $personal['pending_fees'];
+            return $stats;
+        }
+
+        if ($role === 'Parent') {
+            $personal = $this->buildParentPersonalDashboardStats($user);
+            $stats['attendance']['students'] = $personal['attendance'];
+            $stats['fees']['total_pending'] = $personal['pending_fees'];
+            return $stats;
+        }
+
+        return $stats;
+    }
+
+    private function buildStudentPersonalDashboardStats($user): array
+    {
+        $userId = $user->id;
+        $attendance = [
+            'total_days' => 0,
+            'present_days' => 0,
+            'absent_days' => 0,
+            'late_days' => 0,
+            'leave_days' => 0,
+            'percentage' => 0.0,
+            'rate' => 0.0,
+        ];
+
+        if (Schema::hasTable('student_attendance')) {
+            $row = DB::table('student_attendance')
+                ->where('student_id', $userId)
+                ->select(
+                    DB::raw('COUNT(*) as total_days'),
+                    DB::raw('SUM(CASE WHEN status = "Present" THEN 1 ELSE 0 END) as present_days'),
+                    DB::raw('SUM(CASE WHEN status = "Absent" THEN 1 ELSE 0 END) as absent_days'),
+                    DB::raw('SUM(CASE WHEN status = "Late" THEN 1 ELSE 0 END) as late_days'),
+                    DB::raw('SUM(CASE WHEN status IN ("Sick Leave", "Leave") THEN 1 ELSE 0 END) as leave_days')
+                )
+                ->first();
+
+            $total = (int) ($row->total_days ?? 0);
+            $present = (int) ($row->present_days ?? 0);
+            $pct = $total > 0 ? round(($present / $total) * 100, 2) : 0.0;
+
+            $attendance = [
+                'total_days' => $total,
+                'present_days' => $present,
+                'absent_days' => (int) ($row->absent_days ?? 0),
+                'late_days' => (int) ($row->late_days ?? 0),
+                'leave_days' => (int) ($row->leave_days ?? 0),
+                'percentage' => (float) $pct,
+                'rate' => (float) $pct,
+            ];
+        }
+
+        return [
+            'attendance' => $attendance,
+            'pending_fees' => $this->sumPendingFeesForUserIds([$userId]),
+        ];
+    }
+
+    private function buildParentPersonalDashboardStats($user): array
+    {
+        $childrenIds = User::where('parent_id', $user->id)
+            ->where('role', 'Student')
+            ->pluck('id')
+            ->toArray();
+
+        if (empty($childrenIds)) {
+            return [
+                'attendance' => [
+                    'total_days' => 0,
+                    'present_days' => 0,
+                    'absent_days' => 0,
+                    'late_days' => 0,
+                    'leave_days' => 0,
+                    'percentage' => 0.0,
+                    'rate' => 0.0,
+                ],
+                'pending_fees' => 0.0,
+            ];
+        }
+
+        $attendanceData = $this->batchCalculateAttendancePercentage($childrenIds);
+        $avgPct = count($childrenIds) > 0
+            ? round(array_sum($attendanceData) / count($childrenIds), 2)
+            : 0.0;
+
+        return [
+            'attendance' => [
+                'total_days' => 0,
+                'present_days' => 0,
+                'absent_days' => 0,
+                'late_days' => 0,
+                'leave_days' => 0,
+                'percentage' => (float) $avgPct,
+                'rate' => (float) $avgPct,
+            ],
+            'pending_fees' => $this->sumPendingFeesForUserIds($childrenIds),
+        ];
+    }
+
+    private function sumPendingFeesForUserIds(array $userIds): float
+    {
+        if (empty($userIds)) {
+            return 0.0;
+        }
+
+        if (Schema::hasTable('fee_dues')) {
+            $studentIds = DB::table('students')
+                ->whereIn('user_id', $userIds)
+                ->whereNull('deleted_at')
+                ->pluck('id');
+
+            if ($studentIds->isNotEmpty()) {
+                return (float) DB::table('fee_dues')
+                    ->whereIn('student_id', $studentIds)
+                    ->whereIn('status', ['Pending', 'PartiallyPaid', 'Overdue'])
+                    ->sum('balance_amount');
+            }
+        }
+
+        if (Schema::hasTable('fee_payments')) {
+            return (float) DB::table('fee_payments')
+                ->whereIn('student_id', $userIds)
+                ->whereIn('payment_status', ['Pending', 'Partial'])
+                ->sum('total_amount');
+        }
+
+        return 0.0;
     }
     
     /**

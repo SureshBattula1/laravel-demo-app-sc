@@ -774,8 +774,8 @@ class AttendanceController extends Controller
             $attendance = DB::table('student_attendance')
                 ->join('students', 'student_attendance.student_id', '=', 'students.user_id')
                 ->join('users', 'students.user_id', '=', 'users.id')
-                ->where('students.grade', $grade)
-                ->where('students.section', $section)
+                ->where('student_attendance.grade_level', $grade)
+                ->where('student_attendance.section', $section)
                 ->whereNull('students.deleted_at') // ✅ ONLY ACTIVE STUDENTS
                 ->whereDate('student_attendance.date', $date)
                 ->scopedToTenant('student_attendance.branch_id')
@@ -792,8 +792,8 @@ class AttendanceController extends Controller
             // OPTIMIZED: Calculate summary using SQL instead of PHP
             $summaryQuery = DB::table('student_attendance')
                 ->join('students', 'student_attendance.student_id', '=', 'students.user_id')
-                ->where('students.grade', $grade)
-                ->where('students.section', $section)
+                ->where('student_attendance.grade_level', $grade)
+                ->where('student_attendance.section', $section)
                 ->whereNull('students.deleted_at') // ✅ ONLY ACTIVE STUDENTS
                 ->whereDate('student_attendance.date', $date)
                 ->scopedToTenant('student_attendance.branch_id')
