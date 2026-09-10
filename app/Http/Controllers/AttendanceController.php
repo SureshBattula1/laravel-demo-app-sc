@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Traits\PaginatesAndSorts;
 use App\Models\Branch;
+use App\Models\ClassModel;
 use App\Models\Student;
 use App\Models\AcademicYear;
 use Illuminate\Http\Request;
@@ -12,8 +13,9 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Carbon\Carbon;
 use App\Exports\AttendanceExport;
+use App\Models\Notification;
 use App\Services\PdfExportService;
-use App\Services\CsvExportService;
+use App\Services\AttendanceNotificationService;
 use App\Services\ExportService;
 use Maatwebsite\Excel\Facades\Excel;
 
@@ -761,6 +763,317 @@ class AttendanceController extends Controller
                 'total_days' => (int) ($row->total_days ?? 0),
             ];
         })->values()->all();
+    }
+
+    /**
+     * Class/section attendance status for a date (teacher overview).
+     */
+    public function getClassStatus(Request $request)
+    {
+        try {
+            $date = $request->get('date', date('Y-m-d'));
+            $branchId = $this->getDefaultBranchId($request) ?? $request->user()?->branch_id;
+            if (!$branchId) {
+                $accessible = $this->getAccessibleBranchIds($request);
+                if (is_array($accessible) && count($accessible) === 1) {
+                    $branchId = $accessible[0];
+                }
+            }
+            $branchId = $branchId ? (int) $branchId : 0;
+            if ($branchId <= 0 || !$this->canAccessBranch($request, $branchId)) {
+                return response()->json(['success' => false, 'message' => 'Not allowed'], 403);
+            }
+
+            $classes = ClassModel::query()
+                ->where('branch_id', $branchId)
+                ->where('is_active', true)
+                ->orderBy('grade')
+                ->orderBy('section')
+                ->get(['id', 'grade', 'section', 'class_name', 'current_strength']);
+
+            $studentCounts = DB::table('students')
+                ->where('branch_id', $branchId)
+                ->whereNull('deleted_at')
+                ->where('student_status', 'Active')
+                ->select('grade', 'section', DB::raw('COUNT(*) as student_count'))
+                ->groupBy('grade', 'section')
+                ->get()
+                ->keyBy(fn ($row) => ($row->grade ?? '') . '|' . ($row->section ?? ''));
+
+            $attendance = DB::table('student_attendance')
+                ->where('branch_id', $branchId)
+                ->whereDate('date', $date)
+                ->select(
+                    'grade_level',
+                    'section',
+                    DB::raw('COUNT(*) as marked'),
+                    DB::raw('SUM(CASE WHEN status = "Present" THEN 1 ELSE 0 END) as present'),
+                    DB::raw('SUM(CASE WHEN status = "Absent" THEN 1 ELSE 0 END) as absent')
+                )
+                ->groupBy('grade_level', 'section')
+                ->get()
+                ->keyBy(fn ($row) => ($row->grade_level ?? '') . '|' . ($row->section ?? ''));
+
+            $notifyByClass = Notification::withoutTenantScope()
+                ->where('branch_id', $branchId)
+                ->where('metadata->source', 'attendance_notify')
+                ->where('metadata->date', $date)
+                ->orderByDesc('id')
+                ->get(['id', 'metadata', 'sent_at', 'created_at'])
+                ->groupBy(function ($row) {
+                    $meta = is_array($row->metadata) ? $row->metadata : [];
+                    return ($meta['grade'] ?? '') . '|' . ($meta['section'] ?? '');
+                })
+                ->map(function ($group) {
+                    $first = $group->first();
+                    $meta = is_array($first->metadata) ? $first->metadata : [];
+                    return [
+                        'notify_sent' => true,
+                        'notify_group_key' => $meta['group_key'] ?? null,
+                        'notify_sent_at' => optional($first->sent_at ?? $first->created_at)?->toDateTimeString(),
+                    ];
+                });
+
+            $enrich = function (array $row) use ($notifyByClass) {
+                $key = ($row['grade'] ?? '') . '|' . ($row['section'] ?? '');
+                $notify = $notifyByClass->get($key);
+                $row['notify_sent'] = (bool) ($notify['notify_sent'] ?? false);
+                $row['notify_group_key'] = $notify['notify_group_key'] ?? null;
+                $row['notify_sent_at'] = $notify['notify_sent_at'] ?? null;
+                return $row;
+            };
+
+            if ($classes->isEmpty()) {
+                $data = $studentCounts->map(function ($row) use ($attendance, $enrich) {
+                    $key = ($row->grade ?? '') . '|' . ($row->section ?? '');
+                    $marked = $attendance->get($key);
+                    $created = $marked !== null && (int) $marked->marked > 0;
+                    return $enrich([
+                        'grade' => $row->grade,
+                        'section' => $row->section,
+                        'class_name' => null,
+                        'student_count' => (int) $row->student_count,
+                        'present' => $created ? (int) $marked->present : 0,
+                        'absent' => $created ? (int) $marked->absent : 0,
+                        'created' => $created,
+                    ]);
+                })->values();
+            } else {
+                $data = $classes->map(function ($class) use ($studentCounts, $attendance, $enrich) {
+                    $key = ($class->grade ?? '') . '|' . ($class->section ?? '');
+                    $counts = $studentCounts->get($key);
+                    $marked = $attendance->get($key);
+                    $studentCount = (int) ($counts->student_count ?? $class->current_strength ?? 0);
+                    $created = $marked !== null && (int) $marked->marked > 0;
+
+                    return $enrich([
+                        'grade' => $class->grade,
+                        'section' => $class->section,
+                        'class_name' => $class->class_name,
+                        'student_count' => $studentCount,
+                        'present' => $created ? (int) $marked->present : 0,
+                        'absent' => $created ? (int) $marked->absent : 0,
+                        'created' => $created,
+                    ]);
+                })->values();
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => $data,
+                'meta' => [
+                    'date' => $date,
+                    'branch_id' => $branchId,
+                ],
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('Class attendance status error', ['error' => $e->getMessage()]);
+            return response()->json(['success' => false, 'message' => 'Failed to load class attendance status'], 500);
+        }
+    }
+
+    /**
+     * Admin: send per-student attendance status notifications for selected created classes.
+     */
+    public function notifyStudents(Request $request)
+    {
+        try {
+            $user = $request->user();
+            if (!$user || !in_array($user->role, ['BranchAdmin', 'SuperAdmin'], true)) {
+                return response()->json(['success' => false, 'message' => 'Not allowed'], 403);
+            }
+
+            $validator = Validator::make($request->all(), [
+                'date' => 'required|date',
+                'classes' => 'required|array|min:1',
+                'classes.*.grade' => 'required|string|max:50',
+                'classes.*.section' => 'required|string|max:50',
+            ]);
+            if ($validator->fails()) {
+                return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
+            }
+
+            $branchId = $this->getDefaultBranchId($request) ?? $user->branch_id;
+            $branchId = $branchId ? (int) $branchId : 0;
+            if ($branchId <= 0 || !$this->canManageBranch($request, $branchId)) {
+                return response()->json(['success' => false, 'message' => 'Not allowed'], 403);
+            }
+
+            $date = $request->date;
+            $classes = collect($request->classes)
+                ->map(fn ($c) => [
+                    'grade' => strip_tags((string) ($c['grade'] ?? '')),
+                    'section' => strip_tags((string) ($c['section'] ?? '')),
+                ])
+                ->filter(fn ($c) => $c['grade'] !== '' && $c['section'] !== '')
+                ->unique(fn ($c) => $c['grade'] . '|' . $c['section'])
+                ->values()
+                ->all();
+
+            if ($classes === []) {
+                return response()->json(['success' => false, 'message' => 'Select at least one class'], 422);
+            }
+
+            foreach ($classes as $class) {
+                $exists = DB::table('student_attendance')
+                    ->where('branch_id', $branchId)
+                    ->where('grade_level', $class['grade'])
+                    ->where('section', $class['section'])
+                    ->whereDate('date', $date)
+                    ->exists();
+                if (!$exists) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => "Attendance not created for Grade {$class['grade']} - {$class['section']}",
+                    ], 422);
+                }
+            }
+
+            $result = app(AttendanceNotificationService::class)->notifyStudentsForClasses(
+                $branchId,
+                $date,
+                $classes,
+                (int) $user->id
+            );
+
+            if (($result['student_count'] ?? 0) <= 0) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No students with login accounts found to notify.',
+                ], 422);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Attendance notifications sent',
+                'data' => $result,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('Attendance notify students error', ['error' => $e->getMessage()]);
+            return response()->json(['success' => false, 'message' => 'Failed to send notifications'], 500);
+        }
+    }
+
+    /**
+     * Admin: per-student notify receipts for a class/date.
+     */
+    public function notifyReceipts(Request $request)
+    {
+        try {
+            $user = $request->user();
+            if (!$user || !in_array($user->role, ['BranchAdmin', 'SuperAdmin', 'Teacher'], true)) {
+                return response()->json(['success' => false, 'message' => 'Not allowed'], 403);
+            }
+
+            $validator = Validator::make($request->all(), [
+                'date' => 'required|date',
+                'grade' => 'required|string|max:50',
+                'section' => 'required|string|max:50',
+            ]);
+            if ($validator->fails()) {
+                return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
+            }
+
+            $branchId = $this->getDefaultBranchId($request) ?? $user->branch_id;
+            $branchId = $branchId ? (int) $branchId : 0;
+            if ($branchId <= 0 || !$this->canAccessBranch($request, $branchId)) {
+                return response()->json(['success' => false, 'message' => 'Not allowed'], 403);
+            }
+
+            $date = $request->date;
+            $grade = strip_tags($request->grade);
+            $section = strip_tags($request->section);
+
+            $attendanceRows = DB::table('student_attendance')
+                ->join('students', 'student_attendance.student_id', '=', 'students.user_id')
+                ->join('users', 'students.user_id', '=', 'users.id')
+                ->where('student_attendance.branch_id', $branchId)
+                ->where('student_attendance.grade_level', $grade)
+                ->where('student_attendance.section', $section)
+                ->whereDate('student_attendance.date', $date)
+                ->whereNull('students.deleted_at')
+                ->select(
+                    'students.user_id',
+                    'students.roll_number',
+                    'users.first_name',
+                    'users.last_name',
+                    'student_attendance.status'
+                )
+                ->orderBy('students.roll_number')
+                ->get();
+
+            $latestGroupKey = Notification::withoutTenantScope()
+                ->where('branch_id', $branchId)
+                ->where('metadata->source', 'attendance_notify')
+                ->where('metadata->date', $date)
+                ->where('metadata->grade', $grade)
+                ->where('metadata->section', $section)
+                ->orderByDesc('id')
+                ->value('metadata->group_key');
+
+            $sentUserIds = [];
+            $sentAtByUser = [];
+            if ($latestGroupKey) {
+                $sentRows = Notification::withoutTenantScope()
+                    ->where('branch_id', $branchId)
+                    ->where('metadata->group_key', $latestGroupKey)
+                    ->get(['user_id', 'sent_at', 'created_at']);
+                foreach ($sentRows as $sent) {
+                    $uid = (int) $sent->user_id;
+                    $sentUserIds[$uid] = true;
+                    $sentAtByUser[$uid] = optional($sent->sent_at ?? $sent->created_at)?->toDateTimeString();
+                }
+            }
+
+            $students = $attendanceRows->map(function ($row) use ($sentUserIds, $sentAtByUser) {
+                $uid = (int) ($row->user_id ?? 0);
+                $sent = $uid > 0 && isset($sentUserIds[$uid]);
+                return [
+                    'user_id' => $uid > 0 ? $uid : null,
+                    'name' => trim(($row->first_name ?? '') . ' ' . ($row->last_name ?? '')),
+                    'roll_number' => $row->roll_number,
+                    'status' => $row->status,
+                    'sent' => $sent,
+                    'sent_at' => $sent ? ($sentAtByUser[$uid] ?? null) : null,
+                ];
+            })->values();
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'grade' => $grade,
+                    'section' => $section,
+                    'date' => $date,
+                    'group_key' => $latestGroupKey,
+                    'students' => $students,
+                    'sent_count' => $students->where('sent', true)->count(),
+                    'total' => $students->count(),
+                ],
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('Attendance notify receipts error', ['error' => $e->getMessage()]);
+            return response()->json(['success' => false, 'message' => 'Failed to load notify status'], 500);
+        }
     }
 
     /**

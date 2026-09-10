@@ -15,6 +15,8 @@ class Assignment extends Model
 
     protected $fillable = [
         'branch_id',
+        'school_id',
+        'academic_year_id',
         'grade',
         'section',
         'subject_id',
@@ -25,6 +27,7 @@ class Assignment extends Model
         'due_date',
         'max_marks',
         'assignment_type',
+        'audience_mode',
         'attachments',
         'is_published',
         'published_at',
@@ -59,6 +62,16 @@ class Assignment extends Model
     public function submissions(): HasMany
     {
         return $this->hasMany(AssignmentSubmission::class);
+    }
+
+    public function recipients(): HasMany
+    {
+        return $this->hasMany(AssignmentRecipient::class);
+    }
+
+    public function academicYear(): BelongsTo
+    {
+        return $this->belongsTo(AcademicYear::class);
     }
 
     public function createdBy(): BelongsTo

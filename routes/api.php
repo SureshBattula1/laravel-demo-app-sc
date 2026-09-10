@@ -8,6 +8,7 @@ use App\Http\Controllers\BranchTransferController;
 use App\Http\Controllers\DepartmentController;
 use App\Http\Controllers\SubjectController;
 use App\Http\Controllers\ExamController;
+use App\Http\Controllers\AssignmentController;
 use App\Http\Controllers\FeeController;
 use App\Http\Controllers\FeeDuesController;
 use App\Http\Controllers\FeeReportController;
@@ -270,6 +271,17 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
         Route::delete('{id}', [SectionSubjectController::class, 'removeSubject']);
     });
 
+    // Homework assignments (app + website)
+    Route::prefix('assignments')->group(function () {
+        Route::get('/', [AssignmentController::class, 'index']);
+        Route::post('/', [AssignmentController::class, 'store']);
+        Route::get('eligible-students', [AssignmentController::class, 'eligibleStudents']);
+        Route::post('preview-recipients', [AssignmentController::class, 'previewRecipients']);
+        Route::get('{id}', [AssignmentController::class, 'show']);
+        Route::put('{id}', [AssignmentController::class, 'update']);
+        Route::delete('{id}', [AssignmentController::class, 'destroy']);
+    });
+
     // Exam Routes
     Route::apiResource('exams', ExamController::class);
     Route::get('exams/{id}/statistics', [ExamController::class, 'statistics']);
@@ -357,6 +369,9 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
     Route::prefix('attendance')->group(function () {
         Route::get('dashboard', [AttendanceController::class, 'getDashboard']);
         Route::get('export', [AttendanceController::class, 'export']);
+        Route::get('class-status', [AttendanceController::class, 'getClassStatus']);
+        Route::post('notify-students', [AttendanceController::class, 'notifyStudents']);
+        Route::get('notify-receipts', [AttendanceController::class, 'notifyReceipts']);
         Route::post('bulk', [AttendanceController::class, 'markBulk']);
         Route::get('report', [AttendanceController::class, 'getReport']);
         Route::get('student/{studentId}/overview', [AttendanceController::class, 'getStudentAttendanceOverview']);
@@ -613,6 +628,10 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
         // Notifications
         Route::get('/notifications', [CommunicationController::class, 'getNotifications']);
         Route::post('/notifications', [CommunicationController::class, 'createNotification']);
+        Route::post('/notifications/broadcast', [CommunicationController::class, 'broadcastNotification']);
+        Route::get('/notifications/sent', [CommunicationController::class, 'getSentNotifications']);
+        Route::get('/notifications/receipts', [CommunicationController::class, 'getNotificationReceipts']);
+        Route::post('/notifications/read-all', [CommunicationController::class, 'markAllAsRead']);
         Route::post('/notifications/{id}/read', [CommunicationController::class, 'markAsRead']);
 
         // Announcements
