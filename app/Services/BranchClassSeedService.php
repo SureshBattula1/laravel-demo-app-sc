@@ -19,22 +19,31 @@ class BranchClassSeedService
     public function ensureDefaultsForBranch(int $branchId): void
     {
         $branch = Branch::query()->select(['id', 'school_id'])->find($branchId);
-        if (!$branch) {
+        if (! $branch) {
             Log::warning('BranchClassSeedService: branch not found', ['branch_id' => $branchId]);
+
             return;
         }
 
         if (empty($branch->school_id)) {
             Log::warning('BranchClassSeedService: branch has no school_id, skipping', ['branch_id' => $branchId]);
+
             return;
         }
 
-        $currentYearName = AcademicYear::query()->current()->active()->value('name');
-        if (!$currentYearName) {
+        $companyId = (int) (DB::table('schools')->where('id', $branch->school_id)->value('company_id') ?? 0);
+        $yearQuery = AcademicYear::query()->current()->active();
+        if ($companyId > 0) {
+            $yearQuery->where('company_id', $companyId);
+        }
+        $currentYearName = $yearQuery->value('name');
+        if (! $currentYearName) {
             Log::warning('BranchClassSeedService: no current academic year, skipping class seeding', [
                 'branch_id' => $branchId,
                 'school_id' => $branch->school_id,
+                'company_id' => $companyId ?: null,
             ]);
+
             return;
         }
 
@@ -53,6 +62,7 @@ class BranchClassSeedService
                 'branch_id' => $branchId,
                 'school_id' => $branch->school_id,
             ]);
+
             return;
         }
 
@@ -83,7 +93,7 @@ class BranchClassSeedService
                 'branch_id' => $branchId,
                 'grade' => (string) $grade,
                 'section' => null,
-                'class_name' => 'Grade ' . (string) $grade,
+                'class_name' => 'Grade '.(string) $grade,
                 'academic_year' => (string) $currentYearName,
                 'capacity' => 40,
                 'current_strength' => 0,
@@ -105,4 +115,3 @@ class BranchClassSeedService
         DB::table('classes')->insert($rows);
     }
 }
-

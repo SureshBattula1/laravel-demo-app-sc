@@ -3,19 +3,21 @@
 namespace App\Http\Controllers\CompanyPortal;
 
 use App\Http\Controllers\Controller;
-use App\Models\School;
-use App\Models\Company;
 use App\Models\Branch;
-use App\Models\User;
+use App\Models\Company;
 use App\Models\Role;
+use App\Models\School;
+use App\Models\User;
+use App\Services\BranchClassSeedService;
+use App\Services\BranchGradeService;
+use App\Services\CompanyAcademicYearService;
+use App\Services\SchoolGradeService;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Validator;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Database\Eloquent\ModelNotFoundException;
-use App\Services\BranchGradeService;
-use App\Services\SchoolGradeService;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Validator;
 
 class SchoolController extends Controller
 {
@@ -27,10 +29,10 @@ class SchoolController extends Controller
         try {
             $user = $request->user();
 
-            if (!$user || $user->user_type !== 'CompanyAdmin') {
+            if (! $user || $user->user_type !== 'CompanyAdmin') {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Unauthorized'
+                    'message' => 'Unauthorized',
                 ], 401);
             }
 
@@ -50,9 +52,9 @@ class SchoolController extends Controller
 
             if ($request->has('search')) {
                 $search = $request->search;
-                $query->where(function($q) use ($search) {
+                $query->where(function ($q) use ($search) {
                     $q->where('name', 'like', "%{$search}%")
-                      ->orWhere('code', 'like', "%{$search}%");
+                        ->orWhere('code', 'like', "%{$search}%");
                 });
             }
 
@@ -69,24 +71,24 @@ class SchoolController extends Controller
             $schoolsData = $schools->getCollection()->map(function ($school) {
                 $school->branches_count = $school->branches_count ?? 0;
                 $school->active_branches_count = $school->active_branches_count ?? 0;
-                
+
                 // Get total students and teachers from branches in this school
                 $branchIds = DB::table('branches')
                     ->where('school_id', $school->id)
                     ->pluck('id');
-                
+
                 $school->total_students = DB::table('users')
                     ->whereIn('branch_id', $branchIds)
                     ->where('role', 'Student')
                     ->where('is_active', true)
                     ->count();
-                
+
                 $school->total_teachers = DB::table('users')
                     ->whereIn('branch_id', $branchIds)
                     ->where('role', 'Teacher')
                     ->where('is_active', true)
                     ->count();
-                
+
                 return $school;
             });
 
@@ -97,15 +99,15 @@ class SchoolController extends Controller
                     'current_page' => $schools->currentPage(),
                     'last_page' => $schools->lastPage(),
                     'per_page' => $schools->perPage(),
-                    'total' => $schools->total()
-                ]
+                    'total' => $schools->total(),
+                ],
             ]);
         } catch (\Exception $e) {
             Log::error('School list error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to fetch schools'
+                'message' => 'Failed to fetch schools',
             ], 500);
         }
     }
@@ -120,35 +122,16 @@ class SchoolController extends Controller
             $school = School::with(['company', 'mainBranch', 'branches'])
                 ->findOrFail($id);
 
-            // Get admin user for the main branch if it exists
-            $adminUser = null;
-            if ($school->main_branch_id) {
-                $adminUser = User::where('branch_id', $school->main_branch_id)
-                    ->whereIn('role', ['BranchAdmin', 'SuperAdmin', 'Admin'])
-                    ->where('is_active', true)
-                    ->first();
-            }
-
-            $schoolData = $school->toArray();
-            if ($adminUser) {
-                $schoolData['admin_user'] = [
-                    'id' => $adminUser->id,
-                    'first_name' => $adminUser->first_name,
-                    'last_name' => $adminUser->last_name,
-                    'email' => $adminUser->email,
-                    'phone' => $adminUser->phone,
-                    'role' => $adminUser->role
-                ];
-            }
+            $schoolData = $this->formatSchoolPayload($school);
 
             return response()->json([
                 'success' => true,
-                'data' => $schoolData
+                'data' => $schoolData,
             ]);
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'School not found'
+                'message' => 'School not found',
             ], 404);
         }
     }
@@ -160,11 +143,11 @@ class SchoolController extends Controller
     {
         try {
             $user = $request->user();
-            
-            if (!$user || $user->user_type !== 'CompanyAdmin') {
+
+            if (! $user || $user->user_type !== 'CompanyAdmin') {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Unauthorized'
+                    'message' => 'Unauthorized',
                 ], 401);
             }
 
@@ -176,7 +159,7 @@ class SchoolController extends Controller
                 'name' => 'required|string|max:255',
                 'code' => 'required|string|max:50|unique:schools,code',
                 'status' => 'sometimes|in:Active,Inactive,Suspended,UnderConstruction',
-                
+
                 // Branch fields (required when creating school)
                 'branch' => 'required|array',
                 'branch.name' => 'required|string|max:255',
@@ -189,21 +172,32 @@ class SchoolController extends Controller
                 'branch.phone' => 'required|string|max:20|unique:branches,phone',
                 'branch.email' => 'required|email|max:255|unique:branches,email',
                 'branch.website' => 'nullable|url|max:255',
-                
-                // Admin user fields (required when creating school)
+                'branch.principal_name' => 'required|string|max:255',
+                'branch.principal_contact' => 'required|string|max:20',
+                'branch.principal_email' => 'required|email|max:255|unique:users,email',
+                'branch.branch_admin_password' => 'required|string|min:8',
+
+                // SuperAdmin user fields (required when creating school)
                 'admin_user' => 'required|array',
                 'admin_user.first_name' => 'required|string|max:255',
                 'admin_user.last_name' => 'required|string|max:255',
                 'admin_user.email' => 'required|email|max:255|unique:users,email',
                 'admin_user.password' => 'required|string|min:8',
                 'admin_user.phone' => 'nullable|string|max:20',
-                'admin_user.role' => 'required|in:BranchAdmin,SuperAdmin'
             ]);
+
+            $validator->after(function ($v) use ($request) {
+                $adminEmail = strtolower(trim((string) data_get($request->all(), 'admin_user.email', '')));
+                $principalEmail = strtolower(trim((string) data_get($request->all(), 'branch.principal_email', '')));
+                if ($adminEmail !== '' && $principalEmail !== '' && $adminEmail === $principalEmail) {
+                    $v->errors()->add('branch.principal_email', 'Branch Admin email must be different from Super Admin email.');
+                }
+            });
 
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
@@ -218,14 +212,18 @@ class SchoolController extends Controller
                 'name' => $request->name,
                 'code' => $request->code,
                 'status' => $request->status ?? 'Active',
-                'settings' => $request->settings ?? []
+                'settings' => $request->settings ?? [],
             ]);
 
             // Ensure default grades exist for this school (1..12)
             app(SchoolGradeService::class)->ensureDefaults((int) $school->id);
 
+            // Company current academic year (reuse or create Indian FY)
+            app(CompanyAcademicYearService::class)->ensureCurrentIndianYear((int) $companyId);
+
             // Create main branch for the school
             $branchData = $request->branch;
+            $branchAdminPassword = $branchData['branch_admin_password'];
             $branch = Branch::create([
                 'name' => $branchData['name'],
                 'code' => strtoupper($branchData['code']),
@@ -239,10 +237,13 @@ class SchoolController extends Controller
                 'phone' => $branchData['phone'],
                 'email' => $branchData['email'],
                 'website' => $branchData['website'] ?? null,
+                'principal_name' => $branchData['principal_name'],
+                'principal_contact' => $branchData['principal_contact'],
+                'principal_email' => $branchData['principal_email'],
                 'is_main_branch' => true,
                 'status' => 'Active',
                 'is_active' => true,
-                'current_enrollment' => 0
+                'current_enrollment' => 0,
             ]);
 
             // Update school with main branch ID
@@ -252,41 +253,40 @@ class SchoolController extends Controller
             // Ensure branch default grades exist (same as when creating branches via BranchController)
             app(BranchGradeService::class)->ensureDefaults((int) $branch->id);
 
-            // Create admin user for the branch (always SuperAdmin when creating school from company portal)
+            // Seed default classes for the current academic year
+            app(BranchClassSeedService::class)->ensureDefaultsForBranch((int) $branch->id);
+
+            // Create SuperAdmin for the school (always SuperAdmin from company portal)
             $adminData = $request->admin_user;
-            $adminRole = 'SuperAdmin';
             $adminUser = User::create([
                 'first_name' => $adminData['first_name'],
                 'last_name' => $adminData['last_name'],
                 'email' => $adminData['email'],
                 'password' => Hash::make($adminData['password']),
                 'phone' => $adminData['phone'] ?? null,
-                'role' => $adminRole,
+                'role' => 'SuperAdmin',
                 'user_type' => 'SchoolUser',
                 'branch_id' => $branch->id,
                 'company_id' => $companyId,
-                'is_active' => true
+                'is_active' => true,
             ]);
+            $this->attachSchoolRole($adminUser, 'super-admin', (int) $branch->id, 'SuperAdmin');
 
-            // Assign SuperAdmin role via user_roles table (school admin from company portal is always SuperAdmin)
-            $roleSlug = 'super-admin';
-            $role = Role::where('slug', $roleSlug)->first();
-            
-            if ($role) {
-                $adminUser->roles()->attach($role->id, [
-                    'is_primary' => true,
-                    'branch_id' => $branch->id,
-                    'created_at' => now(),
-                    'updated_at' => now()
-                ]);
-            } else {
-                // Log warning if role not found, but don't fail the transaction
-                Log::warning('Role not found when creating admin user', [
-                    'role_slug' => $roleSlug,
-                    'user_id' => $adminUser->id,
-                    'user_role' => $adminRole
-                ]);
-            }
+            // Create BranchAdmin from principal name/email + password
+            [$branchFirstName, $branchLastName] = $this->splitPersonName($branch->principal_name);
+            $branchAdmin = User::create([
+                'first_name' => $branchFirstName,
+                'last_name' => $branchLastName,
+                'email' => $branch->principal_email,
+                'password' => Hash::make($branchAdminPassword),
+                'phone' => $branch->principal_contact,
+                'role' => 'BranchAdmin',
+                'user_type' => 'SchoolUser',
+                'branch_id' => $branch->id,
+                'company_id' => $companyId,
+                'is_active' => true,
+            ]);
+            $this->attachSchoolRole($branchAdmin, 'branch-admin', (int) $branch->id, 'BranchAdmin');
 
             DB::commit();
 
@@ -295,28 +295,25 @@ class SchoolController extends Controller
                 'company_id' => $user->company_id,
                 'created_by' => $user->id,
                 'branch_id' => $branch->id,
-                'admin_user_id' => $adminUser->id
+                'admin_user_id' => $adminUser->id,
+                'branch_admin_id' => $branchAdmin->id,
             ]);
 
             return response()->json([
                 'success' => true,
-                'message' => 'School created successfully with main branch and admin user',
+                'message' => 'School created successfully with main branch, Super Admin, and Branch Admin',
                 'data' => $school->load(['company', 'mainBranch']),
                 'branch' => $branch,
-                'admin_user' => [
-                    'id' => $adminUser->id,
-                    'name' => $adminUser->full_name,
-                    'email' => $adminUser->email,
-                    'role' => $adminUser->role
-                ]
+                'admin_user' => $this->formatAdminUser($adminUser),
+                'branch_admin' => $this->formatAdminUser($branchAdmin),
             ], 201);
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('School creation error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to create school'
+                'message' => 'Failed to create school',
             ], 500);
         }
     }
@@ -332,12 +329,16 @@ class SchoolController extends Controller
             // Allow updating any school by ID (no company_id restriction)
             $school = School::findOrFail($id);
 
+            $mainBranchId = $school->main_branch_id;
+            $superAdmin = $this->findMainBranchUser($mainBranchId, 'SuperAdmin');
+            $branchAdmin = $this->findMainBranchUser($mainBranchId, 'BranchAdmin');
+
             $validator = Validator::make($request->all(), [
                 'name' => 'sometimes|required|string|max:255',
-                'code' => 'sometimes|required|string|max:50|unique:schools,code,' . $id,
+                'code' => 'sometimes|required|string|max:50|unique:schools,code,'.$id,
                 'status' => 'sometimes|in:Active,Inactive,Suspended,UnderConstruction',
                 'settings' => 'sometimes|array',
-                
+
                 // Branch fields (optional for updates)
                 'branch' => 'sometimes|array',
                 'branch.name' => 'sometimes|string|max:255',
@@ -347,24 +348,35 @@ class SchoolController extends Controller
                 'branch.state' => 'sometimes|string|max:100',
                 'branch.country' => 'sometimes|string|max:100',
                 'branch.pincode' => 'sometimes|string|max:10',
-                'branch.phone' => 'sometimes|string|max:20',
-                'branch.email' => 'sometimes|email|max:255',
+                'branch.phone' => 'sometimes|string|max:20|unique:branches,phone,'.($mainBranchId ?? 'NULL'),
+                'branch.email' => 'sometimes|email|max:255|unique:branches,email,'.($mainBranchId ?? 'NULL'),
                 'branch.website' => 'nullable|url|max:255',
+                'branch.principal_name' => 'sometimes|string|max:255',
+                'branch.principal_contact' => 'sometimes|string|max:20',
+                'branch.principal_email' => 'sometimes|email|max:255|unique:users,email,'.($branchAdmin?->id ?? 'NULL'),
+                'branch.branch_admin_password' => 'sometimes|nullable|string|min:8',
 
-                // Admin user fields (optional for updates)
+                // SuperAdmin fields (optional for updates)
                 'admin_user' => 'sometimes|array',
                 'admin_user.first_name' => 'sometimes|string|max:255',
                 'admin_user.last_name' => 'sometimes|string|max:255',
-                'admin_user.email' => 'sometimes|email|max:255',
+                'admin_user.email' => 'sometimes|email|max:255|unique:users,email,'.($superAdmin?->id ?? 'NULL'),
                 'admin_user.password' => 'sometimes|nullable|string|min:8',
                 'admin_user.phone' => 'nullable|string|max:20',
-                'admin_user.role' => 'sometimes|in:BranchAdmin,SuperAdmin,Admin'
             ]);
+
+            $validator->after(function ($v) use ($request, $superAdmin) {
+                $adminEmail = strtolower(trim((string) data_get($request->all(), 'admin_user.email', $superAdmin?->email ?? '')));
+                $principalEmail = strtolower(trim((string) data_get($request->all(), 'branch.principal_email', '')));
+                if ($adminEmail !== '' && $principalEmail !== '' && $adminEmail === $principalEmail) {
+                    $v->errors()->add('branch.principal_email', 'Branch Admin email must be different from Super Admin email.');
+                }
+            });
 
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
@@ -379,7 +391,7 @@ class SchoolController extends Controller
                 $mainBranch = Branch::where('id', $school->main_branch_id)
                     ->where('school_id', $school->id)
                     ->first();
-                
+
                 if ($mainBranch) {
                     $mainBranch->update([
                         'name' => $branchData['name'] ?? $mainBranch->name,
@@ -391,63 +403,35 @@ class SchoolController extends Controller
                         'pincode' => $branchData['pincode'] ?? $mainBranch->pincode,
                         'phone' => $branchData['phone'] ?? $mainBranch->phone,
                         'email' => $branchData['email'] ?? $mainBranch->email,
-                        'website' => $branchData['website'] ?? $mainBranch->website
+                        'website' => $branchData['website'] ?? $mainBranch->website,
+                        'principal_name' => $branchData['principal_name'] ?? $mainBranch->principal_name,
+                        'principal_contact' => $branchData['principal_contact'] ?? $mainBranch->principal_contact,
+                        'principal_email' => $branchData['principal_email'] ?? $mainBranch->principal_email,
                     ]);
+
+                    $this->syncMainBranchAdmin($school, $mainBranch, $branchData['branch_admin_password'] ?? null);
                 }
             }
 
-            // Update admin user if admin_user data is provided
+            // Update SuperAdmin only from admin_user (never mix with BranchAdmin)
             if ($request->has('admin_user') && $school->main_branch_id) {
                 $adminData = $request->admin_user;
-                $adminUser = User::where('branch_id', $school->main_branch_id)
-                    ->whereIn('role', ['BranchAdmin', 'SuperAdmin', 'Admin'])
-                    ->where('is_active', true)
-                    ->first();
-                
+                $adminUser = $this->findMainBranchUser($school->main_branch_id, 'SuperAdmin');
+
                 if ($adminUser) {
-                    // Store original role before update
-                    $oldRole = $adminUser->role;
-                    
                     $updateData = [
                         'first_name' => $adminData['first_name'] ?? $adminUser->first_name,
                         'last_name' => $adminData['last_name'] ?? $adminUser->last_name,
                         'email' => $adminData['email'] ?? $adminUser->email,
                         'phone' => $adminData['phone'] ?? $adminUser->phone,
-                        'role' => $adminData['role'] ?? $adminUser->role
+                        'role' => 'SuperAdmin',
                     ];
-                    
-                    // Only update password if provided
-                    if (!empty($adminData['password'])) {
+
+                    if (! empty($adminData['password'])) {
                         $updateData['password'] = Hash::make($adminData['password']);
                     }
-                    
+
                     $adminUser->update($updateData);
-                    
-                    // Update role assignment if role changed
-                    if (isset($adminData['role']) && $adminData['role'] !== $oldRole) {
-                        // Remove old role
-                        $oldRoleSlug = ($oldRole === 'SuperAdmin' || $oldRole === 'Admin') 
-                            ? 'super-admin' 
-                            : 'branch-admin';
-                        $oldRoleModel = Role::where('slug', $oldRoleSlug)->first();
-                        if ($oldRoleModel) {
-                            $adminUser->roles()->detach($oldRoleModel->id);
-                        }
-                        
-                        // Attach new role
-                        $newRoleSlug = ($adminData['role'] === 'SuperAdmin' || $adminData['role'] === 'Admin')
-                            ? 'super-admin'
-                            : 'branch-admin';
-                        $newRoleModel = Role::where('slug', $newRoleSlug)->first();
-                        if ($newRoleModel) {
-                            $adminUser->roles()->attach($newRoleModel->id, [
-                                'is_primary' => true,
-                                'branch_id' => $school->main_branch_id,
-                                'created_at' => now(),
-                                'updated_at' => now()
-                            ]);
-                        }
-                    }
                 }
             }
 
@@ -455,40 +439,20 @@ class SchoolController extends Controller
 
             Log::info('School updated', ['school_id' => $school->id, 'updated_by' => $user->id]);
 
-            // Reload school with relationships
             $school->refresh();
-            $adminUser = null;
-            if ($school->main_branch_id) {
-                $adminUser = User::where('branch_id', $school->main_branch_id)
-                    ->whereIn('role', ['BranchAdmin', 'SuperAdmin', 'Admin'])
-                    ->where('is_active', true)
-                    ->first();
-            }
-
-            $schoolData = $school->load(['company', 'mainBranch'])->toArray();
-            if ($adminUser) {
-                $schoolData['admin_user'] = [
-                    'id' => $adminUser->id,
-                    'first_name' => $adminUser->first_name,
-                    'last_name' => $adminUser->last_name,
-                    'email' => $adminUser->email,
-                    'phone' => $adminUser->phone,
-                    'role' => $adminUser->role
-                ];
-            }
 
             return response()->json([
                 'success' => true,
                 'message' => 'School updated successfully',
-                'data' => $schoolData
+                'data' => $this->formatSchoolPayload($school),
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('School update error', ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
-            
+
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to update school'
+                'message' => 'Failed to update school',
             ], 500);
         }
     }
@@ -500,13 +464,13 @@ class SchoolController extends Controller
     {
         try {
             $user = $request->user();
-            
+
             $school = School::where('company_id', $user->company_id)->findOrFail($id);
 
             if ($school->status === 'Active') {
                 return response()->json([
                     'success' => false,
-                    'message' => 'School is already active'
+                    'message' => 'School is already active',
                 ], 422);
             }
 
@@ -521,15 +485,15 @@ class SchoolController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'School activated successfully',
-                'data' => $school->fresh()
+                'data' => $school->fresh(),
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('School activation error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to activate school'
+                'message' => 'Failed to activate school',
             ], 500);
         }
     }
@@ -541,13 +505,13 @@ class SchoolController extends Controller
     {
         try {
             $user = $request->user();
-            
+
             $school = School::where('company_id', $user->company_id)->findOrFail($id);
 
             if ($school->status === 'Inactive') {
                 return response()->json([
                     'success' => false,
-                    'message' => 'School is already inactive'
+                    'message' => 'School is already inactive',
                 ], 422);
             }
 
@@ -562,15 +526,15 @@ class SchoolController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'School deactivated successfully',
-                'data' => $school->fresh()
+                'data' => $school->fresh(),
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('School deactivation error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to deactivate school'
+                'message' => 'Failed to deactivate school',
             ], 500);
         }
     }
@@ -582,14 +546,14 @@ class SchoolController extends Controller
     {
         try {
             $user = $request->user();
-            
+
             $school = School::where('company_id', $user->company_id)->findOrFail($id);
 
             // Check if school has branches
             if ($school->branches()->count() > 0) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Cannot delete school with branches. Please delete or transfer branches first.'
+                    'message' => 'Cannot delete school with branches. Please delete or transfer branches first.',
                 ], 422);
             }
 
@@ -603,15 +567,15 @@ class SchoolController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'School deleted successfully'
+                'message' => 'School deleted successfully',
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('School deletion error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to delete school'
+                'message' => 'Failed to delete school',
             ], 500);
         }
     }
@@ -623,7 +587,7 @@ class SchoolController extends Controller
     {
         try {
             $user = $request->user();
-            
+
             $school = School::where('company_id', $user->company_id)->findOrFail($id);
 
             $stats = [
@@ -636,12 +600,12 @@ class SchoolController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data' => $stats
+                'data' => $stats,
             ]);
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to fetch statistics'
+                'message' => 'Failed to fetch statistics',
             ], 500);
         }
     }
@@ -654,11 +618,11 @@ class SchoolController extends Controller
     {
         try {
             $user = $request->user();
-            
-            if (!$user || $user->user_type !== 'CompanyAdmin') {
+
+            if (! $user || $user->user_type !== 'CompanyAdmin') {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Unauthorized'
+                    'message' => 'Unauthorized',
                 ], 401);
             }
 
@@ -693,7 +657,7 @@ class SchoolController extends Controller
                     ->whereIn('branch_id', $branchIds)
                     ->whereIn('role', $rolesToInclude)
                     ->get();
-                
+
                 // Also get users that might not have company_id set but belong to school branches
                 // This handles legacy data or users created before company_id was added
                 $usersWithoutCompany = User::with(['branch'])
@@ -704,7 +668,7 @@ class SchoolController extends Controller
                     ->whereIn('branch_id', $branchIds)
                     ->whereIn('role', $rolesToInclude)
                     ->get();
-                
+
                 $usersFromBranches = $usersFromBranches->merge($usersWithoutCompany);
             }
 
@@ -713,21 +677,21 @@ class SchoolController extends Controller
             // Only get SuperAdmin, BranchAdmin, and Staff from company level
             $adminUsers = collect();
             $adminRolesToGet = array_intersect(['SuperAdmin', 'Admin', 'Staff'], $rolesToInclude);
-            if (!empty($adminRolesToGet)) {
+            if (! empty($adminRolesToGet)) {
                 // First try with company_id
                 $adminUsers = User::with(['branch'])
                     ->where($baseConditions)
                     ->whereNotNull('role')
                     ->where('company_id', $school->company_id)
                     ->whereIn('role', $adminRolesToGet)
-                    ->where(function($q) use ($branchIds) {
+                    ->where(function ($q) use ($branchIds) {
                         $q->whereNull('branch_id');
                         if ($branchIds->isNotEmpty()) {
                             $q->orWhereIn('branch_id', $branchIds);
                         }
                     })
                     ->get();
-                
+
                 // Also get admin users that might not have company_id set but belong to school branches
                 // This handles legacy data
                 if ($branchIds->isNotEmpty()) {
@@ -739,7 +703,7 @@ class SchoolController extends Controller
                         ->whereIn('branch_id', $branchIds)
                         ->whereIn('role', $adminRolesToGet)
                         ->get();
-                    
+
                     $adminUsers = $adminUsers->merge($adminUsersWithoutCompany);
                 }
             }
@@ -774,38 +738,158 @@ class SchoolController extends Controller
                     'branch' => $user->branch ? [
                         'id' => $user->branch->id,
                         'name' => $user->branch->name,
-                        'code' => $user->branch->code
+                        'code' => $user->branch->code,
                     ] : null,
                     'avatar' => $user->avatar,
                     'is_active' => $user->is_active,
                     'last_login' => $user->last_login,
                     'created_at' => $user->created_at,
-                    'updated_at' => $user->updated_at
+                    'updated_at' => $user->updated_at,
                 ];
             });
 
             return response()->json([
                 'success' => true,
                 'data' => $usersData->all(),
-                'roles_found' => $adminRolesToGet
+                'roles_found' => $adminRolesToGet,
             ]);
         } catch (ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'School not found or you do not have access to it.'
+                'message' => 'School not found or you do not have access to it.',
             ], 404);
         } catch (\Exception $e) {
             Log::error('Get school users error', [
                 'error' => $e->getMessage(),
                 'school_id' => $id,
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
             ]);
-            
+
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to fetch school users'
+                'message' => 'Failed to fetch school users',
             ], 500);
         }
     }
-}
 
+    private function formatSchoolPayload(School $school): array
+    {
+        $school->loadMissing(['company', 'mainBranch']);
+        $schoolData = $school->toArray();
+        if (isset($schoolData['mainBranch']) && ! isset($schoolData['main_branch'])) {
+            $schoolData['main_branch'] = $schoolData['mainBranch'];
+        }
+
+        $superAdmin = $this->findMainBranchUser($school->main_branch_id, 'SuperAdmin');
+        $branchAdmin = $this->findMainBranchUser($school->main_branch_id, 'BranchAdmin');
+
+        if ($superAdmin) {
+            $schoolData['admin_user'] = $this->formatAdminUser($superAdmin);
+        }
+        if ($branchAdmin) {
+            $schoolData['branch_admin'] = $this->formatAdminUser($branchAdmin);
+        }
+
+        return $schoolData;
+    }
+
+    private function formatAdminUser(User $user): array
+    {
+        return [
+            'id' => $user->id,
+            'first_name' => $user->first_name,
+            'last_name' => $user->last_name,
+            'name' => $user->full_name,
+            'email' => $user->email,
+            'phone' => $user->phone,
+            'role' => $user->role,
+        ];
+    }
+
+    private function findMainBranchUser(?int $branchId, string $role): ?User
+    {
+        if (! $branchId) {
+            return null;
+        }
+
+        return User::query()
+            ->where('branch_id', $branchId)
+            ->where('role', $role)
+            ->where('is_active', true)
+            ->first();
+    }
+
+    private function attachSchoolRole(User $user, string $roleSlug, int $branchId, string $fallbackRole): void
+    {
+        $role = Role::where('slug', $roleSlug)->first();
+        if ($role) {
+            $user->roles()->attach($role->id, [
+                'is_primary' => true,
+                'branch_id' => $branchId,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            return;
+        }
+
+        Log::warning('Role not found when creating school user', [
+            'role_slug' => $roleSlug,
+            'user_id' => $user->id,
+            'user_role' => $fallbackRole,
+        ]);
+    }
+
+    /**
+     * @return array{0: string, 1: string}
+     */
+    private function splitPersonName(?string $name): array
+    {
+        $parts = preg_split('/\s+/', trim((string) $name), 2) ?: [];
+
+        return [
+            $parts[0] ?? (string) $name,
+            $parts[1] ?? '',
+        ];
+    }
+
+    private function syncMainBranchAdmin(School $school, Branch $mainBranch, ?string $password): void
+    {
+        $branchAdmin = $this->findMainBranchUser($school->main_branch_id, 'BranchAdmin');
+        [$firstName, $lastName] = $this->splitPersonName($mainBranch->principal_name);
+
+        if ($branchAdmin) {
+            $updateData = [
+                'first_name' => $firstName ?: $branchAdmin->first_name,
+                'last_name' => $lastName !== '' ? $lastName : $branchAdmin->last_name,
+                'email' => $mainBranch->principal_email ?: $branchAdmin->email,
+                'phone' => $mainBranch->principal_contact ?: $branchAdmin->phone,
+                'role' => 'BranchAdmin',
+            ];
+            if (! empty($password)) {
+                $updateData['password'] = Hash::make($password);
+            }
+            $branchAdmin->update($updateData);
+
+            return;
+        }
+
+        if (empty($password) || empty($mainBranch->principal_email) || empty($mainBranch->principal_name)) {
+            return;
+        }
+
+        $created = User::create([
+            'first_name' => $firstName,
+            'last_name' => $lastName,
+            'email' => $mainBranch->principal_email,
+            'password' => Hash::make($password),
+            'phone' => $mainBranch->principal_contact,
+            'role' => 'BranchAdmin',
+            'user_type' => 'SchoolUser',
+            'branch_id' => $mainBranch->id,
+            'company_id' => $school->company_id,
+            'is_active' => true,
+        ]);
+        $this->attachSchoolRole($created, 'branch-admin', (int) $mainBranch->id, 'BranchAdmin');
+    }
+}
