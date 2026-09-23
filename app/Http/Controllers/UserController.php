@@ -23,6 +23,7 @@ class UserController extends Controller
 
         $query = User::with(['branch']);
         $this->applyUserTenantFilter($query, $request);
+        $this->applyManageableUserFilter($query, $request);
 
         // OPTIMIZED Search filter - prefix search for better index usage
         if ($search) {
@@ -59,7 +60,8 @@ class UserController extends Controller
             'Teacher' => 'Teacher',
             'Student' => 'Student',
             'Parent' => 'Parent',
-            'Staff' => 'Staff'
+            'Staff' => 'Staff',
+            'Accountant' => 'Accountant',
         ];
 
         // Transform user data to ensure proper serialization
@@ -111,6 +113,7 @@ class UserController extends Controller
     {
         $query = User::with(['branch']);
         $this->applyUserTenantFilter($query, $request);
+        $this->applyManageableUserFilter($query, $request);
         $users = $query->get();
 
         // OPTIMIZED: Cache roles array to avoid N+1 queries
@@ -123,7 +126,8 @@ class UserController extends Controller
             'Teacher' => 'Teacher',
             'Student' => 'Student',
             'Parent' => 'Parent',
-            'Staff' => 'Staff'
+            'Staff' => 'Staff',
+            'Accountant' => 'Accountant',
         ];
 
         // Transform user data to ensure proper serialization
@@ -177,7 +181,8 @@ class UserController extends Controller
             'Teacher' => 'Teacher',
             'Student' => 'Student',
             'Parent' => 'Parent',
-            'Staff' => 'Staff'
+            'Staff' => 'Staff',
+            'Accountant' => 'Accountant',
         ];
         
         $roleName = $roleMapping[$user->role] ?? $user->role;
@@ -220,6 +225,9 @@ class UserController extends Controller
 
         // Get role name from role_id
         $role = DB::table('roles')->where('id', $request->role_id)->first();
+        if (!$this->canAssignRole($request, $role)) {
+            return $this->forbiddenResponse('You cannot assign a role above your own level');
+        }
         $roleName = $role ? $role->name : 'Student';
 
         $user = User::create([
@@ -282,6 +290,9 @@ class UserController extends Controller
         // Convert role_id to role name
         if ($request->has('role_id')) {
             $role = DB::table('roles')->where('id', $request->role_id)->first();
+            if (!$this->canAssignRole($request, $role)) {
+                return $this->forbiddenResponse('You cannot assign a role above your own level');
+            }
             if ($role) {
                 // Map role name to the enum values allowed in users table
                 $roleMapping = [
@@ -614,6 +625,12 @@ class UserController extends Controller
         }
 
         $user = User::findOrFail($id);
+        $assignableRoles = DB::table('roles')->whereIn('id', $request->role_ids)->get();
+        foreach ($assignableRoles as $role) {
+            if (!$this->canAssignRole($request, $role)) {
+                return $this->forbiddenResponse('You cannot assign a role above your own level');
+            }
+        }
         $primaryRoleId = $request->primary_role_id ?? $request->role_ids[0];
 
         DB::beginTransaction();

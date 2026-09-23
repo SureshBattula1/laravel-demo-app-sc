@@ -85,6 +85,35 @@ class Role extends Model
     }
 
     /**
+     * Resolve a role by slug, including Super Admin aliases (super-admin / super-admin-1).
+     */
+    public static function findBySlug(string $slug): ?self
+    {
+        $role = static::query()->where('slug', $slug)->first();
+        if ($role) {
+            return $role;
+        }
+
+        if (in_array($slug, ['super-admin', 'super-admin-1'], true)) {
+            $role = static::query()
+                ->where(function ($query) {
+                    $query->whereIn('slug', ['super-admin', 'super-admin-1'])
+                        ->orWhere('name', 'Super Admin');
+                })
+                ->orderBy('id')
+                ->first();
+
+            if ($role && $role->slug !== 'super-admin') {
+                $role->update(['slug' => 'super-admin']);
+            }
+
+            return $role;
+        }
+
+        return null;
+    }
+
+    /**
      * Scope: Active roles only
      */
     public function scopeActive($query)

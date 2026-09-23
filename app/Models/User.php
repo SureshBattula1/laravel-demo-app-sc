@@ -265,7 +265,9 @@ class User extends Authenticatable
         $rolePermissionIds = \DB::table('user_roles')
             ->join('role_permissions', 'user_roles.role_id', '=', 'role_permissions.role_id')
             ->where('user_roles.user_id', $this->id)
-            ->when($branchId, fn($q) => $q->where('user_roles.branch_id', $branchId))
+            ->when($branchId, fn($q) => $q->where(fn($qq) =>
+                $qq->whereNull('user_roles.branch_id')->orWhere('user_roles.branch_id', $branchId)
+            ))
             ->distinct()
             ->pluck('role_permissions.permission_id')
             ->toArray();
@@ -281,7 +283,9 @@ class User extends Authenticatable
         // STEP 2: Apply user-specific permission overrides
         $userOverrides = \DB::table('user_permissions')
             ->where('user_id', $this->id)
-            ->when($branchId, fn($q) => $q->where('branch_id', $branchId))
+            ->when($branchId, fn($q) => $q->where(fn($qq) =>
+                $qq->whereNull('branch_id')->orWhere('branch_id', $branchId)
+            ))
             ->get();
 
         foreach ($userOverrides as $override) {

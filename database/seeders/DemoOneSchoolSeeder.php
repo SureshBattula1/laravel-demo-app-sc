@@ -45,7 +45,7 @@ class DemoOneSchoolSeeder extends Seeder
         }
 
         $roles = [
-            'super-admin' => Role::where('slug', 'super-admin')->first(),
+            'super-admin' => Role::findBySlug('super-admin'),
             'branch-admin' => Role::where('slug', 'branch-admin')->first(),
             'teacher' => Role::where('slug', 'teacher')->first(),
             'staff' => Role::where('slug', 'staff')->first(),

@@ -94,9 +94,18 @@ class RoleController extends Controller
     /**
      * Get all roles without pagination
      */
-    public function all()
+    public function all(Request $request)
     {
-        $roles = DB::table('roles')->get();
+        $query = DB::table('roles');
+
+        if ($this->getAccessibleBranchIds($request) !== 'all') {
+            $actorLevel = $this->getRoleLevelForUser($request->user());
+            if ($actorLevel !== null) {
+                $query->where('level', '>=', $actorLevel);
+            }
+        }
+
+        $roles = $query->orderBy('level')->orderBy('name')->get();
         
         $roleIds = collect($roles)->pluck('id')->toArray();
         

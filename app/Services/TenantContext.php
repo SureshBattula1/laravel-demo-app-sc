@@ -14,7 +14,8 @@ use Illuminate\Support\Facades\DB;
  *
  * Resolution mirrors the original Controller::getAccessibleBranchIds() logic:
  *   - SuperAdmin (no company/branch) => 'all'
- *   - SuperAdmin with company        => that company's branches
+ *   - SuperAdmin with a school       => that school's branches
+ *   - SuperAdmin with company only   => that company's branches
  *   - BranchAdmin                    => own branch + descendants (CTE)
  *   - cross-branch permission        => school/company branches (or 'all')
  *   - everyone else                  => own branch only
@@ -89,8 +90,12 @@ class TenantContext
             return $this->resolvedBranches = 'all';
         }
 
-        // SuperAdmin: limited to company/branch when present (Company Portal), else all.
+        // SuperAdmin: school first (Access School / assigned branch), then company, else all.
         if ($user->role === 'SuperAdmin') {
+            $schoolId = $this->currentSchoolId();
+            if ($schoolId) {
+                return $this->resolvedBranches = $this->getBranchIdsForSchool($schoolId);
+            }
             if (!empty($user->company_id)) {
                 return $this->resolvedBranches = $this->getBranchIdsForCompany((int) $user->company_id);
             }
@@ -246,6 +251,22 @@ class TenantContext
             ->whereNull('branches.deleted_at')
             ->where('branches.is_active', true)
             ->pluck('branches.id')
+            ->map(fn ($id) => (int) $id)
+            ->toArray();
+    }
+
+    /**
+     * Branch IDs belonging to a single school.
+     *
+     * @return array<int>
+     */
+    protected function getBranchIdsForSchool(int $schoolId): array
+    {
+        return DB::table('branches')
+            ->where('school_id', $schoolId)
+            ->whereNull('deleted_at')
+            ->where('is_active', true)
+            ->pluck('id')
             ->map(fn ($id) => (int) $id)
             ->toArray();
     }

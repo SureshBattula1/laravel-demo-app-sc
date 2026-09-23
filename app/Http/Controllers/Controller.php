@@ -15,8 +15,9 @@ abstract class Controller
     }
 
     /**
-     * Scope a users query to the actor's company and/or accessible branches.
-     * Platform SuperAdmin (no company, unrestricted branches) is unfiltered.
+     * Scope a users query to the actor's current school (or accessible branches).
+     * Never expands to other schools in the same company.
+     * Platform SuperAdmin (unrestricted branches) is unfiltered.
      */
     protected function applyUserTenantFilter($query, Request $request)
     {
@@ -27,24 +28,156 @@ abstract class Controller
             return $query;
         }
 
-        $companyId = $actor?->company_id ? (int) $actor->company_id : null;
+        $scopeBranchIds = is_array($branches) ? array_map('intval', $branches) : [];
+        $schoolId = $this->getCurrentSchoolId($request);
+        if ($schoolId) {
+            $schoolBranches = $this->getBranchIdsForSchool((int) $schoolId);
+            $scopeBranchIds = !empty($scopeBranchIds)
+                ? array_values(array_intersect($scopeBranchIds, $schoolBranches))
+                : $schoolBranches;
+        }
 
-        return $query->where(function ($q) use ($branches, $companyId) {
-            $hasBranchFilter = false;
-            if (is_array($branches) && !empty($branches)) {
-                $q->whereIn('branch_id', $branches);
-                $hasBranchFilter = true;
-            }
-            if ($companyId) {
-                if ($hasBranchFilter) {
-                    $q->orWhere('company_id', $companyId);
-                } else {
-                    $q->where('company_id', $companyId);
-                }
-            } elseif (!$hasBranchFilter) {
+        return $query->where(function ($q) use ($scopeBranchIds, $actor) {
+            if (!empty($scopeBranchIds)) {
+                $q->whereIn('branch_id', $scopeBranchIds);
+            } else {
                 $q->whereRaw('1 = 0');
             }
+            if ($actor) {
+                $q->orWhere('id', $actor->id);
+            }
         });
+    }
+
+    /**
+     * Map users.role enum values to roles.name rows.
+     */
+    protected function userRoleEnumToName(?string $enum): ?string
+    {
+        if (!$enum) {
+            return null;
+        }
+
+        return match ($enum) {
+            'SuperAdmin' => 'Super Admin',
+            'BranchAdmin' => 'Branch Admin',
+            'Teacher' => 'Teacher',
+            'Staff' => 'Staff',
+            'Accountant' => 'Accountant',
+            'Student' => 'Student',
+            'Parent' => 'Parent',
+            default => $enum,
+        };
+    }
+
+    /**
+     * Numeric roles.level for a user (1 = Super Admin … 5 = Student).
+     */
+    protected function getRoleLevelForUser($user): ?int
+    {
+        $name = $this->userRoleEnumToName($user->role ?? null);
+        if (!$name) {
+            return null;
+        }
+
+        $level = \Illuminate\Support\Facades\DB::table('roles')->where('name', $name)->value('level');
+
+        return $level !== null ? (int) $level : null;
+    }
+
+    /**
+     * users.role enum values the actor may list or assign (same or lower authority).
+     */
+    protected function getManageableRoleEnums(Request $request): array
+    {
+        $actorLevel = $this->getRoleLevelForUser($request->user());
+        if ($actorLevel === null) {
+            return [];
+        }
+
+        $enumToName = [
+            'SuperAdmin' => 'Super Admin',
+            'BranchAdmin' => 'Branch Admin',
+            'Teacher' => 'Teacher',
+            'Staff' => 'Staff',
+            'Accountant' => 'Accountant',
+            'Student' => 'Student',
+            'Parent' => 'Parent',
+        ];
+
+        $levelsByName = \Illuminate\Support\Facades\DB::table('roles')->pluck('level', 'name');
+        $allowed = [];
+
+        foreach ($enumToName as $enum => $name) {
+            $level = $levelsByName[$name] ?? null;
+            if ($level !== null && (int) $level >= $actorLevel) {
+                $allowed[] = $enum;
+            }
+        }
+
+        return $allowed;
+    }
+
+    /**
+     * Company-portal accounts never appear in school Settings → Users.
+     */
+    protected function schoolSettingsUserTypes(): array
+    {
+        return ['SchoolUser', 'Teacher', 'Student', 'Staff', 'Parent', 'Accountant'];
+    }
+
+    /**
+     * Keep only the actor plus same-or-lower school users.
+     * Platform SuperAdmin (unrestricted branches) is left unfiltered.
+     */
+    protected function applyManageableUserFilter($query, Request $request)
+    {
+        $actor = $request->user();
+        if (!$actor) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        if ($this->getAccessibleBranchIds($request) === 'all') {
+            return $query;
+        }
+
+        $allowedRoles = $this->getManageableRoleEnums($request);
+        $schoolTypes = $this->schoolSettingsUserTypes();
+
+        return $query->where(function ($q) use ($actor, $allowedRoles, $schoolTypes) {
+            $q->where(function ($inner) use ($allowedRoles, $schoolTypes) {
+                if (!empty($allowedRoles)) {
+                    $inner->whereIn('role', $allowedRoles);
+                } else {
+                    $inner->whereRaw('1 = 0');
+                }
+                $inner->where(function ($typeQ) use ($schoolTypes) {
+                    $typeQ->whereNull('user_type')
+                        ->orWhereIn('user_type', $schoolTypes);
+                });
+            })->orWhere('id', $actor->id);
+        });
+    }
+
+    /**
+     * Whether the actor may assign this roles-table row to another user.
+     */
+    protected function canAssignRole(Request $request, $role): bool
+    {
+        if (!$role) {
+            return false;
+        }
+
+        if ($this->getAccessibleBranchIds($request) === 'all') {
+            return true;
+        }
+
+        $actorLevel = $this->getRoleLevelForUser($request->user());
+        if ($actorLevel === null || !isset($role->level)) {
+            return false;
+        }
+
+        return (int) $role->level >= $actorLevel;
     }
 
     /**
@@ -57,20 +190,41 @@ abstract class Controller
             return false;
         }
 
+        if ((int) $actor->id === (int) $targetUser->id) {
+            return true;
+        }
+
         $branches = $this->getAccessibleBranchIds($request);
         if ($branches === 'all') {
             return true;
         }
 
-        if (!empty($actor->company_id) && (int) ($targetUser->company_id ?? 0) === (int) $actor->company_id) {
-            return true;
+        $schoolId = $this->getCurrentSchoolId($request);
+        if ($schoolId) {
+            $targetSchoolId = $this->getSchoolIdForBranch($targetUser->branch_id ?? null);
+            if ($targetSchoolId !== (int) $schoolId) {
+                return false;
+            }
+        } else {
+            $sameBranch = !empty($targetUser->branch_id) && is_array($branches)
+                && in_array((int) $targetUser->branch_id, array_map('intval', $branches), true);
+            if (!$sameBranch) {
+                return false;
+            }
         }
 
-        if (!empty($targetUser->branch_id) && is_array($branches)) {
-            return in_array((int) $targetUser->branch_id, array_map('intval', $branches), true);
+        $targetType = $targetUser->user_type ?? null;
+        if (in_array($targetType, ['CompanyAdmin', 'SupportStaff', 'Admin'], true)) {
+            return false;
         }
 
-        return false;
+        $actorLevel = $this->getRoleLevelForUser($actor);
+        $targetLevel = $this->getRoleLevelForUser($targetUser);
+        if ($actorLevel === null || $targetLevel === null) {
+            return false;
+        }
+
+        return $targetLevel >= $actorLevel;
     }
 
     /**
@@ -115,6 +269,39 @@ abstract class Controller
             ->where('branches.is_active', true)
             ->pluck('branches.id')
             ->toArray();
+    }
+
+    /**
+     * Branch IDs belonging to one school.
+     *
+     * @return array<int>
+     */
+    protected function getBranchIdsForSchool(int $schoolId): array
+    {
+        return \Illuminate\Support\Facades\DB::table('branches')
+            ->where('school_id', $schoolId)
+            ->whereNull('deleted_at')
+            ->where('is_active', true)
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->toArray();
+    }
+
+    /**
+     * School id for a branch, or null if the branch is missing.
+     */
+    protected function getSchoolIdForBranch($branchId): ?int
+    {
+        if (empty($branchId)) {
+            return null;
+        }
+
+        $schoolId = \Illuminate\Support\Facades\DB::table('branches')
+            ->where('id', $branchId)
+            ->whereNull('deleted_at')
+            ->value('school_id');
+
+        return $schoolId ? (int) $schoolId : null;
     }
 
     /**

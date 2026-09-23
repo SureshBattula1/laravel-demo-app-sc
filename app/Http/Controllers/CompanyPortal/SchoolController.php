@@ -825,7 +825,7 @@ class SchoolController extends Controller
 
     private function attachSchoolRole(User $user, string $roleSlug, int $branchId, string $fallbackRole): void
     {
-        $role = Role::where('slug', $roleSlug)->first();
+        $role = Role::findBySlug($roleSlug);
         if ($role) {
             $user->roles()->attach($role->id, [
                 'is_primary' => true,
