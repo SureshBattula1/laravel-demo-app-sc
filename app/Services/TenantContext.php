@@ -202,16 +202,26 @@ class TenantContext
             return $this->resolvedSchoolId = $schoolId ? (int) $schoolId : null;
         }
 
+        // Company SuperAdmin may own multiple schools — do not force the first school.
+        // Callers that need a single school must pass school_id explicitly.
         if ($user->role === 'SuperAdmin' && !empty($user->company_id)) {
-            $schoolId = DB::table('schools')
-                ->where('company_id', $user->company_id)
-                ->whereNull('deleted_at')
-                ->orderBy('id', 'asc')
-                ->value('id');
-            return $this->resolvedSchoolId = $schoolId ? (int) $schoolId : null;
+            return $this->resolvedSchoolId = null;
         }
 
         return $this->resolvedSchoolId = null;
+    }
+
+    /**
+     * Company id for company-scoped SuperAdmins / company portal users.
+     */
+    public function currentCompanyId(): ?int
+    {
+        $user = $this->currentUser();
+        if (!$user || empty($user->company_id)) {
+            return null;
+        }
+
+        return (int) $user->company_id;
     }
 
     /**

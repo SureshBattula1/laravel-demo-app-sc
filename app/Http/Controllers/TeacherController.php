@@ -45,6 +45,8 @@ class TeacherController extends Controller
                 'nationality',
                 'qualification',
                 'experience_years',
+                'class_teacher_of_grade',
+                'class_teacher_of_section',
                 // NOTE: aadhar_number, pan_number and basic_salary are intentionally NOT
                 // selected for the list — they are sensitive PII/financial fields and belong
                 // only on the detail/View screen, not in a list payload.
@@ -98,6 +100,14 @@ class TeacherController extends Controller
             // Filter by branch
             if ($request->has('branch_id')) {
                 $query->where('branch_id', $request->branch_id);
+            }
+
+            // Filter by class teacher grade / section (admin list filters)
+            if ($request->filled('grade')) {
+                $query->where('class_teacher_of_grade', $request->grade);
+            }
+            if ($request->filled('section')) {
+                $query->where('class_teacher_of_section', $request->section);
             }
 
             // Filter by department

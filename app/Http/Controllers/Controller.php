@@ -7,6 +7,86 @@ use Illuminate\Http\Request;
 abstract class Controller
 {
     /**
+     * Company id for the authenticated user (Company Portal / school SuperAdmin context).
+     */
+    protected function getCurrentCompanyId(Request $request): ?int
+    {
+        return app(\App\Services\TenantContext::class)->currentCompanyId();
+    }
+
+    /**
+     * Scope a users query to the actor's company and/or accessible branches.
+     * Platform SuperAdmin (no company, unrestricted branches) is unfiltered.
+     */
+    protected function applyUserTenantFilter($query, Request $request)
+    {
+        $actor = $request->user();
+        $branches = $this->getAccessibleBranchIds($request);
+
+        if ($branches === 'all') {
+            return $query;
+        }
+
+        $companyId = $actor?->company_id ? (int) $actor->company_id : null;
+
+        return $query->where(function ($q) use ($branches, $companyId) {
+            $hasBranchFilter = false;
+            if (is_array($branches) && !empty($branches)) {
+                $q->whereIn('branch_id', $branches);
+                $hasBranchFilter = true;
+            }
+            if ($companyId) {
+                if ($hasBranchFilter) {
+                    $q->orWhere('company_id', $companyId);
+                } else {
+                    $q->where('company_id', $companyId);
+                }
+            } elseif (!$hasBranchFilter) {
+                $q->whereRaw('1 = 0');
+            }
+        });
+    }
+
+    /**
+     * Whether the actor may view/manage the target user record.
+     */
+    protected function canAccessManagedUser(Request $request, $targetUser): bool
+    {
+        $actor = $request->user();
+        if (!$actor || !$targetUser) {
+            return false;
+        }
+
+        $branches = $this->getAccessibleBranchIds($request);
+        if ($branches === 'all') {
+            return true;
+        }
+
+        if (!empty($actor->company_id) && (int) ($targetUser->company_id ?? 0) === (int) $actor->company_id) {
+            return true;
+        }
+
+        if (!empty($targetUser->branch_id) && is_array($branches)) {
+            return in_array((int) $targetUser->branch_id, array_map('intval', $branches), true);
+        }
+
+        return false;
+    }
+
+    /**
+     * Scope academic years to the actor's company. Platform admins (no company) see all.
+     */
+    protected function applyAcademicYearTenantFilter($query, Request $request)
+    {
+        $companyId = $this->getCurrentCompanyId($request);
+        if ($companyId) {
+            $query->where('company_id', $companyId);
+        }
+
+        return $query;
+    }
+
+    /**
      * Get current school ID from request
      * 
      * @param Request $request

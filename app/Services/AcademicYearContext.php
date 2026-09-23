@@ -41,6 +41,10 @@ class AcademicYearContext
             // middleware) or as a raw integer. Resolve either form to an int.
             $id = app(\App\Support\IdHasher::class)->decode($raw) ?? (is_numeric($raw) ? (int) $raw : null);
             $model = $id !== null ? AcademicYear::query()->where('id', $id)->first() : null;
+            $companyId = auth()->user()?->company_id ? (int) auth()->user()->company_id : null;
+            if ($model && $companyId && (int) $model->company_id !== $companyId) {
+                $model = null;
+            }
             if ($model) {
                 $this->resolvedId = $id;
                 $this->resolvedModel = $model;
@@ -75,12 +79,19 @@ class AcademicYearContext
     }
 
     /**
-     * Get the current (is_current = true) academic year. Cached for the request.
+     * Get the current (is_current = true) academic year for this tenant. Cached for the request.
      */
     public function getCurrent(): ?AcademicYear
     {
-        return Cache::remember('academic_year_current', 60, function () {
-            return AcademicYear::query()->current()->active()->first();
+        $companyId = auth()->user()?->company_id ? (int) auth()->user()->company_id : null;
+        $cacheKey = 'academic_year_current_' . ($companyId ?? 'global');
+
+        return Cache::remember($cacheKey, 60, function () use ($companyId) {
+            $query = AcademicYear::query()->current()->active();
+            if ($companyId) {
+                $query->where('company_id', $companyId);
+            }
+            return $query->first();
         });
     }
 
@@ -156,8 +167,12 @@ class AcademicYearContext
     /**
      * Clear cached current year (e.g. after setting a new current year).
      */
-    public static function clearCurrentCache(): void
+    public static function clearCurrentCache(?int $companyId = null): void
     {
-        Cache::forget('academic_year_current');
+        if ($companyId) {
+            Cache::forget('academic_year_current_' . $companyId);
+        }
+        Cache::forget('academic_year_current_global');
+        Cache::forget('academic_year_current'); // legacy key
     }
 }

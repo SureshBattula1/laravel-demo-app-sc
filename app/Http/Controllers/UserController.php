@@ -22,6 +22,7 @@ class UserController extends Controller
         $branch = $request->get('branch_id');
 
         $query = User::with(['branch']);
+        $this->applyUserTenantFilter($query, $request);
 
         // OPTIMIZED Search filter - prefix search for better index usage
         if ($search) {
@@ -38,8 +39,11 @@ class UserController extends Controller
             $query->where('role', $role);
         }
 
-        // Apply branch filter
+        // Apply branch filter (must still be within tenant)
         if ($branch) {
+            if (!$this->canAccessBranch($request, (int) $branch)) {
+                return $this->forbiddenResponse('You do not have access to this branch');
+            }
             $query->where('branch_id', $branch);
         }
 
@@ -103,9 +107,11 @@ class UserController extends Controller
     /**
      * Get all users without pagination
      */
-    public function all()
+    public function all(Request $request)
     {
-        $users = User::with(['branch'])->get();
+        $query = User::with(['branch']);
+        $this->applyUserTenantFilter($query, $request);
+        $users = $query->get();
 
         // OPTIMIZED: Cache roles array to avoid N+1 queries
         $rolesMap = DB::table('roles')->pluck('id', 'name')->toArray();
@@ -157,9 +163,12 @@ class UserController extends Controller
     /**
      * Get single user
      */
-    public function show($id)
+    public function show(Request $request, $id)
     {
         $user = User::with(['branch'])->findOrFail($id);
+        if (!$this->canAccessManagedUser($request, $user)) {
+            return $this->forbiddenResponse('You do not have access to this user');
+        }
 
         // OPTIMIZED: Single query for role_id with enum to role name mapping
         $roleMapping = [
@@ -187,6 +196,10 @@ class UserController extends Controller
      */
     public function store(Request $request)
     {
+        if ($request->filled('branch_id') && !$this->canAccessBranch($request, (int) $request->branch_id)) {
+            return $this->forbiddenResponse('You do not have access to this branch');
+        }
+
         $validator = Validator::make($request->all(), [
             'first_name' => 'required|string|max:255',
             'last_name' => 'required|string|max:255',
@@ -216,6 +229,7 @@ class UserController extends Controller
             'password' => Hash::make($request->password),
             'role' => $roleName,
             'branch_id' => $request->branch_id,
+            'company_id' => $request->user()?->company_id,
             'is_active' => $request->get('is_active', true),
             'email_verified_at' => now()
         ]);
@@ -237,6 +251,13 @@ class UserController extends Controller
     public function update(Request $request, $id)
     {
         $user = User::findOrFail($id);
+        if (!$this->canAccessManagedUser($request, $user)) {
+            return $this->forbiddenResponse('You do not have access to this user');
+        }
+
+        if ($request->filled('branch_id') && !$this->canAccessBranch($request, (int) $request->branch_id)) {
+            return $this->forbiddenResponse('You do not have access to this branch');
+        }
 
         $validator = Validator::make($request->all(), [
             'first_name' => 'sometimes|string|max:255',
@@ -296,9 +317,12 @@ class UserController extends Controller
     /**
      * Delete user
      */
-    public function destroy($id)
+    public function destroy(Request $request, $id)
     {
         $user = User::findOrFail($id);
+        if (!$this->canAccessManagedUser($request, $user)) {
+            return $this->forbiddenResponse('You do not have access to this user');
+        }
 
         // Prevent deleting yourself
         if ($user->id === auth()->id()) {
@@ -319,9 +343,12 @@ class UserController extends Controller
     /**
      * Toggle user active status
      */
-    public function toggleStatus($id)
+    public function toggleStatus(Request $request, $id)
     {
         $user = User::findOrFail($id);
+        if (!$this->canAccessManagedUser($request, $user)) {
+            return $this->forbiddenResponse('You do not have access to this user');
+        }
 
         // Prevent toggling your own status
         if ($user->id === auth()->id()) {
@@ -359,6 +386,9 @@ class UserController extends Controller
         }
 
         $user = User::findOrFail($id);
+        if (!$this->canAccessManagedUser($request, $user)) {
+            return $this->forbiddenResponse('You do not have access to this user');
+        }
         $user->password = Hash::make($request->password);
         $user->save();
 
@@ -376,9 +406,12 @@ class UserController extends Controller
      * - overridden: true if user has specific override for this permission
      * - granted: final status (true if user has the permission)
      */
-    public function getPermissions($id)
+    public function getPermissions(Request $request, $id)
     {
         $user = User::with(['roles'])->findOrFail($id);
+        if (!$this->canAccessManagedUser($request, $user)) {
+            return $this->forbiddenResponse('You do not have access to this user');
+        }
 
         // Get ALL available permissions in the system
         $allPermissions = DB::table('permissions')
@@ -493,6 +526,11 @@ class UserController extends Controller
      */
     public function updatePermissions(Request $request, $id)
     {
+        $target = User::findOrFail($id);
+        if (!$this->canAccessManagedUser($request, $target)) {
+            return $this->forbiddenResponse('You do not have access to this user');
+        }
+
         $validator = Validator::make($request->all(), [
             'permissions' => 'required|array',
             'permissions.*.permission_id' => 'required|exists:permissions,id',
@@ -556,6 +594,11 @@ class UserController extends Controller
      */
     public function assignRoles(Request $request, $id)
     {
+        $target = User::findOrFail($id);
+        if (!$this->canAccessManagedUser($request, $target)) {
+            return $this->forbiddenResponse('You do not have access to this user');
+        }
+
         $validator = Validator::make($request->all(), [
             'role_ids' => 'required|array',
             'role_ids.*' => 'exists:roles,id',

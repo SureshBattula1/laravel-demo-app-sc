@@ -76,16 +76,20 @@ class BranchController extends Controller
             }
 
             // Filter by school (school-level isolation)
-            $schoolId = $this->getCurrentSchoolId($request);
-            if ($schoolId) {
-                $query->where('school_id', $schoolId);
+            // Company SuperAdmin: do NOT pin to a single school — company branch filter below covers all schools.
+            $user = $request->user();
+            $isCompanySuperAdmin = $user && $user->role === 'SuperAdmin' && !empty($user->company_id);
+            if (!$isCompanySuperAdmin) {
+                $schoolId = $this->getCurrentSchoolId($request);
+                if ($schoolId) {
+                    $query->where('school_id', $schoolId);
+                }
             }
 
             // Apply branch access filtering (use 'id' column for branches table).
             // IMPORTANT: For SuperAdmin with company_id (company context), include inactive branches too.
             // The generic accessible-branch logic may return only active branches; branch management list must show all.
-            $user = $request->user();
-            if ($user && $user->role === 'SuperAdmin' && !empty($user->company_id)) {
+            if ($isCompanySuperAdmin) {
                 // Filter by company via SQL subquery (fast, avoids plucking IDs into PHP memory).
                 $query->whereIn('school_id', function ($q) use ($user) {
                     $q->select('id')

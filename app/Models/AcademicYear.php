@@ -11,6 +11,7 @@ class AcademicYear extends Model
     use SoftDeletes;
 
     protected $fillable = [
+        'company_id',
         'name',
         'start_date',
         'end_date',
@@ -24,6 +25,7 @@ class AcademicYear extends Model
         'end_date' => 'date',
         'is_current' => 'boolean',
         'is_active' => 'boolean',
+        'company_id' => 'integer',
     ];
 
     /**
@@ -40,6 +42,18 @@ class AcademicYear extends Model
     public function scopeActive(Builder $query): Builder
     {
         return $query->where('is_active', true);
+    }
+
+    /**
+     * Scope to a company. Null companyId leaves the query unscoped (platform admin).
+     */
+    public function scopeForCompany(Builder $query, ?int $companyId): Builder
+    {
+        if ($companyId) {
+            $query->where('company_id', $companyId);
+        }
+
+        return $query;
     }
 
     /**
