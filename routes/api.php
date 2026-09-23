@@ -1,62 +1,60 @@
 <?php
 
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\AcademicYearController;
+use App\Http\Controllers\AccountController;
+use App\Http\Controllers\AdmissionController;
+use App\Http\Controllers\AssignmentController;
+use App\Http\Controllers\AttendanceController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BranchController;
+use App\Http\Controllers\BranchSmsGatewayConfigController;
 use App\Http\Controllers\BranchTransferController;
+use App\Http\Controllers\ClassController;
+use App\Http\Controllers\CommunicationController;
+use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DepartmentController;
-use App\Http\Controllers\SubjectController;
+use App\Http\Controllers\EventController;
 use App\Http\Controllers\ExamController;
-use App\Http\Controllers\AssignmentController;
+use App\Http\Controllers\ExamMarkController;
+use App\Http\Controllers\ExamScheduleController;
+use App\Http\Controllers\ExamTermController;
 use App\Http\Controllers\FeeController;
 use App\Http\Controllers\FeeDuesController;
 use App\Http\Controllers\FeeReportController;
-use App\Http\Controllers\RealTimeNotificationController;
 use App\Http\Controllers\FeeTypeController;
-use App\Http\Controllers\AttendanceController;
+use App\Http\Controllers\GlobalSearchController;
+use App\Http\Controllers\GlobalUploadController;
+use App\Http\Controllers\GradeController;
+use App\Http\Controllers\HolidayController;
+use App\Http\Controllers\InvoiceController;
 use App\Http\Controllers\LeaveController;
 use App\Http\Controllers\LibraryController;
-use App\Http\Controllers\TransportController;
-use App\Http\Controllers\VehicleController;
-use App\Http\Controllers\TransportDriverController;
-use App\Http\Controllers\TransportRouteController;
-use App\Http\Controllers\StudentTransportController;
-use App\Http\Controllers\EventController;
-use App\Http\Controllers\TimetableController;
-use App\Http\Controllers\TeacherController;
-use App\Http\Controllers\StudentController;
-use App\Http\Controllers\DashboardController;
-use App\Http\Controllers\StudentGroupController;
-use App\Http\Controllers\ClassController;
-use App\Http\Controllers\SectionController;
-use App\Http\Controllers\GradeController;
-use App\Http\Controllers\AccountController;
-use App\Http\Controllers\TransactionController;
-use App\Http\Controllers\InvoiceController;
-use App\Http\Controllers\HolidayController;
-use App\Http\Controllers\UserController;
-use App\Http\Controllers\RoleController;
-use App\Http\Controllers\PermissionManagementController;
-use App\Http\Controllers\ModuleController;
-use App\Http\Controllers\SectionSubjectController;
-use App\Http\Controllers\ExamTermController;
-use App\Http\Controllers\ExamScheduleController;
-use App\Http\Controllers\GlobalUploadController;
-use App\Http\Controllers\GlobalSearchController;
-use App\Http\Controllers\ExamMarkController;
-use App\Http\Controllers\UserPreferenceController;
-use App\Http\Controllers\AdmissionController;
-use App\Http\Controllers\CommunicationController;
 use App\Http\Controllers\MessageController;
-use App\Http\Controllers\AcademicYearController;
-use App\Http\Controllers\BranchSmsGatewayConfigController;
+use App\Http\Controllers\ModuleController;
+use App\Http\Controllers\PermissionManagementController;
+use App\Http\Controllers\RealTimeNotificationController;
+use App\Http\Controllers\RoleController;
+use App\Http\Controllers\SectionController;
+use App\Http\Controllers\SectionSubjectController;
 use App\Http\Controllers\SmsBulkQueueLogController;
 use App\Http\Controllers\SmsBulkSendController;
 use App\Http\Controllers\SmsTemplateController;
+use App\Http\Controllers\StudentController;
+use App\Http\Controllers\StudentGroupController;
+use App\Http\Controllers\StudentTransportController;
+use App\Http\Controllers\SubjectController;
+use App\Http\Controllers\TeacherController;
+use App\Http\Controllers\TimetableController;
+use App\Http\Controllers\TransactionController;
+use App\Http\Controllers\TransportDriverController;
+use App\Http\Controllers\TransportRouteController;
 use App\Http\Controllers\TwilioWhatsAppStatusWebhookController;
+use App\Http\Controllers\UserController;
+use App\Http\Controllers\UserPreferenceController;
+use App\Http\Controllers\VehicleController;
 use App\Http\Controllers\WhatsAppBulkQueueLogController;
 use App\Http\Controllers\WhatsAppBulkSendController;
+use Illuminate\Support\Facades\Route;
 
 /*
 |--------------------------------------------------------------------------
@@ -76,12 +74,12 @@ Route::get('/health', function () {
     return response()->json([
         'status' => 'ok',
         'timestamp' => now(),
-        'service' => 'MySchool API'
+        'service' => 'MySchool API',
     ]);
 });
 
 // Protected Routes with rate limiting (180 requests per minute = 3 per second)
-Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
+Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->group(function () {
 
     // Auth Routes
     Route::get('/me', [AuthController::class, 'me']);
@@ -241,7 +239,7 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
     // Grade Routes - Full CRUD
     Route::get('grades/export', [GradeController::class, 'export']);
     Route::apiResource('grades', GradeController::class)->parameters([
-        'grades' => 'value'  // Use grade value instead of id
+        'grades' => 'value',  // Use grade value instead of id
     ]);
 
     // Student Group Routes
@@ -655,4 +653,3 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
     Route::post('/send-sms', [MessageController::class, 'sendSms']);
     Route::post('/send-both', [MessageController::class, 'sendBoth']);
 });
-

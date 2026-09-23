@@ -11,6 +11,7 @@ use App\Models\User;
 use App\Services\BranchClassSeedService;
 use App\Services\BranchGradeService;
 use App\Services\CompanyAcademicYearService;
+use App\Services\SchoolAccountAccessService;
 use App\Services\SchoolGradeService;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Request;
@@ -632,9 +633,8 @@ class SchoolController extends Controller
             // Get all branch IDs for this school
             $branchIds = Branch::where('school_id', $school->id)->pluck('id');
 
-            // Build base query conditions
+            // Include inactive users so Access School can show deactivated accounts
             $baseConditions = [
-                ['is_active', '=', true],
                 ['user_type', '!=', 'CompanyAdmin'],
             ];
 
@@ -651,7 +651,7 @@ class SchoolController extends Controller
             // Users whose branch belongs to the school
             $usersFromBranches = collect();
             if ($branchIds->isNotEmpty()) {
-                $usersFromBranches = User::with(['branch'])
+                $usersFromBranches = User::with(['branch.school'])
                     ->where($baseConditions)
                     ->whereNotNull('role')
                     ->whereIn('branch_id', $branchIds)
@@ -660,8 +660,7 @@ class SchoolController extends Controller
 
                 // Also get users that might not have company_id set but belong to school branches
                 // This handles legacy data or users created before company_id was added
-                $usersWithoutCompany = User::with(['branch'])
-                    ->where('is_active', true)
+                $usersWithoutCompany = User::with(['branch.school'])
                     ->where('user_type', '!=', 'CompanyAdmin')
                     ->whereNotNull('role')
                     ->whereNull('company_id') // Users without company_id
@@ -679,7 +678,7 @@ class SchoolController extends Controller
             $adminRolesToGet = array_intersect(['SuperAdmin', 'Admin', 'Staff'], $rolesToInclude);
             if (! empty($adminRolesToGet)) {
                 // First try with company_id
-                $adminUsers = User::with(['branch'])
+                $adminUsers = User::with(['branch.school'])
                     ->where($baseConditions)
                     ->whereNotNull('role')
                     ->where('company_id', $school->company_id)
@@ -695,8 +694,7 @@ class SchoolController extends Controller
                 // Also get admin users that might not have company_id set but belong to school branches
                 // This handles legacy data
                 if ($branchIds->isNotEmpty()) {
-                    $adminUsersWithoutCompany = User::with(['branch'])
-                        ->where('is_active', true)
+                    $adminUsersWithoutCompany = User::with(['branch.school'])
                         ->where('user_type', '!=', 'CompanyAdmin')
                         ->whereNotNull('role')
                         ->whereNull('company_id') // Users without company_id
@@ -724,8 +722,10 @@ class SchoolController extends Controller
                 }
             })->values();
 
+            $accountAccess = app(SchoolAccountAccessService::class);
+
             // Format user data
-            $usersData = $sortedUsers->map(function ($user) {
+            $usersData = $sortedUsers->map(function ($user) use ($accountAccess) {
                 return [
                     'id' => $user->id,
                     'first_name' => $user->first_name,
@@ -739,9 +739,12 @@ class SchoolController extends Controller
                         'id' => $user->branch->id,
                         'name' => $user->branch->name,
                         'code' => $user->branch->code,
+                        'is_active' => $user->branch->is_active,
+                        'status' => $user->branch->status,
                     ] : null,
                     'avatar' => $user->avatar,
                     'is_active' => $user->is_active,
+                    'is_deactivated' => $accountAccess->isBlocked($user),
                     'last_login' => $user->last_login,
                     'created_at' => $user->created_at,
                     'updated_at' => $user->updated_at,
@@ -751,6 +754,7 @@ class SchoolController extends Controller
             return response()->json([
                 'success' => true,
                 'data' => $usersData->all(),
+                'school_status' => $school->status,
                 'roles_found' => $adminRolesToGet,
             ]);
         } catch (ModelNotFoundException $e) {

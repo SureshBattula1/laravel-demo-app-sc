@@ -25,8 +25,9 @@ return Application::configure(basePath: dirname(__DIR__))
             'api.logger' => \App\Http\Middleware\ApiLogger::class,
             'company.auth' => \App\Http\Middleware\CompanyAuthMiddleware::class,
             'academic_year.context' => \App\Http\Middleware\SetAcademicYearContext::class,
+            'school.account.active' => \App\Http\Middleware\EnsureSchoolAccountActive::class,
         ]);
-        
+
         // Enable CORS for API routes; attach academic year context for scoping.
         // EncodeHashids is prepended (outermost) so it transforms the final JSON
         // response; DecodeHashids is appended (innermost) so it rewrites incoming
@@ -43,7 +44,7 @@ return Application::configure(basePath: dirname(__DIR__))
                 \App\Http\Middleware\SetAcademicYearContext::class,
             ]
         );
-        
+
         // Disable CSRF for API routes
         $middleware->validateCsrfTokens(except: [
             'api/*',
