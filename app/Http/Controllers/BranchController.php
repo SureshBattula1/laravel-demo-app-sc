@@ -18,6 +18,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use App\Services\SchoolGradeService;
 use App\Services\BranchClassSeedService;
+use App\Services\BranchFeatureSeedService;
 use App\Services\BranchGradeService;
 
 class BranchController extends Controller
@@ -403,6 +404,7 @@ class BranchController extends Controller
                     'role' => 'BranchAdmin',
                     'user_type' => 'SchoolUser',
                     'branch_id' => $branch->id,
+                    'company_id' => $branch->school?->company_id,
                     'is_active' => true,
                 ]);
                 $role = Role::where('slug', 'branch-admin')->first();
@@ -421,6 +423,16 @@ class BranchController extends Controller
             }
 
             DB::commit();
+
+            try {
+                app(BranchFeatureSeedService::class)->seed($branch->fresh(), $request->user());
+                $branch->refresh();
+            } catch (\Throwable $seedError) {
+                Log::error('Branch feature seed failed', [
+                    'branch_id' => $branch->id,
+                    'error' => $seedError->getMessage(),
+                ]);
+            }
 
             Log::info('Branch created', [
                 'branch_id' => $branch->id,
