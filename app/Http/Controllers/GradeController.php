@@ -256,6 +256,9 @@ class GradeController extends Controller
                 ], 404);
             }
 
+            $sectionsSummary = $this->buildSectionsSummary((int) $branchId, (string) $grade->value);
+            $studentsCount = collect($sectionsSummary)->sum(fn ($row) => (int) ($row['students']['total'] ?? 0));
+
             return response()->json([
                 'success' => true,
                 'data' => [
@@ -264,7 +267,13 @@ class GradeController extends Controller
                     'description' => $grade->description ?? null,
                     'order' => $grade->order ?? 0,
                     'category' => $grade->category ?? null,
-                    'is_active' => (bool) $grade->is_active
+                    'is_active' => (bool) $grade->is_active,
+                    'branch_id' => $grade->branch_id,
+                    'created_at' => $grade->created_at,
+                    'students_count' => $studentsCount,
+                    'classes_count' => count($sectionsSummary),
+                    'sections' => array_column($sectionsSummary, 'name'),
+                    'sections_summary' => $sectionsSummary,
                 ]
             ]);
 
@@ -592,6 +601,146 @@ class GradeController extends Controller
         $filename = (new ExportService('grades'))->generateFilename('pdf');
         
         return $pdf->download($filename);
+    }
+
+    /**
+     * Sections for a grade with active student gender counts and class-teacher info.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildSectionsSummary(int $branchId, string $gradeValue): array
+    {
+        $byName = [];
+
+        $sectionRows = DB::table('sections')
+            ->where('branch_id', $branchId)
+            ->where('grade_level', $gradeValue)
+            ->whereNull('deleted_at')
+            ->orderBy('name')
+            ->get();
+
+        foreach ($sectionRows as $section) {
+            $byName[(string) $section->name] = [
+                'id' => (int) $section->id,
+                'name' => (string) $section->name,
+                'code' => $section->code,
+                'capacity' => (int) ($section->capacity ?? 0),
+                'room_number' => $section->room_number,
+                'is_active' => (bool) $section->is_active,
+                'class_teacher_id' => $section->class_teacher_id ? (int) $section->class_teacher_id : null,
+            ];
+        }
+
+        $classRows = DB::table('classes')
+            ->where('branch_id', $branchId)
+            ->where('grade', $gradeValue)
+            ->whereNotNull('section')
+            ->where('section', '!=', '')
+            ->get();
+
+        foreach ($classRows as $class) {
+            $name = (string) $class->section;
+            if (! isset($byName[$name])) {
+                $byName[$name] = [
+                    'id' => null,
+                    'name' => $name,
+                    'code' => null,
+                    'capacity' => (int) ($class->capacity ?? 0),
+                    'room_number' => $class->room_number,
+                    'is_active' => (bool) $class->is_active,
+                    'class_teacher_id' => $class->class_teacher_id ? (int) $class->class_teacher_id : null,
+                ];
+            } elseif (empty($byName[$name]['class_teacher_id']) && $class->class_teacher_id) {
+                $byName[$name]['class_teacher_id'] = (int) $class->class_teacher_id;
+                if (empty($byName[$name]['room_number'])) {
+                    $byName[$name]['room_number'] = $class->room_number;
+                }
+            }
+        }
+
+        $counts = DB::table('students')
+            ->select(
+                'section',
+                DB::raw("SUM(CASE WHEN gender = 'Male' THEN 1 ELSE 0 END) as male"),
+                DB::raw("SUM(CASE WHEN gender = 'Female' THEN 1 ELSE 0 END) as female"),
+                DB::raw("SUM(CASE WHEN gender = 'Other' THEN 1 ELSE 0 END) as other"),
+                DB::raw('COUNT(*) as total')
+            )
+            ->where('branch_id', $branchId)
+            ->where('grade', $gradeValue)
+            ->where('student_status', 'Active')
+            ->whereNull('deleted_at')
+            ->whereNotNull('section')
+            ->where('section', '!=', '')
+            ->groupBy('section')
+            ->get()
+            ->keyBy('section');
+
+        foreach ($counts as $name => $row) {
+            $name = (string) $name;
+            if (! isset($byName[$name])) {
+                $byName[$name] = [
+                    'id' => null,
+                    'name' => $name,
+                    'code' => null,
+                    'capacity' => 0,
+                    'room_number' => null,
+                    'is_active' => true,
+                    'class_teacher_id' => null,
+                ];
+            }
+        }
+
+        $teacherIds = collect($byName)->pluck('class_teacher_id')->filter()->unique()->values()->all();
+        $usersById = collect();
+        $profilesByUserId = collect();
+        if ($teacherIds) {
+            $usersById = DB::table('users')
+                ->whereIn('id', $teacherIds)
+                ->whereNull('deleted_at')
+                ->get()
+                ->keyBy('id');
+            $profilesByUserId = DB::table('teachers')
+                ->whereIn('user_id', $teacherIds)
+                ->whereNull('deleted_at')
+                ->get()
+                ->keyBy('user_id');
+        }
+
+        ksort($byName, SORT_NATURAL);
+
+        $summary = [];
+        foreach ($byName as $name => $row) {
+            $count = $counts->get($name);
+            $user = $row['class_teacher_id'] ? $usersById->get($row['class_teacher_id']) : null;
+            $profile = $row['class_teacher_id'] ? $profilesByUserId->get($row['class_teacher_id']) : null;
+
+            $summary[] = [
+                'id' => $row['id'],
+                'name' => $row['name'],
+                'code' => $row['code'],
+                'capacity' => $row['capacity'],
+                'room_number' => $row['room_number'],
+                'is_active' => $row['is_active'],
+                'students' => [
+                    'male' => (int) ($count?->male ?? 0),
+                    'female' => (int) ($count?->female ?? 0),
+                    'other' => (int) ($count?->other ?? 0),
+                    'total' => (int) ($count?->total ?? 0),
+                ],
+                'class_teacher' => $user ? [
+                    'id' => (int) $user->id,
+                    'first_name' => $user->first_name,
+                    'last_name' => $user->last_name,
+                    'email' => $user->email,
+                    'phone' => $user->phone,
+                    'designation' => $profile?->designation,
+                    'employee_id' => $profile?->employee_id,
+                ] : null,
+            ];
+        }
+
+        return $summary;
     }
 
     /**
