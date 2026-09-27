@@ -20,7 +20,7 @@ class ExamTermController extends Controller
             // 🚀 OPTIMIZED: Select only needed columns
             $query = ExamTerm::select([
                 'id', 'name', 'code', 'branch_id', 'academic_year',
-                'start_date', 'end_date', 'weightage', 'is_active', 'created_at'
+                'start_date', 'end_date', 'weightage', 'description', 'is_active', 'created_at'
             ])->with(['branch:id,name,code']);
 
             // Branch filtering
