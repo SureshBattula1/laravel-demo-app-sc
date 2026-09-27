@@ -1,0 +1,61 @@
+name: Deploy Laravel Backend to AWS EC2
+
+on:
+  push:
+    branches:
+      - api-v1-4.0 # Triggers automatically when code is pushed or merged into api-v1-4.0
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # 1. Sync updated source code to your EC2 server using native rsync
+      - name: Sync Files to Server via SSH
+        run: |
+          # Write SSH key to runner file
+          mkdir -p ~/.ssh
+          echo "${{ secrets.QA_SERVER_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          
+          # Add EC2 host to known hosts
+          ssh-keyscan -H ${{ secrets.QA_SERVER_HOST }} >> ~/.ssh/known_hosts
+          
+          # Sync files excluding .env, storage, vendor, and git folders
+          rsync -avz --delete \
+            --exclude='.env' \
+            --exclude='storage/' \
+            --exclude='vendor/' \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            ./ ${{ secrets.QA_SERVER_USER }}@${{ secrets.QA_SERVER_HOST }}:/var/www/qa/api/
+
+      # 2. Run post-deployment maintenance commands on EC2
+      - name: Run Post-Deployment Commands on EC2
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.QA_SERVER_HOST }}
+          username: ${{ secrets.QA_SERVER_USER }}
+          key: ${{ secrets.QA_SERVER_SSH_KEY }}
+          script: |
+            cd /var/www/qa/api
+            
+            # Install production vendor dependencies
+            composer install --no-dev --optimize-autoloader --ignore-platform-req=php
+            
+            # Maintenance permissions
+            sudo chown -R ubuntu:www-data storage bootstrap/cache
+            sudo chmod -R 775 storage bootstrap/cache
+            
+            # Run database migrations and refresh configuration caches
+            php artisan migrate --force
+            php artisan config:clear
+            php artisan config:cache
+            php artisan route:cache
+            php artisan view:cache
+            
+            # Reload PHP-FPM to clear OPcache
+            sudo systemctl reload php8.5-fpm
