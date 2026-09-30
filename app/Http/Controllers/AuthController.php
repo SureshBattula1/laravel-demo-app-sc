@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Student;
 use App\Models\User;
 use App\Services\SchoolAccountAccessService;
 use Illuminate\Http\Request;
@@ -9,6 +10,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 
@@ -173,6 +175,8 @@ class AuthController extends Controller
 
             // Inject effective permissions for the frontend
             $user->permissions = $user->getPermissionSlugs($user->branch_id);
+
+            $this->attachStudentProfileAvatar($user);
 
             return response()->json([
                 'success' => true,
@@ -541,5 +545,52 @@ class AuthController extends Controller
                 'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
+    }
+
+    private function attachStudentProfileAvatar(User $user): void
+    {
+        if (strcasecmp((string) $user->role, 'student') !== 0) {
+            return;
+        }
+
+        $profilePath = null;
+        if ($user->user_type_id) {
+            $profilePath = Student::where('id', $user->user_type_id)->value('profile_picture');
+        }
+        if (! $profilePath) {
+            $profilePath = Student::where('user_id', $user->id)->value('profile_picture');
+        }
+
+        $resolved = $this->resolvePublicStorageUrl($profilePath);
+        if ($resolved) {
+            $user->avatar = $resolved;
+        } elseif ($user->avatar) {
+            $user->avatar = $this->resolvePublicStorageUrl($user->avatar) ?? $user->avatar;
+        }
+    }
+
+    private function resolvePublicStorageUrl(?string $value): ?string
+    {
+        if (! $value) {
+            return null;
+        }
+
+        if (str_starts_with($value, 'http')) {
+            return $value;
+        }
+
+        try {
+            if (Storage::disk('public')->exists($value)) {
+                return Storage::disk('public')->url($value);
+            }
+        } catch (\Exception $e) {
+            // Fall through.
+        }
+
+        if (str_starts_with($value, 'storage/')) {
+            return url($value);
+        }
+
+        return url('storage/'.ltrim($value, '/'));
     }
 }

@@ -10,8 +10,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class ExamSchedule extends Model
 {
     use BelongsToTenant;
+
     protected $fillable = [
         'exam_id',
+        'batch_uuid',
         'subject_id',
         'branch_id',
         'grade',
@@ -24,7 +26,7 @@ class ExamSchedule extends Model
         'passing_marks',
         'room_number',
         'invigilator_id',
-        'instructions'
+        'instructions',
     ];
 
     protected function casts(): array
@@ -50,5 +52,9 @@ class ExamSchedule extends Model
     {
         return $this->belongsTo(\App\Models\User::class, 'invigilator_id');
     }
-}
 
+    public function marks(): HasMany
+    {
+        return $this->hasMany(ExamMark::class, 'exam_schedule_id');
+    }
+}

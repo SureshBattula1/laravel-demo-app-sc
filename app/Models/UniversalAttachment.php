@@ -22,14 +22,18 @@ class UniversalAttachment extends Model
         'original_name',
         'description',
         'is_active',
-        'uploaded_by'
+        'uploaded_by',
+    ];
+
+    protected $appends = [
+        'file_url',
     ];
 
     protected function casts(): array
     {
         return [
             'is_active' => 'boolean',
-            'file_size' => 'integer'
+            'file_size' => 'integer',
         ];
     }
 
@@ -40,23 +44,42 @@ class UniversalAttachment extends Model
     }
 
     // Accessors
-    public function getFileUrlAttribute()
+    public function getFileUrlAttribute(): ?string
     {
-        if ($this->file_path) {
-            return Storage::url($this->file_path);
+        $value = $this->file_path;
+        if (! $value) {
+            return null;
         }
-        return null;
+
+        if (str_starts_with($value, 'http://') || str_starts_with($value, 'https://')) {
+            return $value;
+        }
+
+        try {
+            if (Storage::disk('public')->exists($value)) {
+                return Storage::disk('public')->url($value);
+            }
+        } catch (\Exception $e) {
+            // Fall through to manual URL construction.
+        }
+
+        if (str_starts_with($value, 'storage/')) {
+            return url($value);
+        }
+
+        return url('storage/'.ltrim($value, '/'));
     }
 
     public function getFileSizeFormattedAttribute()
     {
         $bytes = $this->file_size;
         if ($bytes >= 1048576) {
-            return round($bytes / 1048576, 2) . ' MB';
+            return round($bytes / 1048576, 2).' MB';
         } elseif ($bytes >= 1024) {
-            return round($bytes / 1024, 2) . ' KB';
+            return round($bytes / 1024, 2).' KB';
         }
-        return $bytes . ' bytes';
+
+        return $bytes.' bytes';
     }
 
     // Helper Methods
@@ -73,7 +96,7 @@ class UniversalAttachment extends Model
             'agreement',
             'report',
             'photo',
-            'other'
+            'other',
         ];
     }
 
@@ -110,4 +133,3 @@ class UniversalAttachment extends Model
         });
     }
 }
-

@@ -3,8 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Http\Traits\PaginatesAndSorts;
-use App\Models\FeeStructure;
 use App\Models\FeePayment;
+use App\Models\FeeStructure;
 use App\Services\AcademicYearContext;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -38,7 +38,7 @@ class FeeController extends Controller
             // 🔥 APPLY BRANCH FILTERING - Restrict to accessible branches
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
             if ($accessibleBranchIds !== 'all') {
-                if (!empty($accessibleBranchIds)) {
+                if (! empty($accessibleBranchIds)) {
                     $query->whereIn('branch_id', $accessibleBranchIds);
                 } else {
                     $query->whereRaw('1 = 0');
@@ -72,12 +72,12 @@ class FeeController extends Controller
             }
 
             // OPTIMIZED Search filter - prefix search for better index usage
-            if ($request->has('search') && !empty($request->search)) {
+            if ($request->has('search') && ! empty($request->search)) {
                 $search = strip_tags($request->search);
-                $query->where(function($q) use ($search) {
+                $query->where(function ($q) use ($search) {
                     $q->where('grade', 'like', "{$search}%")
-                      ->orWhere('fee_type', 'like', "{$search}%")
-                      ->orWhere('academic_year', 'like', "{$search}%");
+                        ->orWhere('fee_type', 'like', "{$search}%")
+                        ->orWhere('academic_year', 'like', "{$search}%");
                 });
             }
 
@@ -91,7 +91,7 @@ class FeeController extends Controller
             $items = collect($structures->items());
             $pairs = $items->filter(fn ($f) => $f->branch_id !== null && $f->grade !== null && $f->grade !== '')
                 ->map(fn ($f) => ['branch_id' => $f->branch_id, 'value' => (string) $f->grade])
-                ->unique(fn ($p) => $p['branch_id'] . '|' . $p['value'])
+                ->unique(fn ($p) => $p['branch_id'].'|'.$p['value'])
                 ->values();
             $gradeLabels = [];
             if ($pairs->isNotEmpty()) {
@@ -103,7 +103,7 @@ class FeeController extends Controller
                         });
                     }
                 });
-                $gradeLabels = $gradeQuery->get()->keyBy(fn ($g) => $g->branch_id . '|' . $g->value)->map(fn ($g) => $g->label)->toArray();
+                $gradeLabels = $gradeQuery->get()->keyBy(fn ($g) => $g->branch_id.'|'.$g->value)->map(fn ($g) => $g->label)->toArray();
             }
 
             // Map data: fee_type fallback and branch-specific grade_label
@@ -111,8 +111,9 @@ class FeeController extends Controller
                 if (empty($fee->fee_type)) {
                     $fee->fee_type = 'General Fee';
                 }
-                $key = $fee->branch_id . '|' . $fee->grade;
-                $fee->grade_label = $gradeLabels[$key] ?? ('Grade ' . $fee->grade);
+                $key = $fee->branch_id.'|'.$fee->grade;
+                $fee->grade_label = $gradeLabels[$key] ?? ('Grade '.$fee->grade);
+
                 return $fee;
             });
 
@@ -128,22 +129,23 @@ class FeeController extends Controller
                     'last_page' => $structures->lastPage(),
                     'from' => $structures->firstItem(),
                     'to' => $structures->lastItem(),
-                    'has_more_pages' => $structures->hasMorePages()
-                ]
+                    'has_more_pages' => $structures->hasMorePages(),
+                ],
             ]);
         } catch (\Exception $e) {
-            Log::error('Error fetching fee structures: ' . $e->getMessage());
+            Log::error('Error fetching fee structures: '.$e->getMessage());
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error fetching fee structures',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
 
     /**
      * Store a newly created fee structure
-     * 
+     *
      * NOTE: This method accepts optional breakdown fields (tuition_fee, admission_fee, etc.)
      * These fields are stored in the database but are optional. The main 'amount' field
      * is the primary fee amount. Breakdown fields can be used for detailed fee reporting.
@@ -187,20 +189,21 @@ class FeeController extends Controller
                 'sports_fee' => 'nullable|numeric|min:0',
                 'lab_fee' => 'nullable|numeric|min:0',
                 'other_fees' => 'nullable|array',
-                'total_amount' => 'nullable|numeric|min:0'
+                'total_amount' => 'nullable|numeric|min:0',
             ]);
 
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Validation failed',
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
             // Tenant guard.
-            if (!$this->canManageBranch($request, (int) $request->branch_id)) {
+            if (! $this->canManageBranch($request, (int) $request->branch_id)) {
                 DB::rollBack();
+
                 return response()->json(['success' => false, 'message' => 'You do not have access to this branch'], 403);
             }
 
@@ -211,7 +214,7 @@ class FeeController extends Controller
                 'created_by' => $request->user()->id,
                 'academic_year_id' => $academicYearId ? (int) $academicYearId : null,
                 'academic_year' => $academicYearName,
-                'is_active' => $request->has('is_active') ? $request->boolean('is_active') : true
+                'is_active' => $request->has('is_active') ? $request->boolean('is_active') : true,
             ]);
 
             DB::commit();
@@ -219,15 +222,16 @@ class FeeController extends Controller
             return response()->json([
                 'success' => true,
                 'data' => $structure->load(['branch', 'creator']),
-                'message' => 'Fee structure created successfully'
+                'message' => 'Fee structure created successfully',
             ], 201);
         } catch (\Exception $e) {
             DB::rollBack();
-            Log::error('Error creating fee structure: ' . $e->getMessage());
+            Log::error('Error creating fee structure: '.$e->getMessage());
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error creating fee structure',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -239,7 +243,7 @@ class FeeController extends Controller
             $structure = FeeStructure::findOrFail($id);
 
             // Tenant guard.
-            if (!$this->canManageBranch($request, (int) $structure->branch_id)) {
+            if (! $this->canManageBranch($request, (int) $structure->branch_id)) {
                 return response()->json(['success' => false, 'message' => 'Fee structure not found'], 404);
             }
 
@@ -247,7 +251,7 @@ class FeeController extends Controller
             if ($structure->payments()->count() > 0) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Cannot edit fee structure with existing payments'
+                    'message' => 'Cannot edit fee structure with existing payments',
                 ], 422);
             }
 
@@ -283,14 +287,14 @@ class FeeController extends Controller
                 'sports_fee' => 'nullable|numeric|min:0',
                 'lab_fee' => 'nullable|numeric|min:0',
                 'other_fees' => 'nullable|array',
-                'total_amount' => 'nullable|numeric|min:0'
+                'total_amount' => 'nullable|numeric|min:0',
             ]);
 
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Validation failed',
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
@@ -298,7 +302,7 @@ class FeeController extends Controller
                 ...$request->all(),
                 'academic_year_id' => $academicYearId ? (int) $academicYearId : $structure->academic_year_id,
                 'academic_year' => $academicYearName ?? $structure->academic_year,
-                'updated_by' => $request->user()->id
+                'updated_by' => $request->user()->id,
             ]);
 
             DB::commit();
@@ -306,15 +310,16 @@ class FeeController extends Controller
             return response()->json([
                 'success' => true,
                 'data' => $structure->load(['branch', 'creator', 'updater']),
-                'message' => 'Fee structure updated successfully'
+                'message' => 'Fee structure updated successfully',
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
-            Log::error('Error updating fee structure: ' . $e->getMessage());
+            Log::error('Error updating fee structure: '.$e->getMessage());
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error updating fee structure',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -326,15 +331,16 @@ class FeeController extends Controller
             $structure = FeeStructure::findOrFail($id);
 
             // Tenant guard.
-            if (!$this->canManageBranch($request, (int) $structure->branch_id)) {
+            if (! $this->canManageBranch($request, (int) $structure->branch_id)) {
                 DB::rollBack();
+
                 return response()->json(['success' => false, 'message' => 'Fee structure not found'], 404);
             }
 
             if ($structure->payments()->count() > 0) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Cannot delete fee structure with existing payments'
+                    'message' => 'Cannot delete fee structure with existing payments',
                 ], 422);
             }
 
@@ -343,15 +349,16 @@ class FeeController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Fee structure deleted successfully'
+                'message' => 'Fee structure deleted successfully',
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
-            Log::error('Error deleting fee structure: ' . $e->getMessage());
+            Log::error('Error deleting fee structure: '.$e->getMessage());
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error deleting fee structure',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -369,15 +376,15 @@ class FeeController extends Controller
             $fromDate = $dateRange['from'];
             $toDate = $dateRange['to'];
             $period = $request->get('period', 'today');
-            
+
             // Log for debugging
             Log::info('Payments Dashboard Request', [
                 'period' => $period,
                 'from_date' => $fromDate,
                 'to_date' => $toDate,
-                'filters' => $request->all()
+                'filters' => $request->all(),
             ]);
-            
+
             // Base query for payments (including Completed and Partial payments)
             // Get branch_id from fee_structure (more reliable than student record)
             $baseQuery = DB::table('fee_payments as fp')
@@ -400,7 +407,7 @@ class FeeController extends Controller
             if ($schoolId) {
                 $baseQuery->where(function ($q) use ($schoolId) {
                     $q->where('fp.school_id', $schoolId)
-                      ->orWhere('fs.school_id', $schoolId);
+                        ->orWhere('fs.school_id', $schoolId);
                 });
             }
 
@@ -408,7 +415,7 @@ class FeeController extends Controller
             // Use branch_id from fee_structure (more reliable)
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
             if ($accessibleBranchIds !== 'all') {
-                if (!empty($accessibleBranchIds)) {
+                if (! empty($accessibleBranchIds)) {
                     $baseQuery->whereIn('fs.branch_id', $accessibleBranchIds);
                 } else {
                     $baseQuery->whereRaw('1 = 0');
@@ -449,15 +456,15 @@ class FeeController extends Controller
             // ✅ Totals in a SINGLE aggregate query (was 4 separate full-join scans).
             $totals = (clone $baseQuery)->selectRaw(
                 'COALESCE(SUM(fp.amount_paid), 0) as total_amount, '
-                . 'COALESCE(SUM(fp.discount_amount), 0) as total_discount, '
-                . 'COALESCE(SUM(fp.late_fee), 0) as total_late_fee, '
-                . 'COUNT(fp.id) as total_count'
+                .'COALESCE(SUM(fp.discount_amount), 0) as total_discount, '
+                .'COALESCE(SUM(fp.late_fee), 0) as total_late_fee, '
+                .'COUNT(fp.id) as total_count'
             )->first();
             $totalAmount = (float) ($totals->total_amount ?? 0);
             $totalDiscount = (float) ($totals->total_discount ?? 0);
             $totalLateFee = (float) ($totals->total_late_fee ?? 0);
             $totalCount = (int) ($totals->total_count ?? 0);
-            
+
             // ✅ Get breakdown by payment status
             $byStatus = (clone $baseQuery)
                 ->select(
@@ -468,14 +475,14 @@ class FeeController extends Controller
                 ->groupBy('fp.payment_status')
                 ->orderBy('fp.payment_status')
                 ->get()
-                ->map(function($item) {
+                ->map(function ($item) {
                     return [
                         'payment_status' => $item->payment_status,
                         'payment_count' => (int) $item->payment_count,
-                        'total_amount' => (float) $item->total_amount
+                        'total_amount' => (float) $item->total_amount,
                     ];
                 });
-            
+
             // Log for debugging
             Log::info('Payments Summary', [
                 'total_amount' => $totalAmount,
@@ -483,12 +490,12 @@ class FeeController extends Controller
                 'period' => $period,
                 'from_date' => $fromDate,
                 'to_date' => $toDate,
-                'includes_partial' => true
+                'includes_partial' => true,
             ]);
 
             // ✅ Get Class/Grade Wise Breakdown (with pending payments)
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
-            
+
             // Get paid amounts by grade from payments (including discount and late fee)
             $paidByGrade = (clone $baseQuery)
                 ->select(
@@ -503,7 +510,7 @@ class FeeController extends Controller
                 ->groupBy('s.grade', 'g.label')
                 ->get()
                 ->keyBy('grade');
-            
+
             // Calculate pending amounts by grade
             // Use subquery to aggregate payments per (fee_structure_id, student_id) to avoid
             // double-counting expected_amount when students have multiple (partial) payments
@@ -521,33 +528,33 @@ class FeeController extends Controller
                 ->groupBy('fee_structure_id', 'student_id');
 
             $pendingQuery = DB::table('fee_structures as fs')
-                ->join('students as s', function($join) {
+                ->join('students as s', function ($join) {
                     $join->where('s.student_status', '=', 'Active')
-                        ->where(function($q) {
+                        ->where(function ($q) {
                             $q->whereColumn('fs.grade', 's.grade')
-                              ->orWhereRaw('fs.grade = CONCAT("Grade ", s.grade)')
-                              ->orWhereRaw('s.grade = CONCAT("Grade ", TRIM(fs.grade))')
-                              ->orWhereRaw('TRIM(REPLACE(s.grade, "Grade ", "")) = TRIM(fs.grade)')
-                              ->orWhereRaw('TRIM(REPLACE(fs.grade, "Grade ", "")) = TRIM(s.grade)');
+                                ->orWhereRaw('fs.grade = CONCAT("Grade ", s.grade)')
+                                ->orWhereRaw('s.grade = CONCAT("Grade ", TRIM(fs.grade))')
+                                ->orWhereRaw('TRIM(REPLACE(s.grade, "Grade ", "")) = TRIM(fs.grade)')
+                                ->orWhereRaw('TRIM(REPLACE(fs.grade, "Grade ", "")) = TRIM(s.grade)');
                         });
                 })
-                ->where(function($q) use ($request) {
+                ->where(function ($q) use ($request) {
                     if ($request->has('academic_year') && $request->academic_year) {
                         $ay = $request->academic_year;
                         $q->where('fs.academic_year', $ay)
-                          ->where(function($q2) use ($ay) {
-                              $q2->where('s.academic_year', $ay)
-                                 ->orWhereNull('s.academic_year')
-                                 ->orWhere('s.academic_year', '');
-                          });
+                            ->where(function ($q2) use ($ay) {
+                                $q2->where('s.academic_year', $ay)
+                                    ->orWhereNull('s.academic_year')
+                                    ->orWhere('s.academic_year', '');
+                            });
                     } else {
                         $q->whereColumn('fs.academic_year', 's.academic_year');
                     }
                 })
                 ->whereColumn('fs.branch_id', 's.branch_id')
-                ->leftJoinSub($paidAggregateSubquery, 'paid', function($join) {
+                ->leftJoinSub($paidAggregateSubquery, 'paid', function ($join) {
                     $join->on('fs.id', '=', 'paid.fee_structure_id')
-                         ->on('s.user_id', '=', 'paid.student_id');
+                        ->on('s.user_id', '=', 'paid.student_id');
                 })
                 ->leftJoin('grades as g', 's.grade', '=', 'g.value')
                 ->where('fs.is_active', true)
@@ -566,52 +573,52 @@ class FeeController extends Controller
             if ($schoolId) {
                 $pendingQuery->where(function ($q) use ($schoolId) {
                     $q->where('fs.school_id', $schoolId)
-                      ->orWhere('s.school_id', $schoolId);
+                        ->orWhere('s.school_id', $schoolId);
                 });
             }
-            
+
             // Apply branch filtering
             if ($accessibleBranchIds !== 'all') {
-                if (!empty($accessibleBranchIds)) {
+                if (! empty($accessibleBranchIds)) {
                     $pendingQuery->whereIn('fs.branch_id', $accessibleBranchIds)
-                                 ->whereIn('s.branch_id', $accessibleBranchIds);
+                        ->whereIn('s.branch_id', $accessibleBranchIds);
                 } else {
                     $pendingQuery->whereRaw('1 = 0');
                 }
             }
-            
+
             // Filter by branch if specified; also use branch's current_academic_year when no academic_year in request
             if ($request->has('branch_id') && $request->branch_id) {
                 $pendingQuery->where('fs.branch_id', $request->branch_id)
-                             ->where('s.branch_id', $request->branch_id);
-                if (!$request->has('academic_year') || !$request->academic_year) {
+                    ->where('s.branch_id', $request->branch_id);
+                if (! $request->has('academic_year') || ! $request->academic_year) {
                     $branch = \App\Models\Branch::find($request->branch_id);
                     if ($branch && $branch->current_academic_year) {
                         $pendingQuery->where('fs.academic_year', $branch->current_academic_year)
-                                     ->where(function($q) use ($branch) {
-                                         $q->where('s.academic_year', $branch->current_academic_year)
-                                           ->orWhereNull('s.academic_year')
-                                           ->orWhere('s.academic_year', '');
-                                     });
+                            ->where(function ($q) use ($branch) {
+                                $q->where('s.academic_year', $branch->current_academic_year)
+                                    ->orWhereNull('s.academic_year')
+                                    ->orWhere('s.academic_year', '');
+                            });
                     }
                 }
             }
-            
+
             $pendingByGrade = $pendingQuery->get()->keyBy('grade');
-            
+
             // Merge paid and pending data
             $allGrades = $paidByGrade->keys()->merge($pendingByGrade->keys())->unique();
-            
-            $byGrade = $allGrades->map(function($grade) use ($paidByGrade, $pendingByGrade) {
+
+            $byGrade = $allGrades->map(function ($grade) use ($paidByGrade, $pendingByGrade) {
                 $paid = $paidByGrade->get($grade);
                 $pending = $pendingByGrade->get($grade);
-                
+
                 $expectedAmount = $pending ? (float) $pending->expected_amount : 0;
                 $totalDiscountPending = $pending ? (float) ($pending->total_discount ?? 0) : 0;
                 $paidAmount = $pending ? (float) $pending->paid_amount : 0;
                 $expectedAfterDiscount = max(0, $expectedAmount - $totalDiscountPending);
                 $pendingAmount = max(0, $expectedAfterDiscount - $paidAmount);
-                
+
                 return [
                     'grade' => $grade,
                     'grade_label' => $paid ? $paid->grade_label : ($pending ? $pending->grade_label : "Grade $grade"),
@@ -621,7 +628,7 @@ class FeeController extends Controller
                     'total_late_fee' => $paid ? (float) ($paid->total_late_fee ?? 0) : 0,
                     'student_count' => $paid ? (int) $paid->student_count : ($pending ? (int) $pending->total_students : 0),
                     'pending_amount' => round($pendingAmount, 2),
-                    'pending_count' => $pendingAmount > 0 ? 1 : 0
+                    'pending_count' => $pendingAmount > 0 ? 1 : 0,
                 ];
             })->sortBy('grade')->values();
 
@@ -641,14 +648,14 @@ class FeeController extends Controller
                 ->orderBy('s.grade')
                 ->orderBy('s.section')
                 ->get()
-                ->map(function($item) {
+                ->map(function ($item) {
                     return [
                         'grade' => $item->grade,
                         'grade_label' => $item->grade_label,
                         'section' => $item->section,
                         'payment_count' => (int) $item->payment_count,
                         'total_amount' => (float) $item->total_amount,
-                        'student_count' => (int) $item->student_count
+                        'student_count' => (int) $item->student_count,
                     ];
                 });
 
@@ -667,14 +674,14 @@ class FeeController extends Controller
                 ->groupBy('fs.branch_id', 'b.name', 'b.code')
                 ->orderBy('b.name')
                 ->get()
-                ->map(function($item) {
+                ->map(function ($item) {
                     return [
                         'branch_id' => $item->branch_id,
                         'branch_name' => $item->branch_name,
                         'branch_code' => $item->branch_code,
                         'payment_count' => (int) $item->payment_count,
                         'total_amount' => (float) $item->total_amount,
-                        'student_count' => (int) $item->student_count
+                        'student_count' => (int) $item->student_count,
                     ];
                 });
 
@@ -688,11 +695,11 @@ class FeeController extends Controller
                 ->groupBy('fp.payment_method')
                 ->orderBy('fp.payment_method')
                 ->get()
-                ->map(function($item) {
+                ->map(function ($item) {
                     return [
                         'payment_method' => $item->payment_method,
                         'payment_count' => (int) $item->payment_count,
-                        'total_amount' => (float) $item->total_amount
+                        'total_amount' => (float) $item->total_amount,
                     ];
                 });
 
@@ -708,22 +715,23 @@ class FeeController extends Controller
                         'period' => $period,
                         'from_date' => $fromDate,
                         'to_date' => $toDate,
-                        'date' => $fromDate === $toDate ? $fromDate : $fromDate . ' to ' . $toDate,
-                        'includes_partial_payments' => true
+                        'date' => $fromDate === $toDate ? $fromDate : $fromDate.' to '.$toDate,
+                        'includes_partial_payments' => true,
                     ],
                     'by_status' => $byStatus,
                     'by_grade' => $byGrade,
                     'by_section' => $bySection,
                     'by_branch' => $byBranch,
-                    'by_payment_method' => $byPaymentMethod
-                ]
+                    'by_payment_method' => $byPaymentMethod,
+                ],
             ]);
         } catch (\Exception $e) {
-            Log::error('Error fetching today\'s payments dashboard: ' . $e->getMessage());
+            Log::error('Error fetching today\'s payments dashboard: '.$e->getMessage());
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error fetching today\'s payments dashboard',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -743,7 +751,7 @@ class FeeController extends Controller
             // 🔥 APPLY BRANCH FILTERING - Restrict to accessible branches
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
             if ($accessibleBranchIds !== 'all') {
-                if (!empty($accessibleBranchIds)) {
+                if (! empty($accessibleBranchIds)) {
                     $query->whereIn('branch_id', $accessibleBranchIds);
                 } else {
                     $query->whereRaw('1 = 0');
@@ -783,11 +791,11 @@ class FeeController extends Controller
             }
 
             // OPTIMIZED Search filter - prefix search for better index usage
-            if ($request->has('search') && !empty($request->search)) {
+            if ($request->has('search') && ! empty($request->search)) {
                 $search = strip_tags($request->search);
-                $query->where(function($q) use ($search) {
+                $query->where(function ($q) use ($search) {
                     $q->where('transaction_id', 'like', "{$search}%")
-                      ->orWhere('payment_method', 'like', "{$search}%");
+                        ->orWhere('payment_method', 'like', "{$search}%");
                 });
             }
 
@@ -805,7 +813,7 @@ class FeeController extends Controller
             $aggs = [];
             $pairs = $items
                 ->map(fn ($p) => ['s' => $p->student_id, 'f' => $p->fee_structure_id])
-                ->unique(fn ($x) => $x['s'] . '|' . $x['f'])
+                ->unique(fn ($x) => $x['s'].'|'.$x['f'])
                 ->values();
             if ($pairs->isNotEmpty()) {
                 $rows = DB::table('fee_payments')
@@ -824,12 +832,12 @@ class FeeController extends Controller
                     ->groupBy('student_id', 'fee_structure_id')
                     ->get();
                 foreach ($rows as $r) {
-                    $aggs[$r->student_id . '|' . $r->fee_structure_id] = $r;
+                    $aggs[$r->student_id.'|'.$r->fee_structure_id] = $r;
                 }
             }
 
             // Map data: ensure fee_type, branch_name, and the derived fee_status / remaining_amount
-            $data = $items->map(function($payment) use ($aggs) {
+            $data = $items->map(function ($payment) use ($aggs) {
                 if ($payment->feeStructure && empty($payment->feeStructure->fee_type)) {
                     $payment->feeStructure->fee_type = 'General Fee';
                 }
@@ -837,7 +845,7 @@ class FeeController extends Controller
                     ? $payment->feeStructure->branch->name
                     : null;
 
-                $agg = $aggs[$payment->student_id . '|' . $payment->fee_structure_id] ?? null;
+                $agg = $aggs[$payment->student_id.'|'.$payment->fee_structure_id] ?? null;
                 $feeAmount = (float) ($payment->feeStructure->amount ?? 0);
                 $paid = $agg ? (float) $agg->paid : 0.0;
                 $disc = $agg ? (float) $agg->disc : 0.0;
@@ -852,6 +860,7 @@ class FeeController extends Controller
                 } else {
                     $payment->fee_status = $remaining > 0 ? 'Partial' : 'Completed';
                 }
+
                 return $payment;
             });
 
@@ -866,15 +875,16 @@ class FeeController extends Controller
                     'last_page' => $payments->lastPage(),
                     'from' => $payments->firstItem(),
                     'to' => $payments->lastItem(),
-                    'has_more_pages' => $payments->hasMorePages()
-                ]
+                    'has_more_pages' => $payments->hasMorePages(),
+                ],
             ]);
         } catch (\Exception $e) {
-            Log::error('Error fetching fee payments: ' . $e->getMessage());
+            Log::error('Error fetching fee payments: '.$e->getMessage());
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error fetching fee payments',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -898,22 +908,23 @@ class FeeController extends Controller
                 'discount_amount' => 'nullable|numeric|min:0',
                 'late_fee' => 'nullable|numeric|min:0',
                 'payment_status' => 'required|string|in:Pending,Partial,Completed,Failed,Refunded',
-                'remarks' => 'nullable|string'
+                'remarks' => 'nullable|string',
             ]);
 
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Validation failed',
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
             $feeStructure = FeeStructure::find($request->fee_structure_id);
 
             // Tenant guard: only record payments against a fee structure in a branch the user can manage.
-            if (!$feeStructure || !$this->canManageBranch($request, (int) $feeStructure->branch_id)) {
+            if (! $feeStructure || ! $this->canManageBranch($request, (int) $feeStructure->branch_id)) {
                 DB::rollBack();
+
                 return response()->json(['success' => false, 'message' => 'Fee structure not found'], 404);
             }
 
@@ -922,9 +933,10 @@ class FeeController extends Controller
             $studentRecord = \App\Models\Student::where('user_id', $request->student_id)->first();
             if ($studentRecord && (int) $studentRecord->branch_id !== (int) $feeStructure->branch_id) {
                 DB::rollBack();
+
                 return response()->json([
                     'success' => false,
-                    'message' => 'Student does not belong to the branch of this fee structure'
+                    'message' => 'Student does not belong to the branch of this fee structure',
                 ], 422);
             }
 
@@ -946,9 +958,10 @@ class FeeController extends Controller
 
             if ($amountPaid > $maxAllowed) {
                 DB::rollBack();
+
                 return response()->json([
                     'success' => false,
-                    'message' => 'You entered more than the actual amount. Maximum allowed: ₹' . number_format($maxAllowed, 2) . ' (Remaining: ₹' . number_format($remainingBeforePayment, 2) . ' + Late Fee: ₹' . number_format($lateFee, 2) . ')',
+                    'message' => 'You entered more than the actual amount. Maximum allowed: ₹'.number_format($maxAllowed, 2).' (Remaining: ₹'.number_format($remainingBeforePayment, 2).' + Late Fee: ₹'.number_format($lateFee, 2).')',
                 ], 422);
             }
 
@@ -959,10 +972,10 @@ class FeeController extends Controller
             // payment_status stayed correct while status defaulted to 'Pending').
             $statusMap = [
                 'Completed' => 'Paid',
-                'Partial'   => 'Partial',
-                'Pending'   => 'Pending',
-                'Failed'    => 'Cancelled',
-                'Refunded'  => 'Cancelled',
+                'Partial' => 'Partial',
+                'Pending' => 'Pending',
+                'Failed' => 'Cancelled',
+                'Refunded' => 'Cancelled',
             ];
             $status = $statusMap[$request->payment_status] ?? 'Pending';
 
@@ -991,7 +1004,7 @@ class FeeController extends Controller
                 'remarks' => $request->remarks,
                 'academic_year_id' => $academicYearId ? (int) $academicYearId : null,
                 'academic_year' => $academicYearName,
-                'created_by' => $request->user()->id
+                'created_by' => $request->user()->id,
             ];
 
             $payment = FeePayment::create($paymentData);
@@ -1001,15 +1014,16 @@ class FeeController extends Controller
             return response()->json([
                 'success' => true,
                 'data' => $payment->load(['feeStructure', 'student', 'creator']),
-                'message' => 'Payment recorded successfully'
+                'message' => 'Payment recorded successfully',
             ], 201);
         } catch (\Exception $e) {
             DB::rollBack();
-            Log::error('Error recording payment: ' . $e->getMessage());
+            Log::error('Error recording payment: '.$e->getMessage());
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error recording payment',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -1020,35 +1034,36 @@ class FeeController extends Controller
             // Get student details to filter fee structures by branch and grade
             // studentId here is actually the user_id
             $student = \App\Models\Student::where('user_id', $studentId)->first();
-            
+
             // If no student record exists, return empty data instead of error
-            if (!$student) {
+            if (! $student) {
                 Log::warning('No student record found for user_id', ['user_id' => $studentId]);
+
                 return response()->json([
                     'success' => true,
                     'data' => [
                         'payments' => [],
                         'pending_fees' => [],
                         'total_paid' => 0,
-                        'pending_count' => 0
+                        'pending_count' => 0,
                     ],
-                    'message' => 'No student record found for this user'
+                    'message' => 'No student record found for this user',
                 ]);
             }
-            
+
             // Log student details for debugging
             Log::info('Getting fees for student', [
                 'user_id' => $studentId,
                 'student_id' => $student->id,
                 'branch_id' => $student->branch_id,
-                'grade' => $student->grade
+                'grade' => $student->grade,
             ]);
 
             $academicYearId = request()->attributes->get('academic_year_id') ?? request()->input('academic_year_id');
             $academicYearName = $academicYearId
                 ? (\App\Models\AcademicYear::query()->where('id', $academicYearId)->value('name') ?? null)
                 : null;
-            
+
             // OPTIMIZED: Use SQL aggregation - Count completed AND partial payments (scoped to academic year when set)
             $totalPaidQuery = FeePayment::where('student_id', $studentId)
                 ->whereIn('payment_status', ['Completed', 'Partial']);
@@ -1077,23 +1092,23 @@ class FeeController extends Controller
                 $allBranchFeesQuery->where('academic_year', $academicYearName);
             }
             $allBranchFees = $allBranchFeesQuery->get();
-            
+
             Log::info('Fee structures debugging', [
                 'student_user_id' => $studentId,
                 'student_branch_id' => $student->branch_id,
                 'student_grade' => $student->grade,
                 'student_grade_type' => gettype($student->grade),
                 'total_branch_fees' => $allBranchFees->count(),
-                'grades_in_fee_structures' => $allBranchFees->pluck('grade')->unique()->toArray()
+                'grades_in_fee_structures' => $allBranchFees->pluck('grade')->unique()->toArray(),
             ]);
 
             // OPTIMIZED: Get pending fees - Only for student's branch and grade (scoped to academic year when set)
             $pendingQuery = FeeStructure::where('is_active', true)
                 ->where('branch_id', $student->branch_id)
-                ->where(function($q) use ($student) {
+                ->where(function ($q) use ($student) {
                     $q->where('grade', $student->grade)
-                      ->orWhere('grade', 'Grade ' . $student->grade)
-                      ->orWhere('grade', str_replace('Grade ', '', $student->grade));
+                        ->orWhere('grade', 'Grade '.$student->grade)
+                        ->orWhere('grade', str_replace('Grade ', '', $student->grade));
                 });
             if ($academicYearId && \Illuminate\Support\Facades\Schema::hasColumn('fee_structures', 'academic_year_id')) {
                 $pendingQuery->where('academic_year_id', $academicYearId);
@@ -1101,11 +1116,11 @@ class FeeController extends Controller
                 $pendingQuery->where('academic_year', $academicYearName);
             }
             $pending = $pendingQuery
-                ->when(!empty($paidStructureIds), function($q) use ($paidStructureIds) {
+                ->when(! empty($paidStructureIds), function ($q) use ($paidStructureIds) {
                     return $q->whereNotIn('id', $paidStructureIds);
                 })
                 ->get()
-                ->map(function($fee) use ($studentId, $academicYearName) {
+                ->map(function ($fee) use ($studentId, $academicYearName) {
                     if (empty($fee->fee_type)) {
                         $fee->fee_type = 'General Fee';
                     }
@@ -1118,6 +1133,7 @@ class FeeController extends Controller
                     $amountPaid = $amountPaidQuery->sum('amount_paid');
                     $fee->amount_paid = (float) $amountPaid;
                     $fee->remaining_amount = max(0, (float) $fee->amount - (float) $amountPaid);
+
                     return $fee;
                 });
 
@@ -1131,11 +1147,12 @@ class FeeController extends Controller
                 ->orderBy('payment_date', 'desc')
                 ->limit(50)
                 ->get()
-                ->map(function($payment) {
+                ->map(function ($payment) {
                     // Ensure fee_type is never null in fee_structure relationship
                     if ($payment->feeStructure && empty($payment->feeStructure->fee_type)) {
                         $payment->feeStructure->fee_type = 'General Fee';
                     }
+
                     return $payment;
                 });
 
@@ -1144,7 +1161,7 @@ class FeeController extends Controller
                 'payments_count' => $payments->count(),
                 'total_paid' => $totalPaid,
                 'paid_structure_ids' => $paidStructureIds,
-                'pending_fee_types' => $pending->pluck('fee_type')->toArray()
+                'pending_fee_types' => $pending->pluck('fee_type')->toArray(),
             ]);
 
             return response()->json([
@@ -1152,17 +1169,18 @@ class FeeController extends Controller
                 'data' => [
                     'payments' => $payments,
                     'pending_fees' => $pending,
-                    'total_paid' => (float)$totalPaid,
-                    'pending_count' => $pending->count()
+                    'total_paid' => (float) $totalPaid,
+                    'pending_count' => $pending->count(),
                 ],
-                'message' => 'Student fees retrieved successfully'
+                'message' => 'Student fees retrieved successfully',
             ]);
         } catch (\Exception $e) {
-            Log::error('Error fetching student fees: ' . $e->getMessage());
+            Log::error('Error fetching student fees: '.$e->getMessage());
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error fetching student fees',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -1174,7 +1192,7 @@ class FeeController extends Controller
             $structure = FeeStructure::with(['branch', 'creator', 'updater'])->findOrFail($id);
 
             // Tenant guard.
-            if (!$this->canAccessBranch($request, (int) $structure->branch_id)) {
+            if (! $this->canAccessBranch($request, (int) $structure->branch_id)) {
                 return response()->json(['success' => false, 'message' => 'Fee structure not found'], 404);
             }
 
@@ -1182,21 +1200,22 @@ class FeeController extends Controller
             if (empty($structure->fee_type)) {
                 $structure->fee_type = 'General Fee';
             }
-            
+
             return response()->json([
                 'success' => true,
-                'data' => $structure
+                'data' => $structure,
             ]);
         } catch (\Exception $e) {
-            Log::error('Error fetching fee structure: ' . $e->getMessage());
+            Log::error('Error fetching fee structure: '.$e->getMessage());
+
             return response()->json([
                 'success' => false,
                 'message' => 'Fee structure not found',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 404);
         }
     }
-    
+
     // Show single fee payment
     public function showPayment(Request $request, string $id)
     {
@@ -1205,7 +1224,7 @@ class FeeController extends Controller
 
             // Tenant guard (payment branch, falling back to its fee structure's branch).
             $payBranch = $payment->branch_id ?? $payment->feeStructure?->branch_id;
-            if (!$this->canAccessBranch($request, (int) $payBranch)) {
+            if (! $this->canAccessBranch($request, (int) $payBranch)) {
                 return response()->json(['success' => false, 'message' => 'Fee payment not found'], 404);
             }
 
@@ -1229,30 +1248,31 @@ class FeeController extends Controller
             if ($studentRecord) {
                 $payment->student_grade_label = null;
                 $payment->student_section = $studentRecord->section ?? null;
-                if (!empty($studentRecord->grade) && !empty($studentRecord->branch_id)) {
+                if (! empty($studentRecord->grade) && ! empty($studentRecord->branch_id)) {
                     $gradeRow = DB::table('grades')
                         ->where('branch_id', $studentRecord->branch_id)
                         ->where('value', $studentRecord->grade)
                         ->first();
-                    $payment->student_grade_label = $gradeRow ? $gradeRow->label : ('Grade ' . $studentRecord->grade);
-                } elseif (!empty($studentRecord->grade)) {
-                    $payment->student_grade_label = 'Grade ' . $studentRecord->grade;
+                    $payment->student_grade_label = $gradeRow ? $gradeRow->label : ('Grade '.$studentRecord->grade);
+                } elseif (! empty($studentRecord->grade)) {
+                    $payment->student_grade_label = 'Grade '.$studentRecord->grade;
                 }
             } else {
-                $payment->student_grade_label = $payment->feeStructure ? ('Grade ' . ($payment->feeStructure->grade ?? '')) : null;
+                $payment->student_grade_label = $payment->feeStructure ? ('Grade '.($payment->feeStructure->grade ?? '')) : null;
                 $payment->student_section = null;
             }
-            
+
             return response()->json([
                 'success' => true,
-                'data' => $payment
+                'data' => $payment,
             ]);
         } catch (\Exception $e) {
-            Log::error('Error fetching fee payment: ' . $e->getMessage());
+            Log::error('Error fetching fee payment: '.$e->getMessage());
+
             return response()->json([
                 'success' => false,
                 'message' => 'Fee payment not found',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 404);
         }
     }
@@ -1267,7 +1287,7 @@ class FeeController extends Controller
 
             // Tenant guard — don't leak another school's receipt PDF.
             $payBranch = $payment->branch_id ?? $payment->feeStructure?->branch_id;
-            if (!$this->canAccessBranch($request, (int) $payBranch)) {
+            if (! $this->canAccessBranch($request, (int) $payBranch)) {
                 return response()->json(['success' => false, 'message' => 'Fee payment not found'], 404);
             }
 
@@ -1276,10 +1296,10 @@ class FeeController extends Controller
             }
 
             $studentName = $payment->student
-                ? trim(($payment->student->first_name ?? '') . ' ' . ($payment->student->last_name ?? ''))
+                ? trim(($payment->student->first_name ?? '').' '.($payment->student->last_name ?? ''))
                 : 'Student';
 
-            $receiptNumber = $payment->receipt_number ?? ('PAYMENT-' . $payment->id);
+            $receiptNumber = $payment->receipt_number ?? ('PAYMENT-'.$payment->id);
 
             // Student grade/section for receipt (use branch-specific grade label when available)
             $studentGradeLabel = null;
@@ -1287,17 +1307,17 @@ class FeeController extends Controller
             $studentRecord = \App\Models\Student::where('user_id', $payment->student_id)->first();
             if ($studentRecord) {
                 $studentSection = $studentRecord->section ?? null;
-                if (!empty($studentRecord->grade) && !empty($studentRecord->branch_id)) {
+                if (! empty($studentRecord->grade) && ! empty($studentRecord->branch_id)) {
                     $gradeRow = DB::table('grades')
                         ->where('branch_id', $studentRecord->branch_id)
                         ->where('value', (string) $studentRecord->grade)
                         ->first();
-                    $studentGradeLabel = $gradeRow ? $gradeRow->label : ('Grade ' . $studentRecord->grade);
-                } elseif (!empty($studentRecord->grade)) {
-                    $studentGradeLabel = 'Grade ' . $studentRecord->grade;
+                    $studentGradeLabel = $gradeRow ? $gradeRow->label : ('Grade '.$studentRecord->grade);
+                } elseif (! empty($studentRecord->grade)) {
+                    $studentGradeLabel = 'Grade '.$studentRecord->grade;
                 }
-            } elseif ($payment->feeStructure && !empty($payment->feeStructure->grade)) {
-                $studentGradeLabel = 'Grade ' . $payment->feeStructure->grade;
+            } elseif ($payment->feeStructure && ! empty($payment->feeStructure->grade)) {
+                $studentGradeLabel = 'Grade '.$payment->feeStructure->grade;
             }
 
             // Load all payments for this student & fee structure to show history
@@ -1312,7 +1332,39 @@ class FeeController extends Controller
             $alreadyPaidExcludingCurrent = (float) $previousPayments->sum('amount_paid');
             $totalLateFee = (float) $paymentHistory->sum('late_fee');
 
-            $html = view('pdf.fee_receipt', [
+            $branding = [];
+            if ($studentRecord) {
+                $studentRecord->loadMissing(['user', 'branch.school']);
+                $branding = app(\App\Services\StudentReportBrandingService::class)
+                    ->forStudent($studentRecord, 'PAYMENT RECEIPT');
+            } else {
+                $branding = [
+                    'school' => [
+                        'name' => strtoupper(config('app.name', 'School')),
+                        'branch_line' => null,
+                        'tagline' => '',
+                        'address_lines' => [],
+                        'logo_data_uri' => null,
+                    ],
+                    'student' => [
+                        'name' => $studentName,
+                        'photo_data_uri' => null,
+                        'class' => $studentGradeLabel ?? '—',
+                        'admission_number' => optional($payment->student)->admission_number ?? '—',
+                        'academic_year' => optional($payment->feeStructure)->academic_year ?? '—',
+                    ],
+                    'report' => [
+                        'title' => 'PAYMENT RECEIPT',
+                        'academic_year' => optional($payment->feeStructure)->academic_year ?? '—',
+                    ],
+                    'signatures' => [
+                        'class_teacher' => 'Class Teacher',
+                        'principal' => 'Principal',
+                    ],
+                ];
+            }
+
+            $html = view('pdf.fee_receipt', array_merge($branding, [
                 'payment' => $payment,
                 'studentName' => $studentName,
                 'studentGradeLabel' => $studentGradeLabel,
@@ -1323,7 +1375,8 @@ class FeeController extends Controller
                 'alreadyPaid' => $alreadyPaid,
                 'alreadyPaidExcludingCurrent' => $alreadyPaidExcludingCurrent,
                 'totalLateFee' => $totalLateFee,
-            ])->render();
+                'generatedAt' => now()->format('d M Y'),
+            ]))->render();
 
             $pdf = app('dompdf.wrapper');
             $pdf->loadHTML($html);
@@ -1333,7 +1386,7 @@ class FeeController extends Controller
 
             return $pdf->download($filename);
         } catch (\Exception $e) {
-            Log::error('Error generating fee payment receipt PDF: ' . $e->getMessage(), [
+            Log::error('Error generating fee payment receipt PDF: '.$e->getMessage(), [
                 'payment_id' => $id,
             ]);
 
@@ -1363,7 +1416,7 @@ class FeeController extends Controller
             }
 
             $branchId = (int) $request->branch_id;
-            if (!$this->canAccessBranch($request, $branchId)) {
+            if (! $this->canAccessBranch($request, $branchId)) {
                 return response()->json(['success' => false, 'message' => 'You do not have access to this branch'], 403);
             }
 
@@ -1406,7 +1459,7 @@ class FeeController extends Controller
 
             // Aggregate each student's paid + discount across the applicable structures (one query).
             $paidByStudent = [];
-            if (!empty($structureIds) && $students->isNotEmpty()) {
+            if (! empty($structureIds) && $students->isNotEmpty()) {
                 $rows = DB::table('fee_payments')
                     ->whereNull('deleted_at')
                     ->whereIn('fee_structure_id', $structureIds)
@@ -1432,9 +1485,10 @@ class FeeController extends Controller
                 $status = $paid <= 0 ? 'Pending' : ($due > 0 ? 'Partial' : 'Paid');
                 $totalPaidAll += $paid;
                 $totalDueAll += $due;
+
                 return [
                     'student_id' => $s->student_id,
-                    'student_name' => trim(($s->first_name ?? '') . ' ' . ($s->last_name ?? '')),
+                    'student_name' => trim(($s->first_name ?? '').' '.($s->last_name ?? '')),
                     'phone' => $s->phone ?: '-',
                     'section' => $s->section,
                     'total_fee' => $totalFee,
@@ -1457,7 +1511,8 @@ class FeeController extends Controller
                 ],
             ]);
         } catch (\Exception $e) {
-            Log::error('Error fetching student fees by class: ' . $e->getMessage());
+            Log::error('Error fetching student fees by class: '.$e->getMessage());
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error fetching student fees by class',
@@ -1472,43 +1527,58 @@ class FeeController extends Controller
     private function parsePaymentDateRange(Request $request): array
     {
         $period = $request->get('period', 'today');
-        
+
         switch ($period) {
             case 'today':
                 return [
                     'from' => \Carbon\Carbon::today()->toDateString(),
-                    'to' => \Carbon\Carbon::today()->toDateString()
+                    'to' => \Carbon\Carbon::today()->toDateString(),
                 ];
-            
+
             case 'week':
                 return [
                     'from' => \Carbon\Carbon::now()->startOfWeek()->toDateString(),
-                    'to' => \Carbon\Carbon::now()->endOfWeek()->toDateString()
+                    'to' => \Carbon\Carbon::now()->endOfWeek()->toDateString(),
                 ];
-            
+
             case 'month':
                 return [
                     'from' => \Carbon\Carbon::now()->startOfMonth()->toDateString(),
-                    'to' => \Carbon\Carbon::now()->endOfMonth()->toDateString()
+                    'to' => \Carbon\Carbon::now()->endOfMonth()->toDateString(),
                 ];
-            
+
             case 'custom':
                 return [
                     'from' => $request->get('from_date', \Carbon\Carbon::today()->toDateString()),
-                    'to' => $request->get('to_date', \Carbon\Carbon::today()->toDateString())
+                    'to' => $request->get('to_date', \Carbon\Carbon::today()->toDateString()),
                 ];
-            
+
             default:
                 return [
                     'from' => \Carbon\Carbon::today()->toDateString(),
-                    'to' => \Carbon\Carbon::today()->toDateString()
+                    'to' => \Carbon\Carbon::today()->toDateString(),
                 ];
         }
     }
 
     // Legacy methods for compatibility
-    public function index() { return $this->indexStructures(request()); }
-    public function store(Request $request) { return $this->storeStructure($request); }
-    public function update(Request $request, string $id) { return $this->updateStructure($request, $id); }
-    public function destroy(string $id) { return $this->destroyStructure(request(), $id); }
+    public function index()
+    {
+        return $this->indexStructures(request());
+    }
+
+    public function store(Request $request)
+    {
+        return $this->storeStructure($request);
+    }
+
+    public function update(Request $request, string $id)
+    {
+        return $this->updateStructure($request, $id);
+    }
+
+    public function destroy(string $id)
+    {
+        return $this->destroyStructure(request(), $id);
+    }
 }

@@ -2,21 +2,21 @@
 
 namespace App\Http\Controllers;
 
+use App\Exports\StudentsExport;
 use App\Http\Traits\PaginatesAndSorts;
-use App\Models\User;
-use App\Services\AcademicYearContext;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Validator;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Facades\Schema;
 use App\Models\Branch;
 use App\Models\Student;
-use App\Exports\StudentsExport;
-use App\Services\PdfExportService;
+use App\Models\User;
+use App\Services\AcademicYearContext;
 use App\Services\CsvExportService;
+use App\Services\PdfExportService;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Validator;
 use Maatwebsite\Excel\Facades\Excel;
 
 class StudentController extends Controller
@@ -98,10 +98,10 @@ class StudentController extends Controller
                 'branches.id as branch_id_val',
                 'branches.name as branch_name',
                 'branches.code as branch_code',
-                DB::raw('COALESCE(' . ($hasEnrollments && $academicYearId ? 'se.grade' : 'NULL') . ', students.grade) as current_grade'),
-                DB::raw('COALESCE(grades.label, CONCAT("Grade ", COALESCE(' . ($hasEnrollments && $academicYearId ? 'se.grade' : 'NULL') . ', students.grade))) as current_grade_label'),
-                DB::raw('COALESCE(' . ($hasEnrollments && $academicYearId ? 'se.section' : 'NULL') . ', students.section) as current_section'),
-                DB::raw('COALESCE(' . ($hasEnrollments && $academicYearId ? 'se.academic_year_id' : 'NULL') . ', students.academic_year_id) as current_academic_year_id'),
+                DB::raw('COALESCE('.($hasEnrollments && $academicYearId ? 'se.grade' : 'NULL').', students.grade) as current_grade'),
+                DB::raw('COALESCE(grades.label, CONCAT("Grade ", COALESCE('.($hasEnrollments && $academicYearId ? 'se.grade' : 'NULL').', students.grade))) as current_grade_label'),
+                DB::raw('COALESCE('.($hasEnrollments && $academicYearId ? 'se.section' : 'NULL').', students.section) as current_section'),
+                DB::raw('COALESCE('.($hasEnrollments && $academicYearId ? 'se.academic_year_id' : 'NULL').', students.academic_year_id) as current_academic_year_id'),
                 DB::raw('COALESCE(ay.name, students.academic_year) as current_academic_year'),
                 'grades.label as grade_label'
             );
@@ -133,7 +133,7 @@ class StudentController extends Controller
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
 
             if ($accessibleBranchIds !== 'all') {
-                if (!empty($accessibleBranchIds)) {
+                if (! empty($accessibleBranchIds)) {
                     $query->whereIn('students.branch_id', $accessibleBranchIds);
                 } else {
                     // No accessible branches - return empty result
@@ -150,7 +150,7 @@ class StudentController extends Controller
                 }
             }
 
-            if ($request->has('section')) {
+            if ($request->filled('section')) {
                 if ($hasEnrollments && $academicYearId) {
                     $query->whereRaw('COALESCE(se.section, students.section) = ?', [$request->section]);
                 } else {
@@ -183,7 +183,7 @@ class StudentController extends Controller
             // Academic year filter - skip when for_group_membership (e.g. add member dropdown)
             // or all_academic_years (e.g. promotion class selection), so we show all active
             // students in the selected branch/grade/section regardless of their enrollment year.
-            if ($academicYearId && !$request->boolean('for_group_membership') && !$request->boolean('all_academic_years')) {
+            if ($academicYearId && ! $request->boolean('for_group_membership') && ! $request->boolean('all_academic_years')) {
                 if ($hasEnrollments) {
                     $query->whereRaw('COALESCE(se.academic_year_id, students.academic_year_id) = ?', [$academicYearId]);
                 } else {
@@ -195,17 +195,17 @@ class StudentController extends Controller
                 // Sanitize search input to prevent SQL injection
                 $search = strip_tags($request->search);
                 $search = preg_replace('/[^\w\s@.-]/', '', $search);
-                
-                $query->where(function($q) use ($search) {
+
+                $query->where(function ($q) use ($search) {
                     // Use FULLTEXT search if available, otherwise use optimized LIKE queries
                     // Remove leading wildcard for better index usage where possible
                     $q->where('users.first_name', 'like', "{$search}%")
-                      ->orWhere('users.last_name', 'like', "{$search}%")
-                      ->orWhere('users.email', 'like', "{$search}%")
-                      ->orWhere('students.admission_number', 'like', "{$search}%")
-                      ->orWhere('students.roll_number', 'like', "{$search}%")
+                        ->orWhere('users.last_name', 'like', "{$search}%")
+                        ->orWhere('users.email', 'like', "{$search}%")
+                        ->orWhere('students.admission_number', 'like', "{$search}%")
+                        ->orWhere('students.roll_number', 'like', "{$search}%")
                       // Safe concatenation with parameter binding to prevent SQL injection
-                      ->orWhereRaw('CONCAT(users.first_name, " ", users.last_name) LIKE ?', ["{$search}%"]);
+                        ->orWhereRaw('CONCAT(users.first_name, " ", users.last_name) LIKE ?', ["{$search}%"]);
                 });
             }
 
@@ -223,21 +223,22 @@ class StudentController extends Controller
                 'users.first_name',
                 'users.last_name',
                 'users.email',
-                'branches.name'
+                'branches.name',
             ];
 
             // Apply pagination and sorting (default: 25 per page, sorted by created_at desc)
             $students = $this->paginateAndSort($query, $request, $sortableColumns, 'students.created_at', 'desc');
 
             // 🚀 OPTIMIZED: Format branch data on backend instead of JSON parsing
-            $studentsData = collect($students->items())->map(function($student) {
+            $studentsData = collect($students->items())->map(function ($student) {
                 $student->branch = [
                     'id' => $student->branch_id_val,
                     'name' => $student->branch_name,
-                    'code' => $student->branch_code
+                    'code' => $student->branch_code,
                 ];
                 // Remove temporary fields
                 unset($student->branch_id_val, $student->branch_name, $student->branch_code);
+
                 return $student;
             })->toArray();
 
@@ -254,17 +255,17 @@ class StudentController extends Controller
                     'from' => $students->firstItem(),
                     'to' => $students->lastItem(),
                     'has_more_pages' => $students->hasMorePages(),
-                    'academic_year_id' => $academicYearId
-                ]
+                    'academic_year_id' => $academicYearId,
+                ],
             ]);
 
         } catch (\Exception $e) {
             Log::error('Get students error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch students',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -325,54 +326,56 @@ class StudentController extends Controller
             // 🔥 APPLY BRANCH FILTERING - Prevent access to other branches
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
             if ($accessibleBranchIds !== 'all') {
-                if (!empty($accessibleBranchIds)) {
+                if (! empty($accessibleBranchIds)) {
                     $query->whereIn('students.branch_id', $accessibleBranchIds);
                 } else {
                     $query->whereRaw('1 = 0');
                 }
             }
-            
+
             // Select all student fields using students.*
             $student = $query->select(
-                    'students.*',
-                    DB::raw('COALESCE(' . ($hasEnrollments && $academicYearId ? 'se.grade' : 'NULL') . ', students.grade) as grade'),
-                    DB::raw('COALESCE(grades.label, CONCAT("Grade ", COALESCE(' . ($hasEnrollments && $academicYearId ? 'se.grade' : 'NULL') . ', students.grade))) as grade_label'),
-                    DB::raw('COALESCE(' . ($hasEnrollments && $academicYearId ? 'se.section' : 'NULL') . ', students.section) as section'),
-                    DB::raw('COALESCE(' . ($hasEnrollments && $academicYearId ? 'se.academic_year_id' : 'NULL') . ', students.academic_year_id) as academic_year_id'),
-                    DB::raw('COALESCE(ay.name, students.academic_year) as academic_year'),
-                    'users.first_name',
-                    'users.last_name',
-                    'users.email',
-                    'users.phone',
-                    'users.is_active',
-                    'users.avatar as user_avatar',
-                    DB::raw('JSON_OBJECT("id", branches.id, "name", branches.name, "code", branches.code) as branch')
-                )
+                'students.*',
+                DB::raw('COALESCE('.($hasEnrollments && $academicYearId ? 'se.grade' : 'NULL').', students.grade) as grade'),
+                DB::raw('COALESCE(grades.label, CONCAT("Grade ", COALESCE('.($hasEnrollments && $academicYearId ? 'se.grade' : 'NULL').', students.grade))) as grade_label'),
+                DB::raw('COALESCE('.($hasEnrollments && $academicYearId ? 'se.section' : 'NULL').', students.section) as section'),
+                DB::raw('COALESCE('.($hasEnrollments && $academicYearId ? 'se.academic_year_id' : 'NULL').', students.academic_year_id) as academic_year_id'),
+                DB::raw('COALESCE(ay.name, students.academic_year) as academic_year'),
+                'users.first_name',
+                'users.last_name',
+                'users.email',
+                'users.phone',
+                'users.is_active',
+                'users.avatar as user_avatar',
+                DB::raw('JSON_OBJECT("id", branches.id, "name", branches.name, "code", branches.code) as branch')
+            )
                 ->first();
 
-            if (!$student) {
+            if (! $student) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Student not found'
+                    'message' => 'Student not found',
                 ], 404);
             }
 
             // Convert to array and ensure all fields are present
             $studentData = (array) $student;
-            $studentData['profile_picture'] = $this->resolvePublicStorageUrl(
+            $resolvedProfilePicture = $this->resolvePublicStorageUrl(
                 $studentData['profile_picture'] ?? $studentData['user_avatar'] ?? null
             );
+            $studentData['profile_picture'] = $resolvedProfilePicture;
+            $studentData['profile_picture_url'] = $resolvedProfilePicture;
             unset($studentData['user_avatar']);
-            
+
             // Parse JSON branch field
             if (isset($studentData['branch']) && is_string($studentData['branch'])) {
                 $studentData['branch'] = json_decode($studentData['branch']);
             }
-            
+
             // Decode JSON fields that are stored as JSON strings
-            $jsonFields = ['sibling_details', 'vaccination_records', 'language_preferences', 
-                          'hobbies_interests', 'extra_curricular_activities', 'achievements',
-                          'sports_participation', 'cultural_activities'];
+            $jsonFields = ['sibling_details', 'vaccination_records', 'language_preferences',
+                'hobbies_interests', 'extra_curricular_activities', 'achievements',
+                'sports_participation', 'cultural_activities'];
             foreach ($jsonFields as $field) {
                 if (isset($studentData[$field]) && is_string($studentData[$field])) {
                     $decoded = json_decode($studentData[$field], true);
@@ -384,20 +387,20 @@ class StudentController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data' => $studentData
+                'data' => $studentData,
             ]);
 
         } catch (\Exception $e) {
             Log::error('Get student error', [
                 'id' => $id,
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
             ]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch student',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -468,39 +471,41 @@ class StudentController extends Controller
                 )
                 ->first();
 
-            if (!$student) {
+            if (! $student) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Student profile not found'
+                    'message' => 'Student profile not found',
                 ], 404);
             }
 
             // Convert to array and parse JSON fields
             $studentData = (array) $student;
-            $studentData['profile_picture'] = $this->resolvePublicStorageUrl(
+            $resolvedProfilePicture = $this->resolvePublicStorageUrl(
                 $studentData['profile_picture'] ?? $studentData['user_avatar'] ?? null
             );
+            $studentData['profile_picture'] = $resolvedProfilePicture;
+            $studentData['profile_picture_url'] = $resolvedProfilePicture;
             unset($studentData['user_avatar']);
-            
+
             if (isset($studentData['branch']) && is_string($studentData['branch'])) {
                 $studentData['branch'] = json_decode($studentData['branch']);
             }
 
             return response()->json([
                 'success' => true,
-                'data' => $studentData
+                'data' => $studentData,
             ]);
 
         } catch (\Exception $e) {
             Log::error('Get student by user_id error', [
                 'user_id' => $userId,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch student profile',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -510,17 +515,17 @@ class StudentController extends Controller
      */
     /**
      * Store a newly created student
-     * 
+     *
      * NOTE: This method uses a two-phase validation approach:
      * - Phase 1 (store): Only core/required fields are validated here
      * - Phase 2 (prepareStudentData): Additional 100+ optional fields are handled without validation
-     * 
+     *
      * This design allows flexible student creation where:
      * - Core fields (name, email, admission details, basic contact) are required during creation
      * - Extended fields (identity documents, detailed addresses, medical info, etc.) can be:
      *   a) Provided during creation (will be saved but not validated)
      *   b) Added later via the update() method (which uses 'sometimes' validation)
-     * 
+     *
      * This pattern is intentional to support:
      * - Quick student registration with minimal data
      * - Gradual profile completion over time
@@ -557,7 +562,7 @@ class StudentController extends Controller
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
@@ -573,9 +578,9 @@ class StudentController extends Controller
                 'role' => 'Student',
                 'user_type' => 'Student',
                 'branch_id' => $request->branch_id,
-                'is_active' => true
+                'is_active' => true,
             ]);
-            
+
             // Assign Student role via roles relationship
             $studentRole = \App\Models\Role::where('slug', 'student')->first();
             if ($studentRole) {
@@ -583,13 +588,13 @@ class StudentController extends Controller
                     'is_primary' => true,
                     'branch_id' => $request->branch_id,
                     'created_at' => now(),
-                    'updated_at' => now()
+                    'updated_at' => now(),
                 ]);
             }
 
             // Prepare student data using structured helper method
             $studentData = $this->prepareStudentData($request, $user->id);
-            
+
             // Create student record
             $studentId = DB::table('students')->insertGetId($studentData);
 
@@ -628,18 +633,18 @@ class StudentController extends Controller
                 'data' => [
                     'student_id' => $studentId,
                     'user_id' => $user->id,
-                    'admission_number' => $request->admission_number
-                ]
+                    'admission_number' => $request->admission_number,
+                ],
             ], 201);
 
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Create student error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create student',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -652,10 +657,10 @@ class StudentController extends Controller
         try {
             $student = DB::table('students')->where('id', $id)->first();
 
-            if (!$student) {
+            if (! $student) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Student not found'
+                    'message' => 'Student not found',
                 ], 404);
             }
 
@@ -664,14 +669,14 @@ class StudentController extends Controller
             if ($user && $user->role === 'Student' && (int) $student->user_id !== (int) $user->id) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Access denied'
+                    'message' => 'Access denied',
                 ], 403);
             }
 
             $validator = Validator::make($request->all(), [
                 'section' => 'sometimes|string',
                 'roll_number' => ['sometimes', 'nullable', function ($attr, $value, $fail) {
-                    if ($value !== null && $value !== '' && !is_string($value) && !is_numeric($value)) {
+                    if ($value !== null && $value !== '' && ! is_string($value) && ! is_numeric($value)) {
                         $fail('The roll number must be a string or number.');
                     }
                 }],
@@ -680,13 +685,13 @@ class StudentController extends Controller
                 'state' => 'sometimes|string',
                 'pincode' => 'sometimes|string',
                 'student_status' => 'sometimes|in:Active,Graduated,Left,Suspended,Expelled',
-                'profile_picture' => 'sometimes|string|nullable' // Allow profile_picture path to be updated
+                'profile_picture' => 'sometimes|string|nullable', // Allow profile_picture path to be updated
             ]);
 
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
@@ -699,9 +704,9 @@ class StudentController extends Controller
             $updateData = $this->prepareStudentUpdateData($request);
 
             // Only update if there's data to update
-            if (!empty($updateData)) {
+            if (! empty($updateData)) {
                 DB::table('students')->where('id', $id)->update($updateData);
-                
+
                 // If profile_picture was updated, also update user's avatar
                 if (isset($updateData['profile_picture']) && $studentModel->user) {
                     $studentModel->user->update(['avatar' => $updateData['profile_picture']]);
@@ -715,17 +720,17 @@ class StudentController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Student updated successfully'
+                'message' => 'Student updated successfully',
             ]);
 
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Update student error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update student',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -738,10 +743,10 @@ class StudentController extends Controller
         try {
             $student = DB::table('students')->where('id', $id)->first();
 
-            if (!$student) {
+            if (! $student) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Student not found'
+                    'message' => 'Student not found',
                 ], 404);
             }
 
@@ -753,7 +758,7 @@ class StudentController extends Controller
                 ->update([
                     'student_status' => 'Left',
                     'deleted_at' => now(),
-                    'updated_at' => now()
+                    'updated_at' => now(),
                 ]);
 
             // Deactivate user
@@ -763,17 +768,17 @@ class StudentController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Student deleted successfully'
+                'message' => 'Student deleted successfully',
             ]);
 
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Delete student error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to delete student',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -787,17 +792,17 @@ class StudentController extends Controller
             // Find student with trashed records
             $student = Student::withTrashed()->find($id);
 
-            if (!$student) {
+            if (! $student) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Student not found'
+                    'message' => 'Student not found',
                 ], 404);
             }
 
-            if (!$student->trashed()) {
+            if (! $student->trashed()) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Student is already active'
+                    'message' => 'Student is already active',
                 ], 400);
             }
 
@@ -822,16 +827,16 @@ class StudentController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Student restored successfully',
-                'data' => $student->load('user', 'branch')
+                'data' => $student->load('user', 'branch'),
             ]);
 
         } catch (\Exception $e) {
             Log::error('Restore student error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to restore student',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -881,13 +886,13 @@ class StudentController extends Controller
                 'to_grade' => 'required|string',
                 'to_academic_year_id' => 'required|integer|exists:academic_years,id',
                 'from_section' => 'nullable|string|max:50',
-                'to_section' => 'nullable|string|max:50'
+                'to_section' => 'nullable|string|max:50',
             ]);
 
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
@@ -896,7 +901,7 @@ class StudentController extends Controller
             if (empty($studentIds)) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'No accessible students in the selection for your branch.'
+                    'message' => 'No accessible students in the selection for your branch.',
                 ], 403);
             }
 
@@ -913,7 +918,7 @@ class StudentController extends Controller
 
             foreach ($studentIds as $studentId) {
                 $student = \App\Models\Student::find($studentId);
-                if (!$student || !$promotionService->studentMatchesForPromotion($student, (string) $request->from_grade, $fromAcademicYearId, $fromSection)) {
+                if (! $student || ! $promotionService->studentMatchesForPromotion($student, (string) $request->from_grade, $fromAcademicYearId, $fromSection)) {
                     continue;
                 }
 
@@ -976,18 +981,18 @@ class StudentController extends Controller
                 'data' => [
                     'promoted_count' => $promoted,
                     'to_grade' => $request->to_grade,
-                    'to_academic_year_id' => $request->to_academic_year_id
-                ]
+                    'to_academic_year_id' => $request->to_academic_year_id,
+                ],
             ]);
 
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Promote students error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to promote students',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -1009,18 +1014,18 @@ class StudentController extends Controller
                 'from_academic_year_id' => 'nullable|integer|exists:academic_years,id',
                 'check_eligibility' => 'boolean',
                 'from_section' => 'nullable|string|max:50',
-                'to_section' => 'nullable|string|max:50'
+                'to_section' => 'nullable|string|max:50',
             ]);
 
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
-            $feeCarryForwardService = new \App\Services\FeeCarryForwardService();
-            $notificationService = new \App\Services\FeeNotificationService();
+            $feeCarryForwardService = new \App\Services\FeeCarryForwardService;
+            $notificationService = new \App\Services\FeeNotificationService;
             $promotionService = new \App\Services\StudentPromotionService(
                 $feeCarryForwardService,
                 $notificationService
@@ -1030,10 +1035,10 @@ class StudentController extends Controller
                 ? (int) $request->from_academic_year_id
                 : $this->academicYearContext->id(false);
 
-            if (!$fromAcademicYearId) {
+            if (! $fromAcademicYearId) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'From academic year is required. Select it in the toolbar or provide from_academic_year_id.'
+                    'message' => 'From academic year is required. Select it in the toolbar or provide from_academic_year_id.',
                 ], 422);
             }
 
@@ -1042,7 +1047,7 @@ class StudentController extends Controller
             if (empty($studentIds)) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'No accessible students in the selection for your branch.'
+                    'message' => 'No accessible students in the selection for your branch.',
                 ], 403);
             }
 
@@ -1062,23 +1067,23 @@ class StudentController extends Controller
                 return response()->json([
                     'success' => false,
                     'message' => 'No students were promoted. Students may not match the selected grade/section for the from academic year, or may have been skipped.',
-                    'data' => $result
+                    'data' => $result,
                 ], 422);
             }
 
             return response()->json([
                 'success' => true,
                 'message' => "Successfully promoted {$result['promoted_count']} students with fee carry-forward",
-                'data' => $result
+                'data' => $result,
             ]);
 
         } catch (\Exception $e) {
             Log::error('Promote with fee handling error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to promote students',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -1097,13 +1102,13 @@ class StudentController extends Controller
                 'to_academic_year_id' => 'nullable|integer|exists:academic_years,id',
                 'academic_year' => 'nullable|string',
                 'from_section' => 'nullable|string|max:50',
-                'to_section' => 'nullable|string|max:50'
+                'to_section' => 'nullable|string|max:50',
             ]);
 
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
@@ -1117,14 +1122,14 @@ class StudentController extends Controller
                 ? (\App\Models\AcademicYear::query()->where('id', $toAcademicYearId)->value('name') ?? $request->academic_year)
                 : $request->academic_year;
 
-            if (!$fromAcademicYearName) {
+            if (! $fromAcademicYearName) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'From academic year could not be resolved. Ensure X-Academic-Year-Id header is set or academic_year is provided.'
+                    'message' => 'From academic year could not be resolved. Ensure X-Academic-Year-Id header is set or academic_year is provided.',
                 ], 422);
             }
 
-            $carryForwardService = new \App\Services\FeeCarryForwardService();
+            $carryForwardService = new \App\Services\FeeCarryForwardService;
             $promotionService = app(\App\Services\StudentPromotionService::class);
             $previews = [];
 
@@ -1136,7 +1141,7 @@ class StudentController extends Controller
             foreach ($studentIds as $studentId) {
                 $student = \App\Models\Student::with('user')->find($studentId);
 
-                if (!$student || !$promotionService->studentMatchesForPromotion($student, (string) $request->from_grade, $fromAcademicYearId, $fromSection)) {
+                if (! $student || ! $promotionService->studentMatchesForPromotion($student, (string) $request->from_grade, $fromAcademicYearId, $fromSection)) {
                     continue;
                 }
 
@@ -1149,7 +1154,7 @@ class StudentController extends Controller
 
                 $preview['student_id'] = $studentId;
                 $student->load('user');
-                $preview['student_name'] = ($student->user ? $student->user->first_name . ' ' . $student->user->last_name : 'N/A');
+                $preview['student_name'] = ($student->user ? $student->user->first_name.' '.$student->user->last_name : 'N/A');
                 $previews[] = $preview;
             }
 
@@ -1168,18 +1173,18 @@ class StudentController extends Controller
                     'total_fees_carry_forward' => $totalFeesCarryForward,
                     'summary' => [
                         'total_students' => count($previews),
-                        'total_pending_amount' => $totalFeesCarryForward
-                    ]
-                ]
+                        'total_pending_amount' => $totalFeesCarryForward,
+                    ],
+                ],
             ]);
 
         } catch (\Exception $e) {
             Log::error('Preview promotion error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to preview promotion',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -1197,7 +1202,7 @@ class StudentController extends Controller
                 'from_grade' => 'required|string',
                 'to_grade' => 'required|string',
                 'from_section' => 'nullable|string|max:50',
-                'to_section' => 'nullable|string|max:50'
+                'to_section' => 'nullable|string|max:50',
             ]);
 
             if ($validator->fails()) {
@@ -1209,7 +1214,7 @@ class StudentController extends Controller
             if (empty($studentIds)) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'No accessible students in the selection for your branch.'
+                    'message' => 'No accessible students in the selection for your branch.',
                 ], 403);
             }
 
@@ -1227,14 +1232,15 @@ class StudentController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => "Successfully reverted {$result['reverted_count']} student(s) to {$request->to_grade}",
-                'data' => $result
+                'data' => $result,
             ]);
         } catch (\Exception $e) {
             Log::error('Revert promotion error', ['error' => $e->getMessage()]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to revert promotion',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -1248,10 +1254,10 @@ class StudentController extends Controller
             $student = \App\Models\Student::findOrFail($id);
 
             // Tenant guard: don't expose history for students outside accessible branches.
-            if (!$this->canAccessBranch($request, (int) $student->branch_id)) {
+            if (! $this->canAccessBranch($request, (int) $student->branch_id)) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Student not found'
+                    'message' => 'Student not found',
                 ], 404);
             }
 
@@ -1262,16 +1268,16 @@ class StudentController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data' => $history
+                'data' => $history,
             ]);
 
         } catch (\Exception $e) {
             Log::error('Get promotion history error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to get promotion history',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -1283,22 +1289,22 @@ class StudentController extends Controller
     {
         try {
             $student = \App\Models\Student::findOrFail($id);
-            
-            $duesService = new \App\Services\FeeDuesService();
+
+            $duesService = new \App\Services\FeeDuesService;
             $result = $duesService->getStudentDues($student->user_id);
 
             return response()->json([
                 'success' => true,
-                'data' => $result
+                'data' => $result,
             ]);
 
         } catch (\Exception $e) {
             Log::error('Get student dues error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to get student dues',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -1318,7 +1324,7 @@ class StudentController extends Controller
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
@@ -1329,20 +1335,21 @@ class StudentController extends Controller
             $students = $query->get();
 
             // Transform data for export
-            $exportData = collect($students)->map(function($student) {
+            $exportData = collect($students)->map(function ($student) {
                 if (isset($student->branch) && is_string($student->branch)) {
                     $branch = json_decode($student->branch);
                     $student->branch_name = $branch->name ?? '';
                 } else {
                     $student->branch_name = '';
                 }
+
                 return $student;
             });
 
             $format = $request->format;
             $columns = $request->columns; // Custom columns if provided
 
-            return match($format) {
+            return match ($format) {
                 'excel' => $this->exportExcel($exportData, $columns),
                 'pdf' => $this->exportPdf($exportData, $columns),
                 'csv' => $this->exportCsv($exportData, $columns),
@@ -1350,11 +1357,11 @@ class StudentController extends Controller
 
         } catch (\Exception $e) {
             Log::error('Export students error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to export students',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -1412,7 +1419,7 @@ class StudentController extends Controller
         // Apply branch filtering
         $accessibleBranchIds = $this->getAccessibleBranchIds($request);
         if ($accessibleBranchIds !== 'all') {
-            if (!empty($accessibleBranchIds)) {
+            if (! empty($accessibleBranchIds)) {
                 $query->whereIn('students.branch_id', $accessibleBranchIds);
             } else {
                 $query->whereRaw('1 = 0');
@@ -1444,17 +1451,17 @@ class StudentController extends Controller
             // Sanitize search input to prevent SQL injection
             $search = strip_tags($request->search);
             $search = preg_replace('/[^\w\s@.-]/', '', $search);
-            
-            $query->where(function($q) use ($search) {
+
+            $query->where(function ($q) use ($search) {
                 // Use FULLTEXT search if available, otherwise use optimized LIKE queries
                 // Remove leading wildcard for better index usage where possible
                 $q->where('users.first_name', 'like', "{$search}%")
-                  ->orWhere('users.last_name', 'like', "{$search}%")
-                  ->orWhere('users.email', 'like', "{$search}%")
-                  ->orWhere('students.admission_number', 'like', "{$search}%")
-                  ->orWhere('students.roll_number', 'like', "{$search}%")
+                    ->orWhere('users.last_name', 'like', "{$search}%")
+                    ->orWhere('users.email', 'like', "{$search}%")
+                    ->orWhere('students.admission_number', 'like', "{$search}%")
+                    ->orWhere('students.roll_number', 'like', "{$search}%")
                   // Safe concatenation with parameter binding to prevent SQL injection
-                  ->orWhereRaw('CONCAT(users.first_name, " ", users.last_name) LIKE ?', ["{$search}%"]);
+                    ->orWhereRaw('CONCAT(users.first_name, " ", users.last_name) LIKE ?', ["{$search}%"]);
             });
         }
 
@@ -1468,7 +1475,7 @@ class StudentController extends Controller
     {
         $export = new StudentsExport($data, $columns);
         $filename = (new \App\Services\ExportService('students'))->generateFilename('xlsx');
-        
+
         return Excel::download($export, $filename);
     }
 
@@ -1478,18 +1485,18 @@ class StudentController extends Controller
     protected function exportPdf($data, ?array $columns)
     {
         $pdfService = new PdfExportService('students');
-        
+
         if ($columns) {
             $pdfService->setColumns($columns);
         }
-        
+
         // Use A3 paper size for students to accommodate more columns
         $pdfService->setPaperSize('a3');
         $pdfService->setOrientation('landscape');
-        
+
         $pdf = $pdfService->generate($data, 'Students Report');
         $filename = (new \App\Services\ExportService('students'))->generateFilename('pdf');
-        
+
         return $pdf->download($filename);
     }
 
@@ -1499,16 +1506,16 @@ class StudentController extends Controller
     protected function exportCsv($data, ?array $columns)
     {
         $csvService = new CsvExportService('students');
-        
+
         if ($columns) {
             $csvService->setColumns($columns);
         }
-        
+
         $filename = (new \App\Services\ExportService('students'))->generateFilename('csv');
-        
+
         return $csvService->generate($data, $filename);
     }
-    
+
     /**
      * Upload profile picture for student
      */
@@ -1516,76 +1523,77 @@ class StudentController extends Controller
     {
         try {
             $validator = Validator::make($request->all(), [
-                'profile_picture' => 'required|image|mimes:jpeg,jpg,png,gif,svg,webp,bmp|max:1024'
+                'profile_picture' => 'required|image|mimes:jpeg,jpg,png,gif,svg,webp,bmp|max:1024',
             ]);
 
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Validation failed',
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
             $student = Student::findOrFail($id);
-            
+
             $filePath = $this->handleFileUpload($request, $student, 'profile_picture', 'profile_picture');
-            
+
             if ($filePath) {
                 // Update student profile_picture field with path
                 $student->update(['profile_picture' => $filePath]);
-                
+
                 // Also update the user's avatar field
                 if ($student->user) {
                     $student->user->update(['avatar' => $filePath]);
                 }
-                
+
                 return response()->json([
                     'success' => true,
                     'message' => 'Profile picture uploaded successfully',
                     'data' => [
                         'file_path' => $filePath,
-                        'file_url' => Storage::url($filePath)
-                    ]
+                        'file_url' => Storage::url($filePath),
+                    ],
                 ]);
             }
-            
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to upload profile picture'
-            ], 500);
-            
-        } catch (\Exception $e) {
-            Log::error('Upload profile picture error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to upload profile picture',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+            ], 500);
+
+        } catch (\Exception $e) {
+            Log::error('Upload profile picture error', ['error' => $e->getMessage()]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to upload profile picture',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
-    
+
     /**
      * Handle file upload for student documents
      */
     private function handleFileUpload(Request $request, Student $student, string $fieldName, string $documentType): ?string
     {
-        if (!$request->hasFile($fieldName)) {
+        if (! $request->hasFile($fieldName)) {
             return null;
         }
 
         try {
             $file = $request->file($fieldName);
-            
+
             // Generate unique filename
-            $fileName = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
-            $filePath = $file->storeAs('students/' . $student->id . '/' . $documentType, $fileName, 'public');
-            
+            $fileName = time().'_'.uniqid().'.'.$file->getClientOriginalExtension();
+            $filePath = $file->storeAs('students/'.$student->id.'/'.$documentType, $fileName, 'public');
+
             return $filePath;
-            
+
         } catch (\Exception $e) {
             Log::error('File upload error', ['error' => $e->getMessage(), 'field' => $fieldName]);
+
             return null;
         }
     }
@@ -1596,20 +1604,16 @@ class StudentController extends Controller
      */
     /**
      * Prepare student data array from request
-     * 
+     *
      * NOTE: This method handles 100+ optional fields without validation.
      * Fields provided here will be saved to the database if they exist in the request.
      * For proper validation of optional fields, use the update() method which validates
      * fields when they are provided using 'sometimes' rules.
-     * 
+     *
      * This approach allows:
      * - Flexible student creation with partial data
      * - Bulk imports with varying field completeness
      * - Gradual profile completion
-     * 
-     * @param Request $request
-     * @param int $userId
-     * @return array
      */
     private function prepareStudentData(Request $request, int $userId): array
     {
@@ -1621,7 +1625,7 @@ class StudentController extends Controller
             'school_id' => $schoolId ?? $this->getCurrentSchoolId($request),
             'student_status' => 'Active',
             'created_at' => now(),
-            'updated_at' => now()
+            'updated_at' => now(),
         ];
 
         // Admission & Academic Fields
@@ -1642,7 +1646,7 @@ class StudentController extends Controller
         $data['gender'] = $request->gender;
         $data['blood_group'] = $request->blood_group ?? null;
         $data['religion'] = $request->religion ?? null;
-        $data['nationality'] = !empty(trim((string)($request->nationality ?? ''))) ? trim($request->nationality) : 'Indian';
+        $data['nationality'] = ! empty(trim((string) ($request->nationality ?? ''))) ? trim($request->nationality) : 'Indian';
         $data['mother_tongue'] = $request->mother_tongue ?? null;
         $data['category'] = $request->category ?? null;
         $data['caste'] = $request->caste ?? null;
@@ -1816,178 +1820,454 @@ class StudentController extends Controller
         $data = ['updated_at' => now()];
 
         // Admission & Academic Fields
-        if ($request->has('admission_type')) $data['admission_type'] = $request->admission_type;
-        if ($request->has('roll_number')) $data['roll_number'] = $request->roll_number !== null && $request->roll_number !== '' ? (string) $request->roll_number : null;
-        if ($request->has('section')) $data['section'] = $request->section ?: null;
-        if ($request->has('stream')) $data['stream'] = $request->stream ?: null;
-        if ($request->has('elective_subjects')) $data['elective_subjects'] = $request->elective_subjects ?: null;
-        if ($request->has('registration_number')) $data['registration_number'] = $request->registration_number ?: null;
+        if ($request->has('admission_type')) {
+            $data['admission_type'] = $request->admission_type;
+        }
+        if ($request->has('roll_number')) {
+            $data['roll_number'] = $request->roll_number !== null && $request->roll_number !== '' ? (string) $request->roll_number : null;
+        }
+        if ($request->has('section')) {
+            $data['section'] = $request->section ?: null;
+        }
+        if ($request->has('stream')) {
+            $data['stream'] = $request->stream ?: null;
+        }
+        if ($request->has('elective_subjects')) {
+            $data['elective_subjects'] = $request->elective_subjects ?: null;
+        }
+        if ($request->has('registration_number')) {
+            $data['registration_number'] = $request->registration_number ?: null;
+        }
 
         // Personal Information
-        if ($request->has('blood_group')) $data['blood_group'] = $request->blood_group ?: null;
-        if ($request->has('religion')) $data['religion'] = $request->religion ?: null;
-        if ($request->has('nationality')) $data['nationality'] = !empty(trim((string)$request->nationality)) ? trim($request->nationality) : 'Indian';
-        if ($request->has('mother_tongue')) $data['mother_tongue'] = $request->mother_tongue ?: null;
-        if ($request->has('category')) $data['category'] = $request->category ?: null;
-        if ($request->has('caste')) $data['caste'] = $request->caste ?: null;
-        if ($request->has('sub_caste')) $data['sub_caste'] = $request->sub_caste ?: null;
+        if ($request->has('blood_group')) {
+            $data['blood_group'] = $request->blood_group ?: null;
+        }
+        if ($request->has('religion')) {
+            $data['religion'] = $request->religion ?: null;
+        }
+        if ($request->has('nationality')) {
+            $data['nationality'] = ! empty(trim((string) $request->nationality)) ? trim($request->nationality) : 'Indian';
+        }
+        if ($request->has('mother_tongue')) {
+            $data['mother_tongue'] = $request->mother_tongue ?: null;
+        }
+        if ($request->has('category')) {
+            $data['category'] = $request->category ?: null;
+        }
+        if ($request->has('caste')) {
+            $data['caste'] = $request->caste ?: null;
+        }
+        if ($request->has('sub_caste')) {
+            $data['sub_caste'] = $request->sub_caste ?: null;
+        }
 
         // Identity Documents
-        if ($request->has('aadhaar_number')) $data['aadhaar_number'] = $request->aadhaar_number ?: null;
-        if ($request->has('pen_number')) $data['pen_number'] = $request->pen_number ?: null;
-        if ($request->has('birth_certificate_number')) $data['birth_certificate_number'] = $request->birth_certificate_number ?: null;
-        if ($request->has('passport_number')) $data['passport_number'] = $request->passport_number ?: null;
-        if ($request->has('passport_expiry')) $data['passport_expiry'] = $request->passport_expiry ?: null;
-        if ($request->has('student_id_card_number')) $data['student_id_card_number'] = $request->student_id_card_number ?: null;
-        if ($request->has('voter_id')) $data['voter_id'] = $request->voter_id ?: null;
-        if ($request->has('ration_card_number')) $data['ration_card_number'] = $request->ration_card_number ?: null;
-        if ($request->has('domicile_certificate_number')) $data['domicile_certificate_number'] = $request->domicile_certificate_number ?: null;
-        if ($request->has('income_certificate_number')) $data['income_certificate_number'] = $request->income_certificate_number ?: null;
-        if ($request->has('caste_certificate_number')) $data['caste_certificate_number'] = $request->caste_certificate_number ?: null;
+        if ($request->has('aadhaar_number')) {
+            $data['aadhaar_number'] = $request->aadhaar_number ?: null;
+        }
+        if ($request->has('pen_number')) {
+            $data['pen_number'] = $request->pen_number ?: null;
+        }
+        if ($request->has('birth_certificate_number')) {
+            $data['birth_certificate_number'] = $request->birth_certificate_number ?: null;
+        }
+        if ($request->has('passport_number')) {
+            $data['passport_number'] = $request->passport_number ?: null;
+        }
+        if ($request->has('passport_expiry')) {
+            $data['passport_expiry'] = $request->passport_expiry ?: null;
+        }
+        if ($request->has('student_id_card_number')) {
+            $data['student_id_card_number'] = $request->student_id_card_number ?: null;
+        }
+        if ($request->has('voter_id')) {
+            $data['voter_id'] = $request->voter_id ?: null;
+        }
+        if ($request->has('ration_card_number')) {
+            $data['ration_card_number'] = $request->ration_card_number ?: null;
+        }
+        if ($request->has('domicile_certificate_number')) {
+            $data['domicile_certificate_number'] = $request->domicile_certificate_number ?: null;
+        }
+        if ($request->has('income_certificate_number')) {
+            $data['income_certificate_number'] = $request->income_certificate_number ?: null;
+        }
+        if ($request->has('caste_certificate_number')) {
+            $data['caste_certificate_number'] = $request->caste_certificate_number ?: null;
+        }
 
         // Address Information
-        if ($request->has('current_address')) $data['current_address'] = $request->current_address;
-        if ($request->has('current_district')) $data['current_district'] = $request->current_district ?: null;
-        if ($request->has('current_landmark')) $data['current_landmark'] = $request->current_landmark ?: null;
-        if ($request->has('permanent_address')) $data['permanent_address'] = $request->permanent_address ?: null;
-        if ($request->has('permanent_district')) $data['permanent_district'] = $request->permanent_district ?: null;
-        if ($request->has('permanent_landmark')) $data['permanent_landmark'] = $request->permanent_landmark ?: null;
-        if ($request->has('correspondence_address')) $data['correspondence_address'] = $request->correspondence_address ?: null;
-        if ($request->has('city')) $data['city'] = $request->city;
-        if ($request->has('state')) $data['state'] = $request->state;
-        if ($request->has('country')) $data['country'] = $request->country;
-        if ($request->has('pincode')) $data['pincode'] = $request->pincode;
+        if ($request->has('current_address')) {
+            $data['current_address'] = $request->current_address;
+        }
+        if ($request->has('current_district')) {
+            $data['current_district'] = $request->current_district ?: null;
+        }
+        if ($request->has('current_landmark')) {
+            $data['current_landmark'] = $request->current_landmark ?: null;
+        }
+        if ($request->has('permanent_address')) {
+            $data['permanent_address'] = $request->permanent_address ?: null;
+        }
+        if ($request->has('permanent_district')) {
+            $data['permanent_district'] = $request->permanent_district ?: null;
+        }
+        if ($request->has('permanent_landmark')) {
+            $data['permanent_landmark'] = $request->permanent_landmark ?: null;
+        }
+        if ($request->has('correspondence_address')) {
+            $data['correspondence_address'] = $request->correspondence_address ?: null;
+        }
+        if ($request->has('city')) {
+            $data['city'] = $request->city;
+        }
+        if ($request->has('state')) {
+            $data['state'] = $request->state;
+        }
+        if ($request->has('country')) {
+            $data['country'] = $request->country;
+        }
+        if ($request->has('pincode')) {
+            $data['pincode'] = $request->pincode;
+        }
 
         // Sibling Information
-        if ($request->has('number_of_siblings')) $data['number_of_siblings'] = $request->number_of_siblings ?? 0;
-        if ($request->has('sibling_details')) $data['sibling_details'] = $this->encodeJsonField($request->sibling_details);
-        if ($request->has('sibling_discount_applicable')) $data['sibling_discount_applicable'] = $request->sibling_discount_applicable ?? false;
-        if ($request->has('sibling_discount_percentage')) $data['sibling_discount_percentage'] = $request->sibling_discount_percentage ?? 0;
+        if ($request->has('number_of_siblings')) {
+            $data['number_of_siblings'] = $request->number_of_siblings ?? 0;
+        }
+        if ($request->has('sibling_details')) {
+            $data['sibling_details'] = $this->encodeJsonField($request->sibling_details);
+        }
+        if ($request->has('sibling_discount_applicable')) {
+            $data['sibling_discount_applicable'] = $request->sibling_discount_applicable ?? false;
+        }
+        if ($request->has('sibling_discount_percentage')) {
+            $data['sibling_discount_percentage'] = $request->sibling_discount_percentage ?? 0;
+        }
 
         // Father Information
-        if ($request->has('father_name')) $data['father_name'] = $request->father_name;
-        if ($request->has('father_phone')) $data['father_phone'] = $request->father_phone;
-        if ($request->has('father_email')) $data['father_email'] = $request->father_email ?: null;
-        if ($request->has('father_occupation')) $data['father_occupation'] = $request->father_occupation ?: null;
-        if ($request->has('father_qualification')) $data['father_qualification'] = $request->father_qualification ?: null;
-        if ($request->has('father_organization')) $data['father_organization'] = $request->father_organization ?: null;
-        if ($request->has('father_designation')) $data['father_designation'] = $request->father_designation ?: null;
-        if ($request->has('father_annual_income')) $data['father_annual_income'] = $request->father_annual_income ?? 0;
-        if ($request->has('father_aadhaar')) $data['father_aadhaar'] = $request->father_aadhaar ?: null;
+        if ($request->has('father_name')) {
+            $data['father_name'] = $request->father_name;
+        }
+        if ($request->has('father_phone')) {
+            $data['father_phone'] = $request->father_phone;
+        }
+        if ($request->has('father_email')) {
+            $data['father_email'] = $request->father_email ?: null;
+        }
+        if ($request->has('father_occupation')) {
+            $data['father_occupation'] = $request->father_occupation ?: null;
+        }
+        if ($request->has('father_qualification')) {
+            $data['father_qualification'] = $request->father_qualification ?: null;
+        }
+        if ($request->has('father_organization')) {
+            $data['father_organization'] = $request->father_organization ?: null;
+        }
+        if ($request->has('father_designation')) {
+            $data['father_designation'] = $request->father_designation ?: null;
+        }
+        if ($request->has('father_annual_income')) {
+            $data['father_annual_income'] = $request->father_annual_income ?? 0;
+        }
+        if ($request->has('father_aadhaar')) {
+            $data['father_aadhaar'] = $request->father_aadhaar ?: null;
+        }
 
         // Mother Information
-        if ($request->has('mother_name')) $data['mother_name'] = $request->mother_name;
-        if ($request->has('mother_phone')) $data['mother_phone'] = $request->mother_phone ?: null;
-        if ($request->has('mother_email')) $data['mother_email'] = $request->mother_email ?: null;
-        if ($request->has('mother_occupation')) $data['mother_occupation'] = $request->mother_occupation ?: null;
-        if ($request->has('mother_qualification')) $data['mother_qualification'] = $request->mother_qualification ?: null;
-        if ($request->has('mother_organization')) $data['mother_organization'] = $request->mother_organization ?: null;
-        if ($request->has('mother_designation')) $data['mother_designation'] = $request->mother_designation ?: null;
-        if ($request->has('mother_annual_income')) $data['mother_annual_income'] = $request->mother_annual_income ?? 0;
-        if ($request->has('mother_aadhaar')) $data['mother_aadhaar'] = $request->mother_aadhaar ?: null;
+        if ($request->has('mother_name')) {
+            $data['mother_name'] = $request->mother_name;
+        }
+        if ($request->has('mother_phone')) {
+            $data['mother_phone'] = $request->mother_phone ?: null;
+        }
+        if ($request->has('mother_email')) {
+            $data['mother_email'] = $request->mother_email ?: null;
+        }
+        if ($request->has('mother_occupation')) {
+            $data['mother_occupation'] = $request->mother_occupation ?: null;
+        }
+        if ($request->has('mother_qualification')) {
+            $data['mother_qualification'] = $request->mother_qualification ?: null;
+        }
+        if ($request->has('mother_organization')) {
+            $data['mother_organization'] = $request->mother_organization ?: null;
+        }
+        if ($request->has('mother_designation')) {
+            $data['mother_designation'] = $request->mother_designation ?: null;
+        }
+        if ($request->has('mother_annual_income')) {
+            $data['mother_annual_income'] = $request->mother_annual_income ?? 0;
+        }
+        if ($request->has('mother_aadhaar')) {
+            $data['mother_aadhaar'] = $request->mother_aadhaar ?: null;
+        }
 
         // Guardian Information
-        if ($request->has('guardian_name')) $data['guardian_name'] = $request->guardian_name ?: null;
-        if ($request->has('guardian_relation')) $data['guardian_relation'] = $request->guardian_relation ?: null;
-        if ($request->has('guardian_phone')) $data['guardian_phone'] = $request->guardian_phone ?: null;
-        if ($request->has('guardian_qualification')) $data['guardian_qualification'] = $request->guardian_qualification ?: null;
-        if ($request->has('guardian_occupation')) $data['guardian_occupation'] = $request->guardian_occupation ?: null;
-        if ($request->has('guardian_email')) $data['guardian_email'] = $request->guardian_email ?: null;
-        if ($request->has('guardian_address')) $data['guardian_address'] = $request->guardian_address ?: null;
-        if ($request->has('guardian_annual_income')) $data['guardian_annual_income'] = $request->guardian_annual_income ?? 0;
+        if ($request->has('guardian_name')) {
+            $data['guardian_name'] = $request->guardian_name ?: null;
+        }
+        if ($request->has('guardian_relation')) {
+            $data['guardian_relation'] = $request->guardian_relation ?: null;
+        }
+        if ($request->has('guardian_phone')) {
+            $data['guardian_phone'] = $request->guardian_phone ?: null;
+        }
+        if ($request->has('guardian_qualification')) {
+            $data['guardian_qualification'] = $request->guardian_qualification ?: null;
+        }
+        if ($request->has('guardian_occupation')) {
+            $data['guardian_occupation'] = $request->guardian_occupation ?: null;
+        }
+        if ($request->has('guardian_email')) {
+            $data['guardian_email'] = $request->guardian_email ?: null;
+        }
+        if ($request->has('guardian_address')) {
+            $data['guardian_address'] = $request->guardian_address ?: null;
+        }
+        if ($request->has('guardian_annual_income')) {
+            $data['guardian_annual_income'] = $request->guardian_annual_income ?? 0;
+        }
 
         // Emergency Contact
-        if ($request->has('emergency_contact_name')) $data['emergency_contact_name'] = $request->emergency_contact_name;
-        if ($request->has('emergency_contact_phone')) $data['emergency_contact_phone'] = $request->emergency_contact_phone;
-        if ($request->has('emergency_contact_relation')) $data['emergency_contact_relation'] = $request->emergency_contact_relation ?: null;
+        if ($request->has('emergency_contact_name')) {
+            $data['emergency_contact_name'] = $request->emergency_contact_name;
+        }
+        if ($request->has('emergency_contact_phone')) {
+            $data['emergency_contact_phone'] = $request->emergency_contact_phone;
+        }
+        if ($request->has('emergency_contact_relation')) {
+            $data['emergency_contact_relation'] = $request->emergency_contact_relation ?: null;
+        }
 
         // Transport Details
-        if ($request->has('transport_required')) $data['transport_required'] = $request->transport_required ?? false;
-        if ($request->has('transport_route')) $data['transport_route'] = $request->transport_route ?: null;
-        if ($request->has('pickup_point')) $data['pickup_point'] = $request->pickup_point ?: null;
-        if ($request->has('drop_point')) $data['drop_point'] = $request->drop_point ?: null;
-        if ($request->has('vehicle_number')) $data['vehicle_number'] = $request->vehicle_number ?: null;
-        if ($request->has('pickup_time')) $data['pickup_time'] = $request->pickup_time ?: null;
-        if ($request->has('drop_time')) $data['drop_time'] = $request->drop_time ?: null;
-        if ($request->has('transport_fee')) $data['transport_fee'] = $request->transport_fee ?? 0;
+        if ($request->has('transport_required')) {
+            $data['transport_required'] = $request->transport_required ?? false;
+        }
+        if ($request->has('transport_route')) {
+            $data['transport_route'] = $request->transport_route ?: null;
+        }
+        if ($request->has('pickup_point')) {
+            $data['pickup_point'] = $request->pickup_point ?: null;
+        }
+        if ($request->has('drop_point')) {
+            $data['drop_point'] = $request->drop_point ?: null;
+        }
+        if ($request->has('vehicle_number')) {
+            $data['vehicle_number'] = $request->vehicle_number ?: null;
+        }
+        if ($request->has('pickup_time')) {
+            $data['pickup_time'] = $request->pickup_time ?: null;
+        }
+        if ($request->has('drop_time')) {
+            $data['drop_time'] = $request->drop_time ?: null;
+        }
+        if ($request->has('transport_fee')) {
+            $data['transport_fee'] = $request->transport_fee ?? 0;
+        }
 
         // Hostel Details
-        if ($request->has('hostel_required')) $data['hostel_required'] = $request->hostel_required ?? false;
-        if ($request->has('hostel_name')) $data['hostel_name'] = $request->hostel_name ?: null;
-        if ($request->has('hostel_room_number')) $data['hostel_room_number'] = $request->hostel_room_number ?: null;
-        if ($request->has('hostel_fee')) $data['hostel_fee'] = $request->hostel_fee ?? 0;
+        if ($request->has('hostel_required')) {
+            $data['hostel_required'] = $request->hostel_required ?? false;
+        }
+        if ($request->has('hostel_name')) {
+            $data['hostel_name'] = $request->hostel_name ?: null;
+        }
+        if ($request->has('hostel_room_number')) {
+            $data['hostel_room_number'] = $request->hostel_room_number ?: null;
+        }
+        if ($request->has('hostel_fee')) {
+            $data['hostel_fee'] = $request->hostel_fee ?? 0;
+        }
 
         // Library Information
-        if ($request->has('library_card_number')) $data['library_card_number'] = $request->library_card_number ?: null;
-        if ($request->has('library_card_issue_date')) $data['library_card_issue_date'] = $request->library_card_issue_date ?: null;
-        if ($request->has('library_card_expiry_date')) $data['library_card_expiry_date'] = $request->library_card_expiry_date ?: null;
+        if ($request->has('library_card_number')) {
+            $data['library_card_number'] = $request->library_card_number ?: null;
+        }
+        if ($request->has('library_card_issue_date')) {
+            $data['library_card_issue_date'] = $request->library_card_issue_date ?: null;
+        }
+        if ($request->has('library_card_expiry_date')) {
+            $data['library_card_expiry_date'] = $request->library_card_expiry_date ?: null;
+        }
 
         // Previous Education
-        if ($request->has('previous_school')) $data['previous_school'] = $request->previous_school ?: null;
-        if ($request->has('previous_grade')) $data['previous_grade'] = $request->previous_grade ?: null;
-        if ($request->has('previous_school_board')) $data['previous_school_board'] = $request->previous_school_board ?: null;
-        if ($request->has('previous_school_address')) $data['previous_school_address'] = $request->previous_school_address ?: null;
-        if ($request->has('previous_school_phone')) $data['previous_school_phone'] = $request->previous_school_phone ?: null;
-        if ($request->has('previous_percentage')) $data['previous_percentage'] = $request->previous_percentage ?: null;
-        if ($request->has('transfer_certificate_number')) $data['transfer_certificate_number'] = $request->transfer_certificate_number ?: null;
-        if ($request->has('tc_number')) $data['tc_number'] = $request->tc_number ?: null;
-        if ($request->has('tc_date')) $data['tc_date'] = $request->tc_date ?: null;
-        if ($request->has('previous_student_id')) $data['previous_student_id'] = $request->previous_student_id ?: null;
-        if ($request->has('medium_of_instruction')) $data['medium_of_instruction'] = $request->medium_of_instruction ?: null;
-        if ($request->has('language_preferences')) $data['language_preferences'] = $this->encodeJsonField($request->language_preferences);
+        if ($request->has('previous_school')) {
+            $data['previous_school'] = $request->previous_school ?: null;
+        }
+        if ($request->has('previous_grade')) {
+            $data['previous_grade'] = $request->previous_grade ?: null;
+        }
+        if ($request->has('previous_school_board')) {
+            $data['previous_school_board'] = $request->previous_school_board ?: null;
+        }
+        if ($request->has('previous_school_address')) {
+            $data['previous_school_address'] = $request->previous_school_address ?: null;
+        }
+        if ($request->has('previous_school_phone')) {
+            $data['previous_school_phone'] = $request->previous_school_phone ?: null;
+        }
+        if ($request->has('previous_percentage')) {
+            $data['previous_percentage'] = $request->previous_percentage ?: null;
+        }
+        if ($request->has('transfer_certificate_number')) {
+            $data['transfer_certificate_number'] = $request->transfer_certificate_number ?: null;
+        }
+        if ($request->has('tc_number')) {
+            $data['tc_number'] = $request->tc_number ?: null;
+        }
+        if ($request->has('tc_date')) {
+            $data['tc_date'] = $request->tc_date ?: null;
+        }
+        if ($request->has('previous_student_id')) {
+            $data['previous_student_id'] = $request->previous_student_id ?: null;
+        }
+        if ($request->has('medium_of_instruction')) {
+            $data['medium_of_instruction'] = $request->medium_of_instruction ?: null;
+        }
+        if ($request->has('language_preferences')) {
+            $data['language_preferences'] = $this->encodeJsonField($request->language_preferences);
+        }
 
         // Medical & Health Information
-        if ($request->has('medical_history')) $data['medical_history'] = $request->medical_history ?: null;
-        if ($request->has('allergies')) $data['allergies'] = $request->allergies ?: null;
-        if ($request->has('medications')) $data['medications'] = $request->medications ?: null;
-        if ($request->has('current_medications')) $data['current_medications'] = $request->current_medications ?: null;
-        if ($request->has('height_cm')) $data['height_cm'] = $request->height_cm ?: null;
-        if ($request->has('weight_kg')) $data['weight_kg'] = $request->weight_kg ?: null;
-        if ($request->has('vision_status')) $data['vision_status'] = $request->vision_status ?: null;
-        if ($request->has('hearing_status')) $data['hearing_status'] = $request->hearing_status ?: null;
-        if ($request->has('chronic_conditions')) $data['chronic_conditions'] = $request->chronic_conditions ?: null;
-        if ($request->has('medical_insurance')) $data['medical_insurance'] = $request->medical_insurance ?? false;
-        if ($request->has('insurance_provider')) $data['insurance_provider'] = $request->insurance_provider ?: null;
-        if ($request->has('insurance_policy_number')) $data['insurance_policy_number'] = $request->insurance_policy_number ?: null;
-        if ($request->has('last_health_checkup')) $data['last_health_checkup'] = $request->last_health_checkup ?: null;
-        if ($request->has('family_doctor_name')) $data['family_doctor_name'] = $request->family_doctor_name ?: null;
-        if ($request->has('family_doctor_phone')) $data['family_doctor_phone'] = $request->family_doctor_phone ?: null;
-        if ($request->has('vaccination_status')) $data['vaccination_status'] = $request->vaccination_status ?: null;
-        if ($request->has('vaccination_records')) $data['vaccination_records'] = $this->encodeJsonField($request->vaccination_records);
-        if ($request->has('special_needs')) $data['special_needs'] = $request->special_needs ?? false;
-        if ($request->has('special_needs_details')) $data['special_needs_details'] = $request->special_needs_details ?: null;
+        if ($request->has('medical_history')) {
+            $data['medical_history'] = $request->medical_history ?: null;
+        }
+        if ($request->has('allergies')) {
+            $data['allergies'] = $request->allergies ?: null;
+        }
+        if ($request->has('medications')) {
+            $data['medications'] = $request->medications ?: null;
+        }
+        if ($request->has('current_medications')) {
+            $data['current_medications'] = $request->current_medications ?: null;
+        }
+        if ($request->has('height_cm')) {
+            $data['height_cm'] = $request->height_cm ?: null;
+        }
+        if ($request->has('weight_kg')) {
+            $data['weight_kg'] = $request->weight_kg ?: null;
+        }
+        if ($request->has('vision_status')) {
+            $data['vision_status'] = $request->vision_status ?: null;
+        }
+        if ($request->has('hearing_status')) {
+            $data['hearing_status'] = $request->hearing_status ?: null;
+        }
+        if ($request->has('chronic_conditions')) {
+            $data['chronic_conditions'] = $request->chronic_conditions ?: null;
+        }
+        if ($request->has('medical_insurance')) {
+            $data['medical_insurance'] = $request->medical_insurance ?? false;
+        }
+        if ($request->has('insurance_provider')) {
+            $data['insurance_provider'] = $request->insurance_provider ?: null;
+        }
+        if ($request->has('insurance_policy_number')) {
+            $data['insurance_policy_number'] = $request->insurance_policy_number ?: null;
+        }
+        if ($request->has('last_health_checkup')) {
+            $data['last_health_checkup'] = $request->last_health_checkup ?: null;
+        }
+        if ($request->has('family_doctor_name')) {
+            $data['family_doctor_name'] = $request->family_doctor_name ?: null;
+        }
+        if ($request->has('family_doctor_phone')) {
+            $data['family_doctor_phone'] = $request->family_doctor_phone ?: null;
+        }
+        if ($request->has('vaccination_status')) {
+            $data['vaccination_status'] = $request->vaccination_status ?: null;
+        }
+        if ($request->has('vaccination_records')) {
+            $data['vaccination_records'] = $this->encodeJsonField($request->vaccination_records);
+        }
+        if ($request->has('special_needs')) {
+            $data['special_needs'] = $request->special_needs ?? false;
+        }
+        if ($request->has('special_needs_details')) {
+            $data['special_needs_details'] = $request->special_needs_details ?: null;
+        }
 
         // Fee & Scholarship
-        if ($request->has('fee_concession_applicable')) $data['fee_concession_applicable'] = $request->fee_concession_applicable ?? false;
-        if ($request->has('concession_type')) $data['concession_type'] = $request->concession_type ?: null;
-        if ($request->has('concession_percentage')) $data['concession_percentage'] = $request->concession_percentage ?? 0;
-        if ($request->has('scholarship_name')) $data['scholarship_name'] = $request->scholarship_name ?: null;
-        if ($request->has('scholarship_details')) $data['scholarship_details'] = $request->scholarship_details ?: null;
-        if ($request->has('economic_status')) $data['economic_status'] = $request->economic_status ?: null;
-        if ($request->has('family_annual_income')) $data['family_annual_income'] = $request->family_annual_income ?? 0;
+        if ($request->has('fee_concession_applicable')) {
+            $data['fee_concession_applicable'] = $request->fee_concession_applicable ?? false;
+        }
+        if ($request->has('concession_type')) {
+            $data['concession_type'] = $request->concession_type ?: null;
+        }
+        if ($request->has('concession_percentage')) {
+            $data['concession_percentage'] = $request->concession_percentage ?? 0;
+        }
+        if ($request->has('scholarship_name')) {
+            $data['scholarship_name'] = $request->scholarship_name ?: null;
+        }
+        if ($request->has('scholarship_details')) {
+            $data['scholarship_details'] = $request->scholarship_details ?: null;
+        }
+        if ($request->has('economic_status')) {
+            $data['economic_status'] = $request->economic_status ?: null;
+        }
+        if ($request->has('family_annual_income')) {
+            $data['family_annual_income'] = $request->family_annual_income ?? 0;
+        }
 
         // Additional Information
-        if ($request->has('hobbies_interests')) $data['hobbies_interests'] = $this->encodeJsonField($request->hobbies_interests);
-        if ($request->has('extra_curricular_activities')) $data['extra_curricular_activities'] = $this->encodeJsonField($request->extra_curricular_activities);
-        if ($request->has('achievements')) $data['achievements'] = $this->encodeJsonField($request->achievements);
-        if ($request->has('sports_participation')) $data['sports_participation'] = $this->encodeJsonField($request->sports_participation);
-        if ($request->has('cultural_activities')) $data['cultural_activities'] = $this->encodeJsonField($request->cultural_activities);
-        if ($request->has('behavior_records')) $data['behavior_records'] = $request->behavior_records ?: null;
-        if ($request->has('counselor_notes')) $data['counselor_notes'] = $request->counselor_notes ?: null;
-        if ($request->has('special_instructions')) $data['special_instructions'] = $request->special_instructions ?: null;
+        if ($request->has('hobbies_interests')) {
+            $data['hobbies_interests'] = $this->encodeJsonField($request->hobbies_interests);
+        }
+        if ($request->has('extra_curricular_activities')) {
+            $data['extra_curricular_activities'] = $this->encodeJsonField($request->extra_curricular_activities);
+        }
+        if ($request->has('achievements')) {
+            $data['achievements'] = $this->encodeJsonField($request->achievements);
+        }
+        if ($request->has('sports_participation')) {
+            $data['sports_participation'] = $this->encodeJsonField($request->sports_participation);
+        }
+        if ($request->has('cultural_activities')) {
+            $data['cultural_activities'] = $this->encodeJsonField($request->cultural_activities);
+        }
+        if ($request->has('behavior_records')) {
+            $data['behavior_records'] = $request->behavior_records ?: null;
+        }
+        if ($request->has('counselor_notes')) {
+            $data['counselor_notes'] = $request->counselor_notes ?: null;
+        }
+        if ($request->has('special_instructions')) {
+            $data['special_instructions'] = $request->special_instructions ?: null;
+        }
 
         // Admission & Leaving
-        if ($request->has('student_status')) $data['student_status'] = $request->student_status;
-        if ($request->has('admission_status')) $data['admission_status'] = $request->admission_status ?: null;
-        if ($request->has('leaving_date')) $data['leaving_date'] = $request->leaving_date ?: null;
-        if ($request->has('leaving_reason')) $data['leaving_reason'] = $request->leaving_reason ?: null;
-        if ($request->has('tc_issued_number')) $data['tc_issued_number'] = $request->tc_issued_number ?: null;
+        if ($request->has('student_status')) {
+            $data['student_status'] = $request->student_status;
+        }
+        if ($request->has('admission_status')) {
+            $data['admission_status'] = $request->admission_status ?: null;
+        }
+        if ($request->has('leaving_date')) {
+            $data['leaving_date'] = $request->leaving_date ?: null;
+        }
+        if ($request->has('leaving_reason')) {
+            $data['leaving_reason'] = $request->leaving_reason ?: null;
+        }
+        if ($request->has('tc_issued_number')) {
+            $data['tc_issued_number'] = $request->tc_issued_number ?: null;
+        }
 
         // Other Fields
-        if ($request->has('remarks')) $data['remarks'] = $request->remarks ?: null;
-        if ($request->has('profile_picture')) $data['profile_picture'] = $request->profile_picture ?: null;
-        if ($request->has('parent_id')) $data['parent_id'] = $request->parent_id ?: null;
-        if ($request->has('documents')) $data['documents'] = $request->documents ?: null;
+        if ($request->has('remarks')) {
+            $data['remarks'] = $request->remarks ?: null;
+        }
+        if ($request->has('profile_picture')) {
+            $data['profile_picture'] = $request->profile_picture ?: null;
+        }
+        if ($request->has('parent_id')) {
+            $data['parent_id'] = $request->parent_id ?: null;
+        }
+        if ($request->has('documents')) {
+            $data['documents'] = $request->documents ?: null;
+        }
 
         return $data;
     }
@@ -1998,7 +2278,7 @@ class StudentController extends Controller
     private function updateUserFields(Request $request, int $userId): void
     {
         $userUpdate = [];
-        
+
         if ($request->has('first_name')) {
             $userUpdate['first_name'] = $request->first_name;
         }
@@ -2011,8 +2291,8 @@ class StudentController extends Controller
         if ($request->has('phone')) {
             $userUpdate['phone'] = $request->phone;
         }
-        
-        if (!empty($userUpdate)) {
+
+        if (! empty($userUpdate)) {
             User::where('id', $userId)->update($userUpdate);
         }
     }
@@ -2022,7 +2302,7 @@ class StudentController extends Controller
      */
     private function resolvePublicStorageUrl(?string $value): ?string
     {
-        if (!$value) {
+        if (! $value) {
             return null;
         }
 
@@ -2042,7 +2322,7 @@ class StudentController extends Controller
             return url($value);
         }
 
-        return url('storage/' . ltrim($value, '/'));
+        return url('storage/'.ltrim($value, '/'));
     }
 
     /**
@@ -2060,7 +2340,7 @@ class StudentController extends Controller
                 return $value; // Already JSON string
             }
         }
+
         return $value ?: null;
     }
 }
-

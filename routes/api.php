@@ -208,6 +208,10 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
     Route::post('students', [StudentController::class, 'store']);
     Route::get('students/export', [StudentController::class, 'export']);
     Route::get('students/by-user/{userId}', [StudentController::class, 'getByUserId']);
+    Route::get('students/{studentUserId}/exam-progress-card.pdf', [\App\Http\Controllers\StudentExamProgressCardController::class, 'download'])
+        ->whereNumber('studentUserId');
+    Route::get('students/{studentUserId}/fee-statement.pdf', [\App\Http\Controllers\StudentFeeStatementController::class, 'download'])
+        ->whereNumber('studentUserId');
 
     // Promotion routes - MUST come before students/{id} to avoid route conflicts
     Route::post('students/promote', [StudentController::class, 'promote']);
@@ -299,6 +303,7 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
     // Exam Schedules
     Route::prefix('exam-schedules')->group(function () {
         Route::get('/', [ExamScheduleController::class, 'index']);
+        Route::post('bulk', [ExamScheduleController::class, 'storeBulk']);
         Route::post('/', [ExamScheduleController::class, 'store']);
         Route::get('{id}/students', [ExamScheduleController::class, 'getStudents']);
         // No numeric constraint: IDs are opaque hashid strings when HASHIDS_ENABLED is on.
