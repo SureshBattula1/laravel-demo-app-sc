@@ -67,6 +67,14 @@ class AssignmentController extends Controller
                 $query->where('is_published', $request->boolean('is_published'));
             }
 
+            if ($request->filled('search')) {
+                $search = strip_tags($request->search);
+                $query->where(function ($q) use ($search) {
+                    $q->where('title', 'like', $search . '%')
+                        ->orWhere('description', 'like', $search . '%');
+                });
+            }
+
             $academicYearId = $this->academicYearContext->id(false);
             if ($academicYearId && Schema::hasColumn('assignments', 'academic_year_id')) {
                 $query->where(function ($q) use ($academicYearId) {
@@ -105,7 +113,7 @@ class AssignmentController extends Controller
     public function show(Request $request, $id)
     {
         try {
-            $assignment = Assignment::with(['subject:id,name,code', 'teacher:id,first_name,last_name', 'recipients'])
+            $assignment = Assignment::with(['subject:id,name,code', 'teacher:id,first_name,last_name', 'branch:id,name,code', 'recipients'])
                 ->withCount(['recipients', 'submissions'])
                 ->findOrFail($id);
 
@@ -439,6 +447,10 @@ class AssignmentController extends Controller
             'section' => $assignment->section ?? '',
             'subject' => $assignment->subject?->name ?? '',
             'subject_id' => $assignment->subject_id,
+            'branch_id' => $assignment->branch_id,
+            'branch' => $assignment->relationLoaded('branch') && $assignment->branch
+                ? $assignment->branch->only(['id', 'name', 'code'])
+                : null,
             'due_date' => optional($assignment->due_date)->toDateString(),
             'submission_count' => (int) ($assignment->submissions_count ?? 0),
             'recipient_count' => (int) ($assignment->recipients_count ?? $assignment->recipients->count()),
