@@ -37,6 +37,9 @@ class DatabaseSeeder extends Seeder
             
             // Step 3: Assign Permissions to Roles
             $this->assignRolePermissions();
+
+            // Ensure assignments module/permissions exist on databases seeded before this module
+            $this->call(AssignmentsModuleSeeder::class);
             
             // Step 4: Create Super Admin Users
             $this->createSuperAdmins();
