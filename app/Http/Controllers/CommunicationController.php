@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Traits\PaginatesAndSorts;
 use App\Models\Notification;
+use App\Models\NotificationCampaignRecipient;
 use App\Models\Announcement;
 use App\Models\Circular;
 use App\Services\AcademicYearContext;
@@ -112,6 +113,66 @@ class CommunicationController extends Controller
         }
     }
 
+    public function getNotification(Request $request, $id)
+    {
+        try {
+            $user = $request->user();
+            $notification = Notification::query()->with(['branch', 'user', 'createdBy'])->findOrFail($id);
+
+            if (!$this->canAccessInboxNotification($request, $notification)) {
+                return response()->json(['success' => false, 'message' => 'Notification not found'], 404);
+            }
+
+            $isOwner = (int) $notification->user_id === (int) $user->id;
+            if ($isOwner && $notification->read_at === null) {
+                $notification->update([
+                    'read_at' => now(),
+                    'status' => 'Read',
+                ]);
+                app(\App\Services\NotificationCampaignService::class)->markViewed((int) $notification->id);
+                $notification->refresh();
+            } elseif ($isOwner) {
+                app(\App\Services\NotificationCampaignService::class)->markViewed((int) $notification->id);
+            }
+
+            $payload = $this->presentInboxItem($notification, $user);
+            $payload = array_merge($payload, $this->campaignEngagementForNotification($notification, $user));
+
+            return response()->json(['success' => true, 'data' => $payload]);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json(['success' => false, 'message' => 'Notification not found'], 404);
+        } catch (\Exception $e) {
+            Log::error('Get notification error', ['error' => $e->getMessage()]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to load notification',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+            ], 500);
+        }
+    }
+
+    public function unreadNotificationCount(Request $request)
+    {
+        try {
+            $user = $request->user();
+            $count = Notification::query()
+                ->where('user_id', $user->id)
+                ->whereNull('read_at')
+                ->count();
+
+            return response()->json(['success' => true, 'data' => ['unread' => $count]]);
+        } catch (\Exception $e) {
+            Log::error('Unread notification count error', ['error' => $e->getMessage()]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to load unread count',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+            ], 500);
+        }
+    }
+
     public function getNotificationReceipts(Request $request)
     {
         try {
@@ -186,8 +247,55 @@ class CommunicationController extends Controller
         $row['section'] = $meta['section'] ?? null;
         $row['student_count'] = isset($meta['student_count']) ? (int) $meta['student_count'] : null;
         $row['audience'] = $this->audienceLabel($meta['grade'] ?? null, $meta['section'] ?? null);
+        $row['campaign_id'] = isset($meta['campaign_id']) ? (int) $meta['campaign_id'] : null;
+        $row['module'] = $meta['module'] ?? null;
+        $row['status_key'] = $meta['status_key'] ?? null;
+
+        if ($user && (int) $notification->user_id === (int) $user->id) {
+            $engagement = $this->campaignEngagementForNotification($notification, $user);
+            $row['liked'] = $engagement['liked'];
+            $row['campaign_viewed'] = $engagement['campaign_viewed'];
+        }
 
         return $row;
+    }
+
+    private function canAccessInboxNotification(Request $request, Notification $notification): bool
+    {
+        $user = $request->user();
+        if (!$user) {
+            return false;
+        }
+
+        $isOwner = (int) $notification->user_id === (int) $user->id;
+        $isStaff = in_array($user->role, ['SuperAdmin', 'BranchAdmin'], true)
+            && $this->canAccessBranch($request, (int) $notification->branch_id);
+
+        return $isOwner || $isStaff;
+    }
+
+    /**
+     * @return array{liked: bool, campaign_viewed: bool}
+     */
+    private function campaignEngagementForNotification(Notification $notification, $user): array
+    {
+        $meta = is_array($notification->metadata) ? $notification->metadata : [];
+        if (($meta['source'] ?? null) !== 'notification_campaign') {
+            return [
+                'liked' => false,
+                'campaign_viewed' => $notification->read_at !== null,
+            ];
+        }
+
+        $recipient = NotificationCampaignRecipient::query()
+            ->where('notification_id', $notification->id)
+            ->where('user_id', $user->id)
+            ->first();
+
+        return [
+            'liked' => $recipient?->liked_at !== null,
+            'campaign_viewed' => $recipient?->viewed_at !== null,
+        ];
     }
 
     public function broadcastNotification(Request $request)
@@ -469,6 +577,8 @@ class CommunicationController extends Controller
                 'status' => 'Read'
             ]);
 
+            app(\App\Services\NotificationCampaignService::class)->markViewed((int) $notification->id);
+
             return response()->json([
                 'success' => true,
                 'message' => 'Notification marked as read',
@@ -498,6 +608,11 @@ class CommunicationController extends Controller
     {
         try {
             $user = $request->user();
+            $unreadIds = Notification::query()
+                ->where('user_id', $user->id)
+                ->whereNull('read_at')
+                ->pluck('id');
+
             $updated = Notification::query()
                 ->where('user_id', $user->id)
                 ->whereNull('read_at')
@@ -506,6 +621,11 @@ class CommunicationController extends Controller
                     'status' => 'Read',
                     'updated_at' => now(),
                 ]);
+
+            $campaignService = app(\App\Services\NotificationCampaignService::class);
+            foreach ($unreadIds as $notificationId) {
+                $campaignService->markViewed((int) $notificationId);
+            }
 
             return response()->json([
                 'success' => true,

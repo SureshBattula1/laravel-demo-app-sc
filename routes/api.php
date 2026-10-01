@@ -30,6 +30,7 @@ use App\Http\Controllers\InvoiceController;
 use App\Http\Controllers\LeaveController;
 use App\Http\Controllers\LibraryController;
 use App\Http\Controllers\MessageController;
+use App\Http\Controllers\NotificationCampaignController;
 use App\Http\Controllers\ModuleController;
 use App\Http\Controllers\PermissionManagementController;
 use App\Http\Controllers\RealTimeNotificationController;
@@ -629,13 +630,25 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
     // Communication System Routes
     Route::prefix('communications')->group(function () {
         // Notifications
+        Route::get('/notifications/unread-count', [CommunicationController::class, 'unreadNotificationCount']);
+        Route::get('/notifications/sent', [CommunicationController::class, 'getSentNotifications']);
+        Route::get('/notifications/receipts', [CommunicationController::class, 'getNotificationReceipts']);
+        Route::get('/notifications/{id}', [CommunicationController::class, 'getNotification']);
         Route::get('/notifications', [CommunicationController::class, 'getNotifications']);
         Route::post('/notifications', [CommunicationController::class, 'createNotification']);
         Route::post('/notifications/broadcast', [CommunicationController::class, 'broadcastNotification']);
-        Route::get('/notifications/sent', [CommunicationController::class, 'getSentNotifications']);
-        Route::get('/notifications/receipts', [CommunicationController::class, 'getNotificationReceipts']);
         Route::post('/notifications/read-all', [CommunicationController::class, 'markAllAsRead']);
         Route::post('/notifications/{id}/read', [CommunicationController::class, 'markAsRead']);
+
+        Route::get('/notification-campaigns/modules', [NotificationCampaignController::class, 'modules']);
+        Route::get('/notification-campaigns/dashboard', [NotificationCampaignController::class, 'dashboard']);
+        Route::get('/notification-campaigns/templates', [NotificationCampaignController::class, 'templates']);
+        Route::get('/notification-campaigns/marked-attendance', [NotificationCampaignController::class, 'markedAttendance']);
+        Route::post('/notification-campaigns/preview', [NotificationCampaignController::class, 'preview']);
+        Route::post('/notification-campaigns/notifications/{notificationId}/like', [NotificationCampaignController::class, 'like']);
+        Route::get('/notification-campaigns', [NotificationCampaignController::class, 'index']);
+        Route::post('/notification-campaigns', [NotificationCampaignController::class, 'store']);
+        Route::get('/notification-campaigns/{id}', [NotificationCampaignController::class, 'show']);
 
         // Announcements
         Route::get('/announcements', [CommunicationController::class, 'getAnnouncements']);

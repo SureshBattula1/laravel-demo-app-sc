@@ -22,6 +22,10 @@ class SmsTemplateTagRenderer
         'mother_name',
         'roll_number',
         'employee_id',
+        'date',
+        'status',
+        'attendance_date',
+        'class_name',
     ];
 
     /**

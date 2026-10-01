@@ -73,6 +73,24 @@ class InboxNotificationService
             ];
         }
 
+        if ($source === 'notification_campaign') {
+            $bits = array_filter([
+                isset($meta['module']) ? ucfirst((string) $meta['module']) : null,
+                isset($meta['grade'], $meta['section'])
+                    ? 'Grade '.(string) $meta['grade'].' · Section '.(string) $meta['section']
+                    : null,
+                isset($meta['status_key'])
+                    ? ucfirst(str_replace('_', ' ', (string) $meta['status_key']))
+                    : null,
+            ]);
+
+            return [
+                'description' => null,
+                'optional_description' => $bits === [] ? null : implode(' · ', $bits),
+                'attachments' => [],
+            ];
+        }
+
         $assignmentId = isset($meta['assignment_id']) ? (int) $meta['assignment_id'] : 0;
         if ($assignmentId <= 0) {
             $bits = array_filter([
