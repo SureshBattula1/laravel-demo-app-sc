@@ -141,7 +141,7 @@ class AssignmentController extends Controller
 
             $validator = Validator::make($request->all(), [
                 'grade' => 'required|string',
-                'section' => 'required|string',
+                'section' => 'nullable|string|max:50',
                 'branch_id' => 'nullable|exists:branches,id',
             ]);
             if ($validator->fails()) {
@@ -159,7 +159,7 @@ class AssignmentController extends Controller
             $students = $this->recipientResolver->eligibleStudents(
                 $branchId,
                 strip_tags($request->grade),
-                strip_tags($request->section),
+                $this->normalizedSection($request->section),
                 $this->academicYearContext->id(false)
             );
 
@@ -178,7 +178,7 @@ class AssignmentController extends Controller
 
             $validator = Validator::make($request->all(), [
                 'grade' => 'required|string',
-                'section' => 'required|string',
+                'section' => 'nullable|string|max:50',
                 'audience_mode' => 'required|in:all,custom',
                 'student_ids' => 'nullable|array',
                 'student_ids.*' => 'integer',
@@ -196,7 +196,7 @@ class AssignmentController extends Controller
             $studentIds = $this->recipientResolver->resolveStudentIds(
                 $branchId,
                 strip_tags($request->grade),
-                strip_tags($request->section),
+                $this->normalizedSection($request->section),
                 $this->academicYearContext->id(false),
                 $request->audience_mode,
                 $request->student_ids
@@ -229,7 +229,7 @@ class AssignmentController extends Controller
             $validator = Validator::make($request->all(), [
                 'branch_id' => 'nullable|exists:branches,id',
                 'grade' => 'required|string|max:50',
-                'section' => 'required|string|max:50',
+                'section' => 'nullable|string|max:50',
                 'subject_id' => 'required|exists:subjects,id',
                 'title' => 'required|string|max:255',
                 'description' => 'nullable|string',
@@ -264,10 +264,11 @@ class AssignmentController extends Controller
             }
 
             $academicYearId = $this->academicYearContext->id(false);
+            $section = $this->normalizedSection($request->section);
             $studentIds = $this->recipientResolver->resolveStudentIds(
                 $branchId,
                 strip_tags($request->grade),
-                strip_tags($request->section),
+                $section,
                 $academicYearId,
                 $request->audience_mode,
                 $request->student_ids
@@ -276,18 +277,20 @@ class AssignmentController extends Controller
             if ($studentIds === []) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'No students found for this class and section.',
+                    'message' => $section === ''
+                        ? 'No students found for this class.'
+                        : 'No students found for this class and section.',
                 ], 422);
             }
 
             $isPublished = $request->has('is_published') ? $request->boolean('is_published') : true;
             $user = $request->user();
 
-            $assignment = DB::transaction(function () use ($request, $branchId, $academicYearId, $studentIds, $isPublished, $user) {
+            $assignment = DB::transaction(function () use ($request, $branchId, $academicYearId, $studentIds, $isPublished, $user, $section) {
                 $payload = [
                     'branch_id' => $branchId,
                     'grade' => strip_tags($request->grade),
-                    'section' => strip_tags($request->section),
+                    'section' => $section !== '' ? $section : null,
                     'subject_id' => (int) $request->subject_id,
                     'teacher_id' => $user->id,
                     'title' => strip_tags($request->title),
@@ -602,5 +605,11 @@ class AssignmentController extends Controller
         $schoolId = Branch::whereKey($branchId)->value('school_id');
 
         return $schoolId ? (int) $schoolId : null;
+    }
+
+    /** Empty/null section means whole class (all sections in grade). */
+    private function normalizedSection(mixed $section): string
+    {
+        return trim(strip_tags((string) ($section ?? '')));
     }
 }

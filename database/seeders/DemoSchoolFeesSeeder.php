@@ -3,9 +3,11 @@
 namespace Database\Seeders;
 
 use App\Models\AccountCategory;
+use App\Models\FeeDue;
 use App\Models\FeePayment;
 use App\Models\FeeStructure;
 use App\Models\FeeType;
+use App\Models\Student;
 use App\Models\Transaction;
 use Database\Seeders\Concerns\ResolvesDemoSchoolContext;
 use Illuminate\Database\Seeder;
@@ -189,6 +191,55 @@ class DemoSchoolFeesSeeder extends Seeder
             );
         }
 
-        $this->command?->info('Demo fees: 4 types, 8 structures, '.$payments.' payments, 5 account categories.');
+        $dues = 0;
+        $students = Student::query()
+            ->where('branch_id', $ctx->branch->id)
+            ->whereNotNull('user_id')
+            ->get(['id', 'user_id', 'grade', 'section']);
+
+        foreach ($students as $student) {
+            $grade = (string) $student->grade;
+            if (! isset($structures[$grade])) {
+                continue;
+            }
+            foreach ($structures[$grade] as $typeName => $structure) {
+                $original = (float) $structure->amount;
+                $paid = (float) FeePayment::query()
+                    ->where('student_id', $student->user_id)
+                    ->where('fee_structure_id', $structure->id)
+                    ->sum('amount_paid');
+                $balance = round(max(0, $original - $paid), 2);
+                if ($balance <= 0) {
+                    continue;
+                }
+                $status = $paid > 0 ? 'PartiallyPaid' : 'Pending';
+                if ($dueDate < $today) {
+                    $status = 'Overdue';
+                }
+                FeeDue::firstOrCreate(
+                    [
+                        'student_id' => $student->id,
+                        'fee_structure_id' => $structure->id,
+                        'due_date' => $dueDate,
+                        'fee_type' => $typeName,
+                    ],
+                    [
+                        'academic_year' => $ctx->ay->name,
+                        'original_grade' => $grade,
+                        'current_grade' => $grade,
+                        'original_amount' => $original,
+                        'paid_amount' => $paid,
+                        'balance_amount' => $balance,
+                        'overdue_days' => $dueDate < $today ? (int) now()->diffInDays($dueDate) : 0,
+                        'status' => $status,
+                    ]
+                );
+                $dues++;
+            }
+        }
+
+        $this->command?->info(
+            'Demo fees: 4 types, 8 structures, '.$payments.' payments, '.$dues.' open dues, 5 account categories.'
+        );
     }
 }

@@ -148,6 +148,8 @@ class AssignmentRecipientResolver
 
     private function eligibleQuery(int $branchId, string $grade, string $section, ?int $academicYearId)
     {
+        $section = trim($section);
+        $gradeWide = $section === '';
         $hasEnrollments = Schema::hasTable('student_enrollments');
 
         $query = DB::table('students')
@@ -164,11 +166,15 @@ class AssignmentRecipientResolver
                     ->where('se.academic_year_id', '=', $academicYearId);
             })
                 ->whereRaw('COALESCE(se.grade, students.grade) = ?', [$grade])
-                ->whereRaw('COALESCE(se.section, students.section) = ?', [$section])
                 ->whereRaw('COALESCE(se.academic_year_id, students.academic_year_id) = ?', [$academicYearId]);
+            if (!$gradeWide) {
+                $query->whereRaw('COALESCE(se.section, students.section) = ?', [$section]);
+            }
         } else {
-            $query->where('students.grade', $grade)
-                ->where('students.section', $section);
+            $query->where('students.grade', $grade);
+            if (!$gradeWide) {
+                $query->where('students.section', $section);
+            }
             if ($academicYearId) {
                 $query->where('students.academic_year_id', $academicYearId);
             }

@@ -17,7 +17,7 @@ class DatabaseSeeder extends Seeder
      * Seed the application's database.
      * This seeder creates:
      * - 6 Roles (Super Admin, Branch Admin, Teacher, Staff, Accountant, Student)
-     * - 24 Modules (for sidebar menus)
+     * - Modules (for sidebar menus)
      * - Permissions for each module
      * - 2 Super Admin users with ALL permissions
      * - NO other users (teachers/students will be created by application)
@@ -38,8 +38,9 @@ class DatabaseSeeder extends Seeder
             // Step 3: Assign Permissions to Roles
             $this->assignRolePermissions();
 
-            // Ensure assignments module/permissions exist on databases seeded before this module
+            // Ensure module/permissions exist on databases seeded before these modules were added
             $this->call(AssignmentsModuleSeeder::class);
+            $this->call(NotificationsModuleSeeder::class);
             
             // Step 4: Create Super Admin Users
             $this->createSuperAdmins();
@@ -416,11 +417,19 @@ class DatabaseSeeder extends Seeder
                 'permissions' => ['view', 'create', 'edit', 'delete']
             ],
             [
+                'name' => 'Notifications',
+                'slug' => 'notifications',
+                'icon' => 'notifications_active',
+                'route' => '/notification-campaigns',
+                'order' => 21,
+                'permissions' => ['view', 'create', 'edit', 'delete']
+            ],
+            [
                 'name' => 'Reports',
                 'slug' => 'reports',
                 'icon' => 'assessment',
                 'route' => '/reports',
-                'order' => 21,
+                'order' => 22,
                 'permissions' => ['view', 'generate', 'export']
             ],
             [
@@ -428,7 +437,7 @@ class DatabaseSeeder extends Seeder
                 'slug' => 'roles',
                 'icon' => 'admin_panel_settings',
                 'route' => '/settings/roles',
-                'order' => 22,
+                'order' => 23,
                 'permissions' => ['view', 'create', 'edit', 'delete', 'update']
             ],
             [
@@ -436,7 +445,7 @@ class DatabaseSeeder extends Seeder
                 'slug' => 'permissions',
                 'icon' => 'shield',
                 'route' => '/settings/permissions',
-                'order' => 23,
+                'order' => 25,
                 'permissions' => ['view', 'create', 'edit', 'delete', 'update']
             ],
             [
@@ -444,7 +453,7 @@ class DatabaseSeeder extends Seeder
                 'slug' => 'users',
                 'icon' => 'people',
                 'route' => '/settings/users',
-                'order' => 24,
+                'order' => 26,
                 'permissions' => ['view', 'create', 'edit', 'delete', 'update']
             ],
             [
@@ -452,7 +461,7 @@ class DatabaseSeeder extends Seeder
                 'slug' => 'settings',
                 'icon' => 'settings',
                 'route' => '/settings',
-                'order' => 25,
+                'order' => 27,
                 'permissions' => ['view', 'edit']
             ],
             [
@@ -461,7 +470,7 @@ class DatabaseSeeder extends Seeder
                 'slug' => 'search',
                 'icon' => 'search',
                 'route' => '/search',
-                'order' => 26,
+                'order' => 28,
                 'permissions' => ['global']
             ],
             [
@@ -469,7 +478,7 @@ class DatabaseSeeder extends Seeder
                 'slug' => 'library',
                 'icon' => 'local_library',
                 'route' => '/library',
-                'order' => 27,
+                'order' => 29,
                 'permissions' => ['view', 'create', 'edit', 'delete', 'issue', 'return', 'export']
             ],
             [
@@ -477,7 +486,7 @@ class DatabaseSeeder extends Seeder
                 'slug' => 'transport',
                 'icon' => 'directions_bus',
                 'route' => '/transport',
-                'order' => 28,
+                'order' => 30,
                 'permissions' => ['view', 'create', 'edit', 'delete', 'assign', 'export']
             ]
         ];
@@ -553,6 +562,7 @@ class DatabaseSeeder extends Seeder
             'departments.view', 'departments.create', 'departments.edit', 'departments.delete',
             'groups.view', 'groups.create', 'groups.edit', 'groups.delete',
             'bulk_management.view', 'bulk_management.create', 'bulk_management.edit', 'bulk_management.delete',
+            'notifications.view', 'notifications.create', 'notifications.edit', 'notifications.delete',
             'holidays.view', 'holidays.create', 'holidays.edit', 'holidays.delete',
             'leaves.view', 'leaves.create', 'leaves.edit', 'leaves.delete', 'leaves.approve', 'leaves.reject',
             'import.view', 'import.upload', 'import.validate', 'import.commit', 'import.cancel', 'import.template',
@@ -583,6 +593,7 @@ class DatabaseSeeder extends Seeder
             'holidays.view',
             'groups.view',
             'bulk_management.view',
+            'notifications.view', 'notifications.create',
             'leaves.view', 'leaves.create', // Teachers can view and create their own leaves
             'import.view', 'import.template', // Teachers can view imports and download templates
             'search.global',
@@ -604,6 +615,7 @@ class DatabaseSeeder extends Seeder
             'holidays.view',
             'groups.view',
             'bulk_management.view', 'bulk_management.create', 'bulk_management.edit',
+            'notifications.view', 'notifications.create',
             'leaves.view', 'leaves.create', 'leaves.edit', 'leaves.approve', 'leaves.reject', // Staff can manage leaves
             'assignments.view',
             'import.view', 'import.upload', 'import.validate', 'import.commit', 'import.cancel', 'import.template', // Staff can manage imports
@@ -634,6 +646,7 @@ class DatabaseSeeder extends Seeder
             'holidays.view',                 // read-only (no create/edit/delete granted)
             'students.view', 'students.edit', // own record only (scoped in StudentController)
             'assignments.view',
+            'notifications.view',
         ])->pluck('id')->toArray();
         $student->permissions()->sync($studentPerms);
         $this->command->info("   ✓ Student: " . count($studentPerms) . " permissions");

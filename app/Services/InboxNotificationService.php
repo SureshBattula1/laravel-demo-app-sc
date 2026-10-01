@@ -59,6 +59,81 @@ class InboxNotificationService
     }
 
     /**
+     * Bulk inbox rows for campaign send chunks (per-recipient title/message).
+     *
+     * @param  list<array{user_id:int,title:string,message:string,metadata:array<string,mixed>}>  $items
+     * @return array<int, int> recipient_id => notification_id
+     */
+    public function insertCampaignNotificationBatch(
+        array $items,
+        int $branchId,
+        ?int $createdBy,
+        string $sendBatchId,
+    ): array {
+        if ($items === []) {
+            return [];
+        }
+
+        $now = now();
+        $rows = [];
+        foreach ($items as $item) {
+            $metadata = array_merge($item['metadata'], [
+                'send_batch_id' => $sendBatchId,
+            ]);
+            $rows[] = [
+                'branch_id' => $branchId,
+                'user_id' => (int) $item['user_id'],
+                'title' => $item['title'],
+                'message' => $item['message'],
+                'type' => 'Info',
+                'priority' => 'Medium',
+                'status' => 'Sent',
+                'read_at' => null,
+                'action_url' => '/notifications',
+                'metadata' => json_encode($metadata),
+                'sent_at' => $now,
+                'created_by' => $createdBy,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ];
+        }
+
+        $chunkSize = max(50, (int) config('notification_campaigns.inbox_insert_chunk_size', 200));
+        foreach (array_chunk($rows, $chunkSize) as $chunk) {
+            Notification::withoutTenantScope()->insert($chunk);
+        }
+
+        $recipientIds = array_values(array_filter(array_map(
+            fn (array $item) => isset($item['metadata']['recipient_id']) ? (int) $item['metadata']['recipient_id'] : 0,
+            $items
+        )));
+
+        if ($recipientIds === []) {
+            return [];
+        }
+
+        $inserted = Notification::withoutTenantScope()
+            ->where('created_by', $createdBy)
+            ->where('branch_id', $branchId)
+            ->where('sent_at', $now)
+            ->whereRaw("JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.send_batch_id')) = ?", [$sendBatchId])
+            ->get(['id', 'metadata']);
+
+        $map = [];
+        foreach ($inserted as $notification) {
+            $meta = is_string($notification->metadata)
+                ? json_decode($notification->metadata, true)
+                : (array) $notification->metadata;
+            $recipientId = (int) ($meta['recipient_id'] ?? 0);
+            if ($recipientId > 0) {
+                $map[$recipientId] = (int) $notification->id;
+            }
+        }
+
+        return $map;
+    }
+
+    /**
      * @param  array<string, mixed>  $meta
      * @return array{description:?string, optional_description:?string, attachments: list<array<string, mixed>>}
      */
@@ -84,10 +159,16 @@ class InboxNotificationService
                     : null,
             ]);
 
+            $assignmentId = isset($meta['assignment_id']) ? (int) $meta['assignment_id'] : 0;
+            $assignment = $assignmentId > 0
+                ? Assignment::withoutTenantScope()->find($assignmentId)
+                : null;
+
             return [
-                'description' => null,
-                'optional_description' => $bits === [] ? null : implode(' · ', $bits),
-                'attachments' => [],
+                'description' => $assignment?->description,
+                'optional_description' => $assignment?->instructions
+                    ?: ($bits === [] ? null : implode(' · ', $bits)),
+                'attachments' => $this->attachmentsForMeta($meta),
             ];
         }
 

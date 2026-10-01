@@ -242,7 +242,7 @@ class CommunicationController extends Controller
         $row['can_view_receipts'] = $canViewReceipts;
         $row['description'] = $details['description'] ?: $notification->message;
         $row['optional_description'] = $details['optional_description'];
-        $row['attachments'] = $details['attachments'];
+        $row['attachments'] = $this->normalizeInboxAttachments($details['attachments']);
         $row['grade'] = $meta['grade'] ?? null;
         $row['section'] = $meta['section'] ?? null;
         $row['student_count'] = isset($meta['student_count']) ? (int) $meta['student_count'] : null;
@@ -452,7 +452,7 @@ class CommunicationController extends Controller
                         'message' => $first->message,
                         'description' => $details['description'] ?: $first->message,
                         'optional_description' => $details['optional_description'],
-                        'attachments' => $details['attachments'],
+                        'attachments' => $this->normalizeInboxAttachments($details['attachments']),
                         'grade' => $grade,
                         'section' => $section,
                         'audience' => $this->audienceLabel($grade, $section),
@@ -471,6 +471,25 @@ class CommunicationController extends Controller
             Log::error('Sent notifications error', ['error' => $e->getMessage()]);
             return response()->json(['success' => false, 'message' => 'Failed to load sent notifications'], 500);
         }
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $attachments
+     * @return list<array<string, mixed>>
+     */
+    private function normalizeInboxAttachments(array $attachments): array
+    {
+        return array_values(array_map(function (array $file) {
+            $url = $file['file_url'] ?? $file['url'] ?? null;
+            $name = $file['original_name'] ?? $file['file_name'] ?? $file['name'] ?? 'Attachment';
+
+            return array_merge($file, [
+                'url' => $url,
+                'name' => $name,
+                'mime' => $file['file_type'] ?? $file['mime'] ?? null,
+                'size' => isset($file['file_size']) ? (int) $file['file_size'] : ($file['size'] ?? null),
+            ]);
+        }, $attachments));
     }
 
     private function audienceLabel($grade, $section): ?string

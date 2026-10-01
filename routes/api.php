@@ -629,26 +629,50 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
 
     // Communication System Routes
     Route::prefix('communications')->group(function () {
-        // Notifications
+        // Personal inbox (auth only — scoped to current user in CommunicationController)
         Route::get('/notifications/unread-count', [CommunicationController::class, 'unreadNotificationCount']);
-        Route::get('/notifications/sent', [CommunicationController::class, 'getSentNotifications']);
-        Route::get('/notifications/receipts', [CommunicationController::class, 'getNotificationReceipts']);
-        Route::get('/notifications/{id}', [CommunicationController::class, 'getNotification']);
+        Route::get('/notifications/sent', [CommunicationController::class, 'getSentNotifications'])
+            ->middleware('permission:notifications.view');
+        Route::get('/notifications/receipts', [CommunicationController::class, 'getNotificationReceipts'])
+            ->middleware('permission:notifications.view');
         Route::get('/notifications', [CommunicationController::class, 'getNotifications']);
-        Route::post('/notifications', [CommunicationController::class, 'createNotification']);
-        Route::post('/notifications/broadcast', [CommunicationController::class, 'broadcastNotification']);
+        Route::get('/notifications/{id}', [CommunicationController::class, 'getNotification']);
         Route::post('/notifications/read-all', [CommunicationController::class, 'markAllAsRead']);
         Route::post('/notifications/{id}/read', [CommunicationController::class, 'markAsRead']);
+        Route::post('/notifications', [CommunicationController::class, 'createNotification'])
+            ->middleware('permission:notifications.create');
+        Route::post('/notifications/broadcast', [CommunicationController::class, 'broadcastNotification'])
+            ->middleware('permission:notifications.create');
 
-        Route::get('/notification-campaigns/modules', [NotificationCampaignController::class, 'modules']);
-        Route::get('/notification-campaigns/dashboard', [NotificationCampaignController::class, 'dashboard']);
-        Route::get('/notification-campaigns/templates', [NotificationCampaignController::class, 'templates']);
-        Route::get('/notification-campaigns/marked-attendance', [NotificationCampaignController::class, 'markedAttendance']);
-        Route::post('/notification-campaigns/preview', [NotificationCampaignController::class, 'preview']);
+        Route::get('/notification-campaigns/modules', [NotificationCampaignController::class, 'modules'])
+            ->middleware('permission:notifications.view');
+        Route::get('/notification-campaigns/dashboard', [NotificationCampaignController::class, 'dashboard'])
+            ->middleware('permission:notifications.view');
+        Route::get('/notification-campaigns/templates', [NotificationCampaignController::class, 'templates'])
+            ->middleware('permission:notifications.view');
+        Route::get('/notification-campaigns/marked-attendance', [NotificationCampaignController::class, 'markedAttendance'])
+            ->middleware('permission:notifications.view');
+        Route::get('/notification-campaigns/class-options', [NotificationCampaignController::class, 'classOptions'])
+            ->middleware('permission:notifications.view');
+        Route::get('/notification-campaigns/fees-due-notify-meta', [NotificationCampaignController::class, 'feesDueNotifyMeta'])
+            ->middleware('permission:notifications.view');
+        Route::get('/notification-campaigns/eligible-targets', [NotificationCampaignController::class, 'eligibleTargets'])
+            ->middleware('permission:notifications.view');
+        Route::post('/notification-campaigns/preview', [NotificationCampaignController::class, 'preview'])
+            ->middleware('permission:notifications.create');
         Route::post('/notification-campaigns/notifications/{notificationId}/like', [NotificationCampaignController::class, 'like']);
-        Route::get('/notification-campaigns', [NotificationCampaignController::class, 'index']);
-        Route::post('/notification-campaigns', [NotificationCampaignController::class, 'store']);
-        Route::get('/notification-campaigns/{id}', [NotificationCampaignController::class, 'show']);
+        Route::get('/notification-campaigns', [NotificationCampaignController::class, 'index'])
+            ->middleware('permission:notifications.view');
+        Route::post('/notification-campaigns', [NotificationCampaignController::class, 'store'])
+            ->middleware('permission:notifications.create');
+        Route::get('/notification-campaigns/{id}/progress', [NotificationCampaignController::class, 'progress'])
+            ->middleware('permission:notifications.view');
+        Route::get('/notification-campaigns/{id}/recipients', [NotificationCampaignController::class, 'recipients'])
+            ->middleware('permission:notifications.view');
+        Route::post('/notification-campaigns/{id}/retry-failed', [NotificationCampaignController::class, 'retryFailed'])
+            ->middleware('permission:notifications.edit');
+        Route::get('/notification-campaigns/{id}', [NotificationCampaignController::class, 'show'])
+            ->middleware('permission:notifications.view');
 
         // Announcements
         Route::get('/announcements', [CommunicationController::class, 'getAnnouncements']);

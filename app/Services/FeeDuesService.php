@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\FeeDue;
 use App\Models\FeePayment;
+use App\Models\FeeStructure;
 use App\Models\Student;
 use App\Services\AuditService;
 use Illuminate\Support\Facades\DB;

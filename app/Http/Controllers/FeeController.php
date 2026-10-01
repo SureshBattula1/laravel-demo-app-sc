@@ -6,6 +6,7 @@ use App\Http\Traits\PaginatesAndSorts;
 use App\Models\FeePayment;
 use App\Models\FeeStructure;
 use App\Services\AcademicYearContext;
+use App\Services\FeeDuesService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -1075,13 +1076,13 @@ class FeeController extends Controller
             // OPTIMIZED: Get FULLY paid structure IDs - Only from completed payments (not partial), scoped to academic year
             $paidStructureIdsQuery = FeePayment::where('student_id', $studentId)
                 ->where('payment_status', 'Completed');
-            if ($academicYearName) {
-                $paidStructureIdsQuery->where('academic_year', $academicYearName);
-            }
-            $paidStructureIds = $paidStructureIdsQuery->pluck('fee_structure_id')
-                ->filter()
-                ->unique()
-                ->toArray();
+            $this->feeDuesService->syncAllPaymentAllocationsForUser((int) $studentId);
+
+            $totalPaidQuery = FeePayment::query()
+                ->where('student_id', $studentId)
+                ->whereIn('payment_status', ['Completed', 'Partial']);
+            $this->applyAcademicYearScopeToPayments($totalPaidQuery, $academicYearName, $academicYearId);
+            $totalPaid = $totalPaidQuery->sum('total_amount');
 
             // Check all fee structures for this branch (filter by academic year when toolbar year is set)
             $allBranchFeesQuery = FeeStructure::where('is_active', true)
@@ -1116,33 +1117,35 @@ class FeeController extends Controller
                 $pendingQuery->where('academic_year', $academicYearName);
             }
             $pending = $pendingQuery
-                ->when(! empty($paidStructureIds), function ($q) use ($paidStructureIds) {
-                    return $q->whereNotIn('id', $paidStructureIds);
-                })
                 ->get()
-                ->map(function ($fee) use ($studentId, $academicYearName) {
+                ->map(function ($fee) use ($studentId, $academicYearName, $academicYearId) {
                     if (empty($fee->fee_type)) {
                         $fee->fee_type = 'General Fee';
                     }
-                    $amountPaidQuery = FeePayment::where('student_id', $studentId)
+                    $amountPaidQuery = FeePayment::query()
+                        ->where('student_id', $studentId)
                         ->where('fee_structure_id', $fee->id)
                         ->whereIn('payment_status', ['Completed', 'Partial']);
-                    if ($academicYearName) {
-                        $amountPaidQuery->where('academic_year', $academicYearName);
-                    }
-                    $amountPaid = $amountPaidQuery->sum('amount_paid');
-                    $fee->amount_paid = (float) $amountPaid;
-                    $fee->remaining_amount = max(0, (float) $fee->amount - (float) $amountPaid);
+                    $this->applyAcademicYearScopeToPayments($amountPaidQuery, $academicYearName, $academicYearId);
+                    $amountPaid = (float) $amountPaidQuery->sum('amount_paid');
+                    $discountQuery = FeePayment::query()
+                        ->where('student_id', $studentId)
+                        ->where('fee_structure_id', $fee->id)
+                        ->whereIn('payment_status', ['Completed', 'Partial']);
+                    $this->applyAcademicYearScopeToPayments($discountQuery, $academicYearName, $academicYearId);
+                    $discount = (float) $discountQuery->sum('discount_amount');
+                    $fee->amount_paid = $amountPaid;
+                    $fee->remaining_amount = max(0, (float) $fee->amount - $amountPaid - $discount);
 
                     return $fee;
-                });
+                })
+                ->filter(fn ($fee) => ($fee->remaining_amount ?? (float) $fee->amount) > 0)
+                ->values();
 
             // OPTIMIZED: Get payments with pagination (limit to recent 50, scoped to academic year when set)
             $paymentsQuery = FeePayment::with(['feeStructure', 'creator'])
                 ->where('student_id', $studentId);
-            if ($academicYearName) {
-                $paymentsQuery->where('academic_year', $academicYearName);
-            }
+            $this->applyAcademicYearScopeToPayments($paymentsQuery, $academicYearName, $academicYearId);
             $payments = $paymentsQuery
                 ->orderBy('payment_date', 'desc')
                 ->limit(50)
@@ -1160,7 +1163,6 @@ class FeeController extends Controller
                 'pending_fees_count' => $pending->count(),
                 'payments_count' => $payments->count(),
                 'total_paid' => $totalPaid,
-                'paid_structure_ids' => $paidStructureIds,
                 'pending_fee_types' => $pending->pluck('fee_type')->toArray(),
             ]);
 
@@ -1581,4 +1583,34 @@ class FeeController extends Controller
     {
         return $this->destroyStructure(request(), $id);
     }
-}
+
+    /**
+     * Include payments tagged for the year, or untagged payments whose fee structure belongs to that year.
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder|\Illuminate\Database\Query\Builder  $query
+     */
+    private function applyAcademicYearScopeToPayments($query, ?string $academicYearName, ?int $academicYearId): void
+    {
+        if ($academicYearName === null && $academicYearId === null) {
+            return;
+        }
+
+        $query->where(function ($outer) use ($academicYearName, $academicYearId) {
+            if ($academicYearName) {
+                $outer->where('academic_year', $academicYearName);
+            }
+            if ($academicYearId) {
+                $outer->orWhere('academic_year_id', $academicYearId);
+            }
+            $outer->orWhere(function ($untagged) use ($academicYearName, $academicYearId) {
+                $untagged->where(function ($blank) {
+                    $blank->whereNull('academic_year')->orWhere('academic_year', '');
+                })->whereHas('feeStructure', function ($structure) use ($academicYearName, $academicYearId) {
+                    if ($academicYearId && \Illuminate\Support\Facades\Schema::hasColumn('fee_structures', 'academic_year_id')) {
+                        $structure->where('academic_year_id', $academicYearId);
+                    } elseif ($academicYearName) {
+                        $structure->where('academic_year', $academicYearName);
+                    }
+                });
+            });
+        });

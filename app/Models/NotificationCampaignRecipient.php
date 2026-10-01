@@ -16,6 +16,7 @@ class NotificationCampaignRecipient extends Model
         'grade',
         'section',
         'status_key',
+        'context',
         'delivery_status',
         'error',
         'notification_id',

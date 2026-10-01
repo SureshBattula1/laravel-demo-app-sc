@@ -12,3 +12,4 @@ Artisan::command('inspire', function () {
 Schedule::command('fees:update-aging')->daily();
 Schedule::command('fees:send-overdue-notifications')->daily();
 Schedule::command('fees:send-payment-reminders')->weekly();
+Schedule::command('campaigns:reclaim-stale-processing')->everyFiveMinutes();

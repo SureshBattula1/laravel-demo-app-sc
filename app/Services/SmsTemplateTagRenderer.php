@@ -26,6 +26,12 @@ class SmsTemplateTagRenderer
         'status',
         'attendance_date',
         'class_name',
+        'amount_due',
+        'due_date',
+        'holiday_name',
+        'holiday_date',
+        'exam_name',
+        'assignment_title',
     ];
 
     /**

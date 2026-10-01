@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Models\NotificationCampaign;
 use App\Services\NotificationCampaignDispatchService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -9,10 +10,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 
-/**
- * @deprecated Use NotificationCampaignDispatchService::start() — kept for backward compatibility.
- */
-class SendNotificationCampaignJob implements ShouldQueue
+class StartNotificationCampaignJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
@@ -20,13 +18,17 @@ class SendNotificationCampaignJob implements ShouldQueue
 
     public function __construct(public int $campaignId) {}
 
-    public static function dispatchFor(int $campaignId): void
-    {
-        app(NotificationCampaignDispatchService::class)->start($campaignId);
-    }
-
     public function handle(NotificationCampaignDispatchService $dispatch): void
     {
-        $dispatch->start($this->campaignId);
+        $campaign = NotificationCampaign::query()->find($this->campaignId);
+        if (!$campaign) {
+            return;
+        }
+
+        if ($campaign->status === 'pending' && $campaign->recipient_count > 0) {
+            $campaign->update(['status' => 'queued']);
+        }
+
+        $dispatch->orchestrate($campaign->fresh());
     }
 }
