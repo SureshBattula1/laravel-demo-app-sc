@@ -102,7 +102,7 @@ class AssignmentsCampaignModule implements NotificationCampaignModule
         $rows = collect();
         foreach ($targetKeys->unique() as $key) {
             $row = $counts->get($key);
-            if (!$row) {
+            if (! $row) {
                 continue;
             }
             [$grade, $section] = explode('|', $key, 2);

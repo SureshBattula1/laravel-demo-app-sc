@@ -184,14 +184,14 @@ class NotificationCampaignService
     public function validateEventDatePolicy(string $module, ?string $eventDate): ?string
     {
         $policy = $this->eventDatePolicy($module);
-        if ($policy === 'any' || !$eventDate) {
+        if ($policy === 'any' || ! $eventDate) {
             return null;
         }
 
         $date = Carbon::parse($eventDate)->startOfDay();
         $today = now()->startOfDay();
 
-        if ($policy === 'today_only' && !$date->equalTo($today)) {
+        if ($policy === 'today_only' && ! $date->equalTo($today)) {
             return 'Attendance notifications can only be scheduled for today.';
         }
 
@@ -233,7 +233,7 @@ class NotificationCampaignService
         ?string $feeStructureId = null,
     ): array {
         $plugin = $this->registry->get($module);
-        if (!$plugin) {
+        if (! $plugin) {
             return [];
         }
 
@@ -516,6 +516,7 @@ class NotificationCampaignService
             if ($sectionKeys === []) {
                 $option['list_state'] = 'closed';
                 $option['selectable'] = false;
+
                 continue;
             }
 
@@ -586,6 +587,7 @@ class NotificationCampaignService
             if ($sectionKeys === []) {
                 $option['list_state'] = 'closed';
                 $option['selectable'] = false;
+
                 continue;
             }
             $delivery = $this->deliveryStatusBySection(
@@ -684,14 +686,14 @@ class NotificationCampaignService
         }
 
         $rows = $query->get([
-                't.grade',
-                't.section',
-                't.status as target_status',
-                't.sent_count',
-                'c.id as campaign_id',
-                'c.status as campaign_status',
-                'c.template_map',
-            ]);
+            't.grade',
+            't.section',
+            't.status as target_status',
+            't.sent_count',
+            'c.id as campaign_id',
+            'c.status as campaign_status',
+            'c.template_map',
+        ]);
 
         $map = [];
         foreach ($rows as $row) {
@@ -864,7 +866,7 @@ class NotificationCampaignService
         ?string $feeStructureId = null,
     ): array {
         $plugin = $this->registry->get($module);
-        if (!$plugin) {
+        if (! $plugin) {
             return [];
         }
 
@@ -924,19 +926,19 @@ class NotificationCampaignService
                 continue;
             }
             $user = $student->user;
-            $name = $user ? trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')) : '';
+            $name = $user ? trim(($user->first_name ?? '').' '.($user->last_name ?? '')) : '';
             $baseContext = [
-                    'student_name' => $name,
-                    'grade' => (string) $student->grade,
-                    'section' => (string) ($student->section ?? ''),
-                    'class_name' => trim($student->grade . ' ' . ($student->section ?? '')),
-                    'roll_number' => (string) ($student->roll_number ?? ''),
-                    'father_name' => (string) ($student->father_name ?? ''),
-                    'mother_name' => (string) ($student->mother_name ?? ''),
-                    'mobile' => (string) ($user->phone ?? ''),
-                    'date' => Carbon::parse($date)->format('d M Y'),
-                    'attendance_date' => Carbon::parse($date)->format('d M Y'),
-                    'status' => ucfirst($statusKey),
+                'student_name' => $name,
+                'grade' => (string) $student->grade,
+                'section' => (string) ($student->section ?? ''),
+                'class_name' => trim($student->grade.' '.($student->section ?? '')),
+                'roll_number' => (string) ($student->roll_number ?? ''),
+                'father_name' => (string) ($student->father_name ?? ''),
+                'mother_name' => (string) ($student->mother_name ?? ''),
+                'mobile' => (string) ($user->phone ?? ''),
+                'date' => Carbon::parse($date)->format('d M Y'),
+                'attendance_date' => Carbon::parse($date)->format('d M Y'),
+                'status' => ucfirst($statusKey),
             ];
             if ($examsScoped) {
                 $context = $plugin->enrichContext($baseContext, $student, $statusKey, $examScheduleDate, $branchId, $examId);
@@ -1017,7 +1019,7 @@ class NotificationCampaignService
         $samples = [];
         foreach ($this->modules()[$module] ?? [] as $status) {
             $templateId = $templateMap[$status['key']] ?? null;
-            if (!$templateId || !$templates->has($templateId)) {
+            if (! $templateId || ! $templates->has($templateId)) {
                 continue;
             }
             $example = collect($recipients)->firstWhere('status_key', $status['key']);
@@ -1025,7 +1027,7 @@ class NotificationCampaignService
                 'student_name' => 'Sample Student',
                 'grade' => $targets[0]['grade'] ?? '',
                 'section' => $targets[0]['section'] ?? '',
-                'class_name' => trim(($targets[0]['grade'] ?? '') . ' ' . ($targets[0]['section'] ?? '')),
+                'class_name' => trim(($targets[0]['grade'] ?? '').' '.($targets[0]['section'] ?? '')),
                 'date' => $eventDate ? Carbon::parse($eventDate)->format('d M Y') : now()->format('d M Y'),
                 'attendance_date' => $eventDate ? Carbon::parse($eventDate)->format('d M Y') : now()->format('d M Y'),
                 'status' => $status['label'],
@@ -1222,7 +1224,7 @@ class NotificationCampaignService
             return ['processed' => 0, 'sent' => 0, 'failed' => 0];
         }
 
-        if (!in_array($campaign->status, ['queued', 'sending', 'pending', 'partial'], true)) {
+        if (! in_array($campaign->status, ['queued', 'sending', 'pending', 'partial'], true)) {
             return ['processed' => 0, 'sent' => 0, 'failed' => 0];
         }
 
@@ -1249,7 +1251,7 @@ class NotificationCampaignService
             try {
                 $templateId = (int) ($campaign->template_map[$recipient->status_key] ?? 0);
                 $template = $templates->get($templateId);
-                if (!$template) {
+                if (! $template) {
                     throw new \RuntimeException('Template missing for '.$recipient->status_key);
                 }
 
@@ -1269,7 +1271,7 @@ class NotificationCampaignService
                     'grade' => $recipient->grade,
                     'section' => $recipient->section,
                 ];
-                if (!empty($storedContext['assignment_id'])) {
+                if (! empty($storedContext['assignment_id'])) {
                     $metadata['assignment_id'] = (int) $storedContext['assignment_id'];
                 }
 
@@ -1303,7 +1305,7 @@ class NotificationCampaignService
 
                 foreach ($recipientModels as $recipient) {
                     $notificationId = $notificationIds[$recipient->id] ?? null;
-                    if (!$notificationId) {
+                    if (! $notificationId) {
                         $recipient->update([
                             'delivery_status' => 'failed',
                             'error' => 'Inbox row not linked',
@@ -1312,19 +1314,19 @@ class NotificationCampaignService
 
                         continue;
                     }
-                $recipient->update([
-                    'delivery_status' => 'sent',
-                    'notification_id' => $notificationId,
-                    'error' => null,
-                ]);
+                    $recipient->update([
+                        'delivery_status' => 'sent',
+                        'notification_id' => $notificationId,
+                        'error' => null,
+                    ]);
                     $sent++;
                 }
             } catch (\Throwable $e) {
                 $message = mb_substr($e->getMessage(), 0, 500);
                 foreach ($recipientModels as $recipient) {
                     if ($recipient->delivery_status === 'processing') {
-                $recipient->update([
-                    'delivery_status' => 'failed',
+                        $recipient->update([
+                            'delivery_status' => 'failed',
                             'error' => $message,
                         ]);
                         $failed++;
@@ -1478,8 +1480,8 @@ class NotificationCampaignService
         $fallback = match ($statusKey) {
             'overdue' => 'due',
             'due' => 'overdue',
-                default => null,
-            };
+            default => null,
+        };
 
         if ($fallback !== null && in_array($fallback, $mappedKeys, true)) {
             return $fallback;

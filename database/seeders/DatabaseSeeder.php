@@ -2,14 +2,14 @@
 
 namespace Database\Seeders;
 
+use App\Models\AcademicYear;
+use App\Models\Module;
+use App\Models\Permission;
+use App\Models\Role;
+use App\Models\User;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
-use App\Models\User;
-use App\Models\Role;
-use App\Models\Module;
-use App\Models\Permission;
-use App\Models\AcademicYear;
 
 class DatabaseSeeder extends Seeder
 {
@@ -25,23 +25,23 @@ class DatabaseSeeder extends Seeder
     public function run(): void
     {
         DB::beginTransaction();
-        
+
         try {
             $this->command->info('🌱 Seeding database...');
-            
+
             // Step 1: Create Roles
             $this->createRoles();
-            
+
             // Step 2: Create Modules and Permissions
             $this->createModulesAndPermissions();
-            
+
             // Step 3: Assign Permissions to Roles
             $this->assignRolePermissions();
 
             // Ensure module/permissions exist on databases seeded before these modules were added
             $this->call(AssignmentsModuleSeeder::class);
             $this->call(NotificationsModuleSeeder::class);
-            
+
             // Step 4: Create Super Admin Users
             $this->createSuperAdmins();
 
@@ -50,15 +50,15 @@ class DatabaseSeeder extends Seeder
 
             // Step 6: Create Company Portal (Company and Company Admin)
             $this->call(CompanyPortalSeeder::class);
-            
+
             DB::commit();
-            
+
             $this->command->info('✅ Database seeding completed successfully!');
             $this->command->info('');
             $this->command->info('📋 Summary:');
             $this->command->info('   - 6 Roles created');
             $this->command->info('   - 24 Modules created');
-            $this->command->info('   - ' . Permission::count() . ' Permissions created');
+            $this->command->info('   - '.Permission::count().' Permissions created');
             $this->command->info('   - Permissions assigned to all roles');
             $this->command->info('   - 2 Super Admin users created');
             $this->command->info('');
@@ -68,21 +68,21 @@ class DatabaseSeeder extends Seeder
             $this->command->info('');
             $this->command->info('💡 Note: Teacher and Student roles are automatically assigned');
             $this->command->info('   when teachers/students are created via the application.');
-            
+
         } catch (\Exception $e) {
             DB::rollBack();
-            $this->command->error('❌ Error seeding database: ' . $e->getMessage());
+            $this->command->error('❌ Error seeding database: '.$e->getMessage());
             throw $e;
         }
     }
-    
+
     /**
      * Create system roles
      */
     private function createRoles(): void
     {
         $this->command->info('📝 Creating roles...');
-        
+
         $roles = [
             [
                 'name' => 'Super Admin',
@@ -90,7 +90,7 @@ class DatabaseSeeder extends Seeder
                 'description' => 'Full system access with all permissions',
                 'level' => 1,
                 'is_system_role' => true,
-                'is_active' => true
+                'is_active' => true,
             ],
             [
                 'name' => 'Branch Admin',
@@ -98,7 +98,7 @@ class DatabaseSeeder extends Seeder
                 'description' => 'Branch-level administration access',
                 'level' => 2,
                 'is_system_role' => true,
-                'is_active' => true
+                'is_active' => true,
             ],
             [
                 'name' => 'Teacher',
@@ -106,7 +106,7 @@ class DatabaseSeeder extends Seeder
                 'description' => 'Teaching staff with student and academic access',
                 'level' => 3,
                 'is_system_role' => true,
-                'is_active' => true
+                'is_active' => true,
             ],
             [
                 'name' => 'Staff',
@@ -114,7 +114,7 @@ class DatabaseSeeder extends Seeder
                 'description' => 'Administrative staff access',
                 'level' => 4,
                 'is_system_role' => true,
-                'is_active' => true
+                'is_active' => true,
             ],
             [
                 'name' => 'Accountant',
@@ -122,7 +122,7 @@ class DatabaseSeeder extends Seeder
                 'description' => 'Accounting and finance management',
                 'level' => 4,
                 'is_system_role' => true,
-                'is_active' => true
+                'is_active' => true,
             ],
             [
                 'name' => 'Student',
@@ -130,10 +130,10 @@ class DatabaseSeeder extends Seeder
                 'description' => 'Student access to view own information',
                 'level' => 5,
                 'is_system_role' => true,
-                'is_active' => true
+                'is_active' => true,
             ],
         ];
-        
+
         foreach ($roles as $roleData) {
             $role = Role::firstOrCreate(
                 ['slug' => $roleData['slug']],
@@ -146,21 +146,22 @@ class DatabaseSeeder extends Seeder
             }
         }
     }
-    
+
     /**
      * Create 2 Super Admin users
      */
     private function createSuperAdmins(): void
     {
         $this->command->info('👤 Creating Super Admin users...');
-        
+
         $superAdminRole = Role::where('slug', 'super-admin')->first();
-        
-        if (!$superAdminRole) {
+
+        if (! $superAdminRole) {
             $this->command->error('   ❌ Super Admin role not found!');
+
             return;
         }
-        
+
         $superAdmins = [
             [
                 'first_name' => 'Super',
@@ -183,27 +184,27 @@ class DatabaseSeeder extends Seeder
                 'is_active' => true,
             ],
         ];
-        
+
         foreach ($superAdmins as $adminData) {
             // Create or get existing user
             $user = User::firstOrCreate(
                 ['email' => $adminData['email']],
                 $adminData
             );
-            
+
             // Check if user already has the Super Admin role
             $hasRole = $user->roles()->where('roles.id', $superAdminRole->id)->exists();
-            
-            if (!$hasRole) {
+
+            if (! $hasRole) {
                 // Assign Super Admin role
                 $user->roles()->attach($superAdminRole->id, [
                     'is_primary' => true,
                     'branch_id' => null, // Super Admin has access to all branches
                     'created_at' => now(),
-                    'updated_at' => now()
+                    'updated_at' => now(),
                 ]);
             }
-            
+
             if ($user->wasRecentlyCreated) {
                 $this->command->info("   ✓ Created Super Admin: {$adminData['email']}");
             } else {
@@ -246,7 +247,7 @@ class DatabaseSeeder extends Seeder
     private function createModulesAndPermissions(): void
     {
         $this->command->info('📱 Creating modules and permissions...');
-        
+
         $modulesData = [
             [
                 'name' => 'Dashboard',
@@ -254,7 +255,7 @@ class DatabaseSeeder extends Seeder
                 'icon' => 'dashboard',
                 'route' => '/dashboard',
                 'order' => 1,
-                'permissions' => ['view']
+                'permissions' => ['view'],
             ],
             [
                 'name' => 'Students',
@@ -262,7 +263,7 @@ class DatabaseSeeder extends Seeder
                 'icon' => 'school',
                 'route' => '/students',
                 'order' => 2,
-                'permissions' => ['view', 'create', 'edit', 'delete', 'export', 'promote', 'transfer']
+                'permissions' => ['view', 'create', 'edit', 'delete', 'export', 'promote', 'transfer'],
             ],
             [
                 'name' => 'Teachers',
@@ -270,7 +271,7 @@ class DatabaseSeeder extends Seeder
                 'icon' => 'person',
                 'route' => '/teachers',
                 'order' => 3,
-                'permissions' => ['view', 'create', 'edit', 'delete', 'export']
+                'permissions' => ['view', 'create', 'edit', 'delete', 'export'],
             ],
             [
                 'name' => 'Student Attendance',
@@ -278,7 +279,7 @@ class DatabaseSeeder extends Seeder
                 'icon' => 'fact_check',
                 'route' => '/attendance/student',
                 'order' => 4,
-                'permissions' => ['view', 'create', 'mark', 'edit', 'delete', 'report', 'export']
+                'permissions' => ['view', 'create', 'mark', 'edit', 'delete', 'report', 'export'],
             ],
             [
                 'name' => 'Teacher Attendance',
@@ -286,7 +287,7 @@ class DatabaseSeeder extends Seeder
                 'icon' => 'assignment_turned_in',
                 'route' => '/attendance/teacher',
                 'order' => 5,
-                'permissions' => ['view', 'create', 'mark', 'edit', 'delete', 'report', 'export']
+                'permissions' => ['view', 'create', 'mark', 'edit', 'delete', 'report', 'export'],
             ],
             [
                 'name' => 'Branches',
@@ -294,7 +295,7 @@ class DatabaseSeeder extends Seeder
                 'icon' => 'business',
                 'route' => '/branches',
                 'order' => 6,
-                'permissions' => ['view', 'create', 'edit', 'delete', 'stats', 'export']
+                'permissions' => ['view', 'create', 'edit', 'delete', 'stats', 'export'],
             ],
             [
                 'name' => 'Accounts',
@@ -302,7 +303,7 @@ class DatabaseSeeder extends Seeder
                 'icon' => 'account_balance',
                 'route' => '/accounts',
                 'order' => 7,
-                'permissions' => ['view', 'create', 'edit', 'delete', 'approve', 'export']
+                'permissions' => ['view', 'create', 'edit', 'delete', 'approve', 'export'],
             ],
             [
                 'name' => 'Transactions',
@@ -310,7 +311,7 @@ class DatabaseSeeder extends Seeder
                 'icon' => 'receipt',
                 'route' => '/accounts/transactions',
                 'order' => 8,
-                'permissions' => ['view', 'create', 'edit', 'delete', 'approve', 'reject']
+                'permissions' => ['view', 'create', 'edit', 'delete', 'approve', 'reject'],
             ],
             [
                 'name' => 'Fees',
@@ -318,7 +319,7 @@ class DatabaseSeeder extends Seeder
                 'icon' => 'payment',
                 'route' => '/fees',
                 'order' => 9,
-                'permissions' => ['view', 'create', 'edit', 'delete', 'collect', 'report']
+                'permissions' => ['view', 'create', 'edit', 'delete', 'collect', 'report'],
             ],
             [
                 'name' => 'Exams',
@@ -326,7 +327,7 @@ class DatabaseSeeder extends Seeder
                 'icon' => 'assignment',
                 'route' => '/exams',
                 'order' => 10,
-                'permissions' => ['view', 'create', 'edit', 'delete', 'results']
+                'permissions' => ['view', 'create', 'edit', 'delete', 'results'],
             ],
             [
                 'name' => 'Assignments',
@@ -334,7 +335,7 @@ class DatabaseSeeder extends Seeder
                 'icon' => 'task',
                 'route' => '/assignments',
                 'order' => 10,
-                'permissions' => ['view', 'create', 'edit', 'delete']
+                'permissions' => ['view', 'create', 'edit', 'delete'],
             ],
             [
                 'name' => 'Grades',
@@ -342,7 +343,7 @@ class DatabaseSeeder extends Seeder
                 'icon' => 'grade',
                 'route' => '/grades',
                 'order' => 11,
-                'permissions' => ['view', 'create', 'edit', 'delete']
+                'permissions' => ['view', 'create', 'edit', 'delete'],
             ],
             [
                 'name' => 'Sections',
@@ -350,7 +351,7 @@ class DatabaseSeeder extends Seeder
                 'icon' => 'class',
                 'route' => '/sections',
                 'order' => 12,
-                'permissions' => ['view', 'create', 'edit', 'delete', 'export']
+                'permissions' => ['view', 'create', 'edit', 'delete', 'export'],
             ],
             [
                 'name' => 'Subjects',
@@ -358,7 +359,7 @@ class DatabaseSeeder extends Seeder
                 'icon' => 'book',
                 'route' => '/subjects',
                 'order' => 13,
-                'permissions' => ['view', 'create', 'edit', 'delete']
+                'permissions' => ['view', 'create', 'edit', 'delete'],
             ],
             [
                 'name' => 'Departments',
@@ -366,7 +367,7 @@ class DatabaseSeeder extends Seeder
                 'icon' => 'domain',
                 'route' => '/departments',
                 'order' => 14,
-                'permissions' => ['view', 'create', 'edit', 'delete']
+                'permissions' => ['view', 'create', 'edit', 'delete'],
             ],
             [
                 'name' => 'Holidays',
@@ -374,7 +375,7 @@ class DatabaseSeeder extends Seeder
                 'icon' => 'event',
                 'route' => '/holidays',
                 'order' => 15,
-                'permissions' => ['view', 'create', 'edit', 'delete']
+                'permissions' => ['view', 'create', 'edit', 'delete'],
             ],
             [
                 'name' => 'Leaves',
@@ -382,7 +383,7 @@ class DatabaseSeeder extends Seeder
                 'icon' => 'event_busy',
                 'route' => '/leaves',
                 'order' => 16,
-                'permissions' => ['view', 'create', 'edit', 'delete', 'approve', 'reject']
+                'permissions' => ['view', 'create', 'edit', 'delete', 'approve', 'reject'],
             ],
             [
                 'name' => 'Import',
@@ -390,7 +391,7 @@ class DatabaseSeeder extends Seeder
                 'icon' => 'upload_file',
                 'route' => '/imports',
                 'order' => 17,
-                'permissions' => ['view', 'upload', 'validate', 'commit', 'cancel', 'template']
+                'permissions' => ['view', 'upload', 'validate', 'commit', 'cancel', 'template'],
             ],
             [
                 'name' => 'Invoices',
@@ -398,7 +399,7 @@ class DatabaseSeeder extends Seeder
                 'icon' => 'description',
                 'route' => '/invoices',
                 'order' => 18,
-                'permissions' => ['view', 'create', 'edit', 'delete', 'send', 'payment']
+                'permissions' => ['view', 'create', 'edit', 'delete', 'send', 'payment'],
             ],
             [
                 'name' => 'Groups',
@@ -406,7 +407,7 @@ class DatabaseSeeder extends Seeder
                 'icon' => 'group',
                 'route' => '/groups',
                 'order' => 19,
-                'permissions' => ['view', 'create', 'edit', 'delete']
+                'permissions' => ['view', 'create', 'edit', 'delete'],
             ],
             [
                 'name' => 'Bulk Management',
@@ -414,7 +415,7 @@ class DatabaseSeeder extends Seeder
                 'icon' => 'hub',
                 'route' => '/bulk-management',
                 'order' => 20,
-                'permissions' => ['view', 'create', 'edit', 'delete']
+                'permissions' => ['view', 'create', 'edit', 'delete'],
             ],
             [
                 'name' => 'Notifications',
@@ -422,7 +423,7 @@ class DatabaseSeeder extends Seeder
                 'icon' => 'notifications_active',
                 'route' => '/notification-campaigns',
                 'order' => 21,
-                'permissions' => ['view', 'create', 'edit', 'delete']
+                'permissions' => ['view', 'create', 'edit', 'delete'],
             ],
             [
                 'name' => 'Reports',
@@ -430,7 +431,7 @@ class DatabaseSeeder extends Seeder
                 'icon' => 'assessment',
                 'route' => '/reports',
                 'order' => 22,
-                'permissions' => ['view', 'generate', 'export']
+                'permissions' => ['view', 'generate', 'export'],
             ],
             [
                 'name' => 'Roles',
@@ -438,7 +439,7 @@ class DatabaseSeeder extends Seeder
                 'icon' => 'admin_panel_settings',
                 'route' => '/settings/roles',
                 'order' => 23,
-                'permissions' => ['view', 'create', 'edit', 'delete', 'update']
+                'permissions' => ['view', 'create', 'edit', 'delete', 'update'],
             ],
             [
                 'name' => 'Permissions',
@@ -446,7 +447,7 @@ class DatabaseSeeder extends Seeder
                 'icon' => 'shield',
                 'route' => '/settings/permissions',
                 'order' => 25,
-                'permissions' => ['view', 'create', 'edit', 'delete', 'update']
+                'permissions' => ['view', 'create', 'edit', 'delete', 'update'],
             ],
             [
                 'name' => 'Users Management',
@@ -454,7 +455,7 @@ class DatabaseSeeder extends Seeder
                 'icon' => 'people',
                 'route' => '/settings/users',
                 'order' => 26,
-                'permissions' => ['view', 'create', 'edit', 'delete', 'update']
+                'permissions' => ['view', 'create', 'edit', 'delete', 'update'],
             ],
             [
                 'name' => 'Settings',
@@ -462,7 +463,7 @@ class DatabaseSeeder extends Seeder
                 'icon' => 'settings',
                 'route' => '/settings',
                 'order' => 27,
-                'permissions' => ['view', 'edit']
+                'permissions' => ['view', 'edit'],
             ],
             [
                 // Global people search (header search box). Not a sidebar item.
@@ -471,7 +472,7 @@ class DatabaseSeeder extends Seeder
                 'icon' => 'search',
                 'route' => '/search',
                 'order' => 28,
-                'permissions' => ['global']
+                'permissions' => ['global'],
             ],
             [
                 'name' => 'Library',
@@ -479,7 +480,7 @@ class DatabaseSeeder extends Seeder
                 'icon' => 'local_library',
                 'route' => '/library',
                 'order' => 29,
-                'permissions' => ['view', 'create', 'edit', 'delete', 'issue', 'return', 'export']
+                'permissions' => ['view', 'create', 'edit', 'delete', 'issue', 'return', 'export'],
             ],
             [
                 'name' => 'Transport',
@@ -487,8 +488,8 @@ class DatabaseSeeder extends Seeder
                 'icon' => 'directions_bus',
                 'route' => '/transport',
                 'order' => 30,
-                'permissions' => ['view', 'create', 'edit', 'delete', 'assign', 'export']
-            ]
+                'permissions' => ['view', 'create', 'edit', 'delete', 'assign', 'export'],
+            ],
         ];
 
         foreach ($modulesData as $moduleData) {
@@ -505,52 +506,52 @@ class DatabaseSeeder extends Seeder
                 $permission = Permission::firstOrCreate(
                     [
                         'module_id' => $module->id,
-                        'action' => $action
+                        'action' => $action,
                     ],
                     [
                         'module_id' => $module->id,
-                        'name' => ucfirst($action) . ' ' . $module->name,
-                        'slug' => $module->slug . '.' . $action,
+                        'name' => ucfirst($action).' '.$module->name,
+                        'slug' => $module->slug.'.'.$action,
                         'action' => $action,
-                        'is_system_permission' => true
+                        'is_system_permission' => true,
                     ]
                 );
                 if ($permission->wasRecentlyCreated) {
                     $createdCount++;
                 }
             }
-            
+
             if ($module->wasRecentlyCreated) {
-                $this->command->info("   ✓ Created module: {$module->name} with " . count($permissions) . " permissions");
+                $this->command->info("   ✓ Created module: {$module->name} with ".count($permissions).' permissions');
             } else {
                 $this->command->info("   ⊙ Module exists: {$module->name} (created {$createdCount} new permissions)");
             }
         }
     }
-    
+
     /**
      * Assign permissions to roles
      */
     private function assignRolePermissions(): void
     {
         $this->command->info('🔒 Assigning permissions to roles...');
-        
+
         // Super Admin - ALL permissions
         $superAdmin = Role::where('slug', 'super-admin')->first();
         $allPermissions = Permission::all()->pluck('id')->toArray();
         $superAdmin->permissions()->sync($allPermissions);
-        $this->command->info("   ✓ Super Admin: " . count($allPermissions) . " permissions");
+        $this->command->info('   ✓ Super Admin: '.count($allPermissions).' permissions');
 
         // Branch Admin - Comprehensive access (NO full financial modules)
         $branchAdmin = Role::where('slug', 'branch-admin')->first();
         $branchAdminPerms = Permission::whereIn('slug', [
             'dashboard.view',
-            'students.view', 'students.create', 'students.edit', 'students.delete', 
+            'students.view', 'students.create', 'students.edit', 'students.delete',
             'students.export', 'students.promote', 'students.transfer',
             'teachers.view', 'teachers.create', 'teachers.edit', 'teachers.delete', 'teachers.export',
-            'student_attendance.view', 'student_attendance.create', 'student_attendance.mark', 
+            'student_attendance.view', 'student_attendance.create', 'student_attendance.mark',
             'student_attendance.edit', 'student_attendance.delete', 'student_attendance.report', 'student_attendance.export',
-            'teacher_attendance.view', 'teacher_attendance.create', 'teacher_attendance.mark', 
+            'teacher_attendance.view', 'teacher_attendance.create', 'teacher_attendance.mark',
             'teacher_attendance.edit', 'teacher_attendance.delete', 'teacher_attendance.report', 'teacher_attendance.export',
             'branches.view', 'branches.create', 'branches.edit', 'branches.delete', 'branches.stats', 'branches.export',
             'fees.view', 'fees.collect', 'fees.report',
@@ -576,7 +577,7 @@ class DatabaseSeeder extends Seeder
             'transport.assign', 'transport.export',
         ])->pluck('id')->toArray();
         $branchAdmin->permissions()->sync($branchAdminPerms);
-        $this->command->info("   ✓ Branch Admin: " . count($branchAdminPerms) . " permissions");
+        $this->command->info('   ✓ Branch Admin: '.count($branchAdminPerms).' permissions');
 
         // Teacher - Academic access
         $teacher = Role::where('slug', 'teacher')->first();
@@ -601,7 +602,7 @@ class DatabaseSeeder extends Seeder
             'transport.view',
         ])->pluck('id')->toArray();
         $teacher->permissions()->sync($teacherPerms);
-        $this->command->info("   ✓ Teacher: " . count($teacherPerms) . " permissions");
+        $this->command->info('   ✓ Teacher: '.count($teacherPerms).' permissions');
 
         // Staff - Administrative access
         $staff = Role::where('slug', 'staff')->first();
@@ -623,7 +624,7 @@ class DatabaseSeeder extends Seeder
             'transport.view', 'transport.create', 'transport.edit', 'transport.assign', // Staff manage transport
         ])->pluck('id')->toArray();
         $staff->permissions()->sync($staffPerms);
-        $this->command->info("   ✓ Staff: " . count($staffPerms) . " permissions");
+        $this->command->info('   ✓ Staff: '.count($staffPerms).' permissions');
 
         // Accountant - Financial access
         $accountant = Role::where('slug', 'accountant')->first();
@@ -637,7 +638,7 @@ class DatabaseSeeder extends Seeder
             'reports.view', 'reports.generate', 'reports.export',
         ])->pluck('id')->toArray();
         $accountant->permissions()->sync($accountantPerms);
-        $this->command->info("   ✓ Accountant: " . count($accountantPerms) . " permissions");
+        $this->command->info('   ✓ Accountant: '.count($accountantPerms).' permissions');
 
         // Student - Limited access: dashboard, read-only holidays, and own profile (view + edit)
         $student = Role::where('slug', 'student')->first();
@@ -649,6 +650,6 @@ class DatabaseSeeder extends Seeder
             'notifications.view',
         ])->pluck('id')->toArray();
         $student->permissions()->sync($studentPerms);
-        $this->command->info("   ✓ Student: " . count($studentPerms) . " permissions");
+        $this->command->info('   ✓ Student: '.count($studentPerms).' permissions');
     }
 }

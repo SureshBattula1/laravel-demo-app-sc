@@ -9,10 +9,10 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('notification_campaigns', function (Blueprint $table) {
-            if (!Schema::hasColumn('notification_campaigns', 'expected_recipient_count')) {
+            if (! Schema::hasColumn('notification_campaigns', 'expected_recipient_count')) {
                 $table->unsignedInteger('expected_recipient_count')->default(0)->after('recipient_count');
             }
-            if (!Schema::hasColumn('notification_campaigns', 'materialize_target_index')) {
+            if (! Schema::hasColumn('notification_campaigns', 'materialize_target_index')) {
                 $table->unsignedSmallInteger('materialize_target_index')->default(0)->after('expected_recipient_count');
             }
         });

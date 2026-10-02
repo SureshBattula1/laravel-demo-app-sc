@@ -18,15 +18,15 @@ class NotificationCampaignEventDatePolicyTest extends TestCase
 {
     private function service(): NotificationCampaignService
     {
-        $registry = new NotificationCampaignModuleRegistry();
-        $registry->register(new AttendanceCampaignModule());
-        $registry->register(new ExamsCampaignModule());
-        $registry->register(new FeesCampaignModule());
-        $registry->register(new HolidaysCampaignModule());
-        $registry->register(new AssignmentsCampaignModule());
+        $registry = new NotificationCampaignModuleRegistry;
+        $registry->register(new AttendanceCampaignModule);
+        $registry->register(new ExamsCampaignModule);
+        $registry->register(new FeesCampaignModule);
+        $registry->register(new HolidaysCampaignModule);
+        $registry->register(new AssignmentsCampaignModule);
 
         return new NotificationCampaignService(
-            new SmsTemplateTagRenderer(),
+            new SmsTemplateTagRenderer,
             $this->createMock(InboxNotificationService::class),
             $registry,
         );

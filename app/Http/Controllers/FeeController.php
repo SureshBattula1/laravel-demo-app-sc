@@ -6,7 +6,6 @@ use App\Http\Traits\PaginatesAndSorts;
 use App\Models\FeePayment;
 use App\Models\FeeStructure;
 use App\Services\AcademicYearContext;
-use App\Services\FeeDuesService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -1614,3 +1613,5 @@ class FeeController extends Controller
                 });
             });
         });
+    }
+}

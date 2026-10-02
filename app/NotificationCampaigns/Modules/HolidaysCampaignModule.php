@@ -46,7 +46,7 @@ class HolidaysCampaignModule implements NotificationCampaignModule
 
     public function eligibleTargets(int $branchId, string $date): array
     {
-        if (!$this->holidayOnDate($branchId, $date)) {
+        if (! $this->holidayOnDate($branchId, $date)) {
             return [];
         }
 
@@ -55,7 +55,7 @@ class HolidaysCampaignModule implements NotificationCampaignModule
 
     public function classifyByUserId(int $branchId, string $date, Collection $students): array
     {
-        if (!$this->holidayOnDate($branchId, $date)) {
+        if (! $this->holidayOnDate($branchId, $date)) {
             return [];
         }
 

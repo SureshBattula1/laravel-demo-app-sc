@@ -36,11 +36,11 @@ class SendCampaignRecipientsChunkJob implements ShouldQueue
         NotificationCampaignDispatchService $dispatch,
     ): void {
         $campaign = NotificationCampaign::query()->find($this->campaignId);
-        if (!$campaign) {
+        if (! $campaign) {
             return;
         }
 
-        if (!in_array($campaign->status, ['queued', 'sending', 'pending', 'partial'], true)) {
+        if (! in_array($campaign->status, ['queued', 'sending', 'pending', 'partial'], true)) {
             if ($campaign->status === 'materializing') {
                 return;
             }

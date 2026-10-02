@@ -70,8 +70,8 @@ class AssignmentController extends Controller
             if ($request->filled('search')) {
                 $search = strip_tags($request->search);
                 $query->where(function ($q) use ($search) {
-                    $q->where('title', 'like', $search . '%')
-                        ->orWhere('description', 'like', $search . '%');
+                    $q->where('title', 'like', $search.'%')
+                        ->orWhere('description', 'like', $search.'%');
                 });
             }
 
@@ -117,7 +117,7 @@ class AssignmentController extends Controller
                 ->withCount(['recipients', 'submissions'])
                 ->findOrFail($id);
 
-            if (!$this->canViewAssignment($request, $assignment)) {
+            if (! $this->canViewAssignment($request, $assignment)) {
                 return response()->json(['success' => false, 'message' => 'Assignment not found'], 404);
             }
 
@@ -135,7 +135,7 @@ class AssignmentController extends Controller
     public function eligibleStudents(Request $request)
     {
         try {
-            if (!$this->canCreateAssignments($request->user())) {
+            if (! $this->canCreateAssignments($request->user())) {
                 return $this->forbiddenResponse('You cannot list assignment students');
             }
 
@@ -149,10 +149,10 @@ class AssignmentController extends Controller
             }
 
             $branchId = $this->resolveWritableBranchId($request, $request->branch_id);
-            if (!$branchId) {
+            if (! $branchId) {
                 return response()->json(['success' => false, 'message' => 'branch_id is required'], 422);
             }
-            if (!$this->canManageBranch($request, $branchId)) {
+            if (! $this->canManageBranch($request, $branchId)) {
                 return $this->forbiddenResponse();
             }
 
@@ -172,7 +172,7 @@ class AssignmentController extends Controller
     public function previewRecipients(Request $request)
     {
         try {
-            if (!$this->canCreateAssignments($request->user())) {
+            if (! $this->canCreateAssignments($request->user())) {
                 return $this->forbiddenResponse('You cannot preview assignment recipients');
             }
 
@@ -189,7 +189,7 @@ class AssignmentController extends Controller
             }
 
             $branchId = $this->resolveWritableBranchId($request, $request->branch_id);
-            if (!$branchId || !$this->canManageBranch($request, $branchId)) {
+            if (! $branchId || ! $this->canManageBranch($request, $branchId)) {
                 return $this->forbiddenResponse();
             }
 
@@ -222,7 +222,7 @@ class AssignmentController extends Controller
     public function store(Request $request)
     {
         try {
-            if (!$this->canCreateAssignments($request->user())) {
+            if (! $this->canCreateAssignments($request->user())) {
                 return $this->forbiddenResponse('You cannot create assignments');
             }
 
@@ -248,15 +248,15 @@ class AssignmentController extends Controller
             }
 
             $branchId = $this->resolveWritableBranchId($request, $request->branch_id);
-            if (!$branchId) {
+            if (! $branchId) {
                 return response()->json(['success' => false, 'message' => 'branch_id is required'], 422);
             }
-            if (!$this->canManageBranch($request, $branchId)) {
+            if (! $this->canManageBranch($request, $branchId)) {
                 return $this->forbiddenResponse();
             }
 
             $subject = Subject::find($request->subject_id);
-            if (!$subject || (int) $subject->branch_id !== (int) $branchId) {
+            if (! $subject || (int) $subject->branch_id !== (int) $branchId) {
                 return response()->json([
                     'success' => false,
                     'errors' => ['subject_id' => ['Subject does not belong to this branch.']],
@@ -338,6 +338,7 @@ class AssignmentController extends Controller
             return response()->json(['success' => false, 'errors' => $e->errors()], 422);
         } catch (\Throwable $e) {
             Log::error('Create assignment error', ['error' => $e->getMessage()]);
+
             return $this->serverErrorResponse('Failed to create assignment', $e);
         }
     }
@@ -346,7 +347,7 @@ class AssignmentController extends Controller
     {
         try {
             $assignment = Assignment::findOrFail($id);
-            if (!$this->canManageAssignment($request, $assignment)) {
+            if (! $this->canManageAssignment($request, $assignment)) {
                 return response()->json(['success' => false, 'message' => 'Assignment not found'], 404);
             }
 
@@ -369,7 +370,7 @@ class AssignmentController extends Controller
             $data = $request->only(['title', 'description', 'instructions', 'due_date', 'max_marks', 'assignment_type', 'attachments']);
             if ($request->has('is_published')) {
                 $data['is_published'] = $request->boolean('is_published');
-                if ($data['is_published'] && !$assignment->published_at) {
+                if ($data['is_published'] && ! $assignment->published_at) {
                     $data['published_at'] = now();
                 }
             }
@@ -392,7 +393,7 @@ class AssignmentController extends Controller
                 ->loadCount(['recipients', 'submissions']);
 
             $notifyRequested = $request->has('notify') ? $request->boolean('notify') : true;
-            $becamePublished = !$wasPublished && $assignment->is_published;
+            $becamePublished = ! $wasPublished && $assignment->is_published;
             $shouldNotify = ($notifyRequested || $becamePublished) && $assignment->is_published;
             if ($shouldNotify) {
                 DispatchAssignmentNotificationsJob::dispatchFor(
@@ -417,7 +418,7 @@ class AssignmentController extends Controller
     {
         try {
             $assignment = Assignment::findOrFail($id);
-            if (!$this->canManageAssignment($request, $assignment)) {
+            if (! $this->canManageAssignment($request, $assignment)) {
                 return response()->json(['success' => false, 'message' => 'Assignment not found'], 404);
             }
 
@@ -437,7 +438,7 @@ class AssignmentController extends Controller
     private function present(Assignment $assignment, bool $detailed = false, $viewerId = null): array
     {
         $due = $assignment->due_date;
-        $status = !$assignment->is_published
+        $status = ! $assignment->is_published
             ? 'Draft'
             : (($due && $due->isPast()) ? 'Due' : 'Published');
 
@@ -485,7 +486,7 @@ class AssignmentController extends Controller
         $keepPaths = [];
 
         foreach ($items as $item) {
-            if (!is_array($item) || empty($item['file_path'])) {
+            if (! is_array($item) || empty($item['file_path'])) {
                 continue;
             }
             $path = ltrim((string) $item['file_path'], '/');
@@ -555,7 +556,7 @@ class AssignmentController extends Controller
     private function canViewAssignment(Request $request, Assignment $assignment): bool
     {
         $user = $request->user();
-        if (!$user || !$this->canAccessBranch($request, (int) $assignment->branch_id)) {
+        if (! $user || ! $this->canAccessBranch($request, (int) $assignment->branch_id)) {
             return false;
         }
         if (in_array($user->role, ['SuperAdmin', 'BranchAdmin', 'Staff'], true)) {
@@ -567,10 +568,11 @@ class AssignmentController extends Controller
                 || $assignment->is_published;
         }
         if ($user->role === 'Student') {
-            if (!$assignment->is_published) {
+            if (! $assignment->is_published) {
                 return false;
             }
             $studentId = Student::where('user_id', $user->id)->value('id');
+
             return $studentId && $assignment->recipients()->where('student_id', $studentId)->exists();
         }
 
@@ -580,9 +582,10 @@ class AssignmentController extends Controller
     private function canManageAssignment(Request $request, Assignment $assignment): bool
     {
         $user = $request->user();
-        if (!$user || !$this->canManageBranch($request, (int) $assignment->branch_id)) {
+        if (! $user || ! $this->canManageBranch($request, (int) $assignment->branch_id)) {
             return false;
         }
+
         return (int) $assignment->created_by === (int) $user->id;
     }
 

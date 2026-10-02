@@ -15,7 +15,7 @@ class FeesCampaignModuleTest extends TestCase
 
     public function test_structure_classification_includes_enrolled_without_due_records(): void
     {
-        $module = new FeesCampaignModule();
+        $module = new FeesCampaignModule;
         $students = collect([
             (object) ['id' => 1, 'user_id' => 101],
             (object) ['id' => 2, 'user_id' => 102],
@@ -32,14 +32,14 @@ class FeesCampaignModuleTest extends TestCase
 
     public function test_section_fee_summaries_empty_without_due_date(): void
     {
-        $module = new FeesCampaignModule();
+        $module = new FeesCampaignModule;
         $this->assertSame([], $module->sectionFeeSummaries(1, null, null, null));
         $this->assertSame([], $module->sectionFeeSummaries(1, '', 'Tuition Fee', '2025-26'));
     }
 
     public function test_grade_keys_normalize_grade_prefix(): void
     {
-        $module = new FeesCampaignModule();
+        $module = new FeesCampaignModule;
         $normalize = (new \ReflectionMethod(FeesCampaignModule::class, 'normalizeGradeKey'))
             ->invoke($module, 'Grade 1');
         $this->assertSame('1', $normalize);
@@ -50,7 +50,7 @@ class FeesCampaignModuleTest extends TestCase
 
     public function test_order_due_dates_upcoming_first_then_past(): void
     {
-        $module = new FeesCampaignModule();
+        $module = new FeesCampaignModule;
         $today = now()->toDateString();
         $tomorrow = now()->addDay()->toDateString();
         $nextWeek = now()->addDays(7)->toDateString();

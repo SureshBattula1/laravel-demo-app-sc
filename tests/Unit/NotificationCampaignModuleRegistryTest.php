@@ -14,12 +14,12 @@ class NotificationCampaignModuleRegistryTest extends TestCase
 {
     private function fullRegistry(): NotificationCampaignModuleRegistry
     {
-        $registry = new NotificationCampaignModuleRegistry();
-        $registry->register(new AttendanceCampaignModule());
-        $registry->register(new ExamsCampaignModule());
-        $registry->register(new FeesCampaignModule());
-        $registry->register(new HolidaysCampaignModule());
-        $registry->register(new AssignmentsCampaignModule());
+        $registry = new NotificationCampaignModuleRegistry;
+        $registry->register(new AttendanceCampaignModule);
+        $registry->register(new ExamsCampaignModule);
+        $registry->register(new FeesCampaignModule);
+        $registry->register(new HolidaysCampaignModule);
+        $registry->register(new AssignmentsCampaignModule);
 
         return $registry;
     }
@@ -46,14 +46,14 @@ class NotificationCampaignModuleRegistryTest extends TestCase
 
     public function test_exams_module_requires_confirm_like_attendance(): void
     {
-        $module = new ExamsCampaignModule();
+        $module = new ExamsCampaignModule;
         $this->assertFalse($module->requiresEventDate());
         $this->assertTrue($module->confirmSelection());
     }
 
     public function test_fees_module_confirm_selection_and_status_keys(): void
     {
-        $module = new FeesCampaignModule();
+        $module = new FeesCampaignModule;
         $this->assertTrue($module->requiresEventDate());
         $this->assertTrue($module->confirmSelection());
         $keys = array_column($module->statuses(), 'key');

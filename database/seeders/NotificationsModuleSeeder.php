@@ -34,8 +34,8 @@ class NotificationsModuleSeeder extends Seeder
                     'action' => $action,
                 ],
                 [
-                    'name' => ucfirst($action) . ' Notifications',
-                    'slug' => 'notifications.' . $action,
+                    'name' => ucfirst($action).' Notifications',
+                    'slug' => 'notifications.'.$action,
                     'action' => $action,
                     'is_system_permission' => true,
                 ]
@@ -60,7 +60,7 @@ class NotificationsModuleSeeder extends Seeder
     private function grant(string $roleSlug, array $permissionIds): void
     {
         $role = Role::where('slug', $roleSlug)->first();
-        if (!$role || $permissionIds === []) {
+        if (! $role || $permissionIds === []) {
             return;
         }
         $role->permissions()->syncWithoutDetaching($permissionIds);

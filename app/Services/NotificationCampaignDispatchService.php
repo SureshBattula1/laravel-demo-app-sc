@@ -40,7 +40,7 @@ class NotificationCampaignDispatchService
     public function afterSendChunk(int $campaignId, int $sentDelta, int $failedDelta): void
     {
         $campaign = NotificationCampaign::query()->find($campaignId);
-        if (!$campaign) {
+        if (! $campaign) {
             return;
         }
 
@@ -48,7 +48,7 @@ class NotificationCampaignDispatchService
             ->whereIn('delivery_status', ['pending', 'processing'])
             ->exists();
 
-        if (!$pending) {
+        if (! $pending) {
             FinalizeCampaignRollupJob::dispatch($campaignId)
                 ->onQueue(config('notification_campaigns.queues.orchestrator'));
 
@@ -66,7 +66,7 @@ class NotificationCampaignDispatchService
     public function afterMaterializeChunk(int $campaignId): void
     {
         $campaign = NotificationCampaign::query()->find($campaignId);
-        if (!$campaign) {
+        if (! $campaign) {
             return;
         }
 

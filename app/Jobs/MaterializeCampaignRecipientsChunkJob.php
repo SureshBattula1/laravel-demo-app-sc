@@ -34,7 +34,7 @@ class MaterializeCampaignRecipientsChunkJob implements ShouldQueue
         NotificationCampaignDispatchService $dispatch,
     ): void {
         $campaign = NotificationCampaign::query()->find($this->campaignId);
-        if (!$campaign || $campaign->status !== 'materializing') {
+        if (! $campaign || $campaign->status !== 'materializing') {
             return;
         }
 

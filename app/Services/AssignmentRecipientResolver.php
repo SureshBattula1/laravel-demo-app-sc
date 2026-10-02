@@ -70,7 +70,7 @@ class AssignmentRecipientResolver
             return [
                 'id' => (int) $row->id,
                 'user_id' => $row->user_id !== null ? (int) $row->user_id : null,
-                'name' => trim(($row->first_name ?? '') . ' ' . ($row->last_name ?? '')),
+                'name' => trim(($row->first_name ?? '').' '.($row->last_name ?? '')),
                 'admission_number' => $row->admission_number,
             ];
         })->all();
@@ -167,12 +167,12 @@ class AssignmentRecipientResolver
             })
                 ->whereRaw('COALESCE(se.grade, students.grade) = ?', [$grade])
                 ->whereRaw('COALESCE(se.academic_year_id, students.academic_year_id) = ?', [$academicYearId]);
-            if (!$gradeWide) {
+            if (! $gradeWide) {
                 $query->whereRaw('COALESCE(se.section, students.section) = ?', [$section]);
             }
         } else {
             $query->where('students.grade', $grade);
-            if (!$gradeWide) {
+            if (! $gradeWide) {
                 $query->where('students.section', $section);
             }
             if ($academicYearId) {

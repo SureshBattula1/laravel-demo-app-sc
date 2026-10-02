@@ -15,12 +15,12 @@ class NotificationCampaignServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->singleton(NotificationCampaignModuleRegistry::class, function () {
-            $registry = new NotificationCampaignModuleRegistry();
-            $registry->register(new AttendanceCampaignModule());
-            $registry->register(new ExamsCampaignModule());
-            $registry->register(new FeesCampaignModule());
-            $registry->register(new HolidaysCampaignModule());
-            $registry->register(new AssignmentsCampaignModule());
+            $registry = new NotificationCampaignModuleRegistry;
+            $registry->register(new AttendanceCampaignModule);
+            $registry->register(new ExamsCampaignModule);
+            $registry->register(new FeesCampaignModule);
+            $registry->register(new HolidaysCampaignModule);
+            $registry->register(new AssignmentsCampaignModule);
 
             return $registry;
         });

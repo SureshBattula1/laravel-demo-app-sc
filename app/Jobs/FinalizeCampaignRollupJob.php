@@ -21,7 +21,7 @@ class FinalizeCampaignRollupJob implements ShouldQueue
     public function handle(NotificationCampaignService $campaigns): void
     {
         $campaign = NotificationCampaign::query()->find($this->campaignId);
-        if (!$campaign) {
+        if (! $campaign) {
             return;
         }
 

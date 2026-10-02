@@ -4,12 +4,10 @@ namespace App\Services;
 
 use App\Models\FeeDue;
 use App\Models\FeePayment;
-use App\Models\FeeStructure;
 use App\Models\Student;
-use App\Services\AuditService;
+use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Carbon\Carbon;
 
 class FeeDuesService
 {
@@ -19,11 +17,11 @@ class FeeDuesService
     public function getStudentDues($studentId, $filters = []): array
     {
         $student = Student::where('user_id', $studentId)->first();
-        
-        if (!$student) {
+
+        if (! $student) {
             return [
                 'dues' => [],
-                'summary' => []
+                'summary' => [],
             ];
         }
 
@@ -50,15 +48,15 @@ class FeeDuesService
 
         foreach ($dues as $due) {
             $feeType = $due->fee_type;
-            
-            if (!isset($duesByType[$feeType])) {
+
+            if (! isset($duesByType[$feeType])) {
                 $duesByType[$feeType] = [
                     'total_amount' => 0,
                     'paid_amount' => 0,
                     'balance_amount' => 0,
                     'count' => 0,
                     'overdue_count' => 0,
-                    'dues' => []
+                    'dues' => [],
                 ];
             }
 
@@ -66,7 +64,7 @@ class FeeDuesService
             $duesByType[$feeType]['paid_amount'] += $due->paid_amount;
             $duesByType[$feeType]['balance_amount'] += $due->balance_amount;
             $duesByType[$feeType]['count']++;
-            
+
             if ($due->status === 'Overdue' || ($due->overdue_days > 0)) {
                 $duesByType[$feeType]['overdue_count']++;
             }
@@ -82,8 +80,8 @@ class FeeDuesService
             'summary' => [
                 'total_dues' => $dues->count(),
                 'total_balance' => $totalBalance,
-                'fee_types_count' => count($duesByType)
-            ]
+                'fee_types_count' => count($duesByType),
+            ],
         ];
     }
 
@@ -93,21 +91,21 @@ class FeeDuesService
     public function updateDueStatus($dueId): void
     {
         $due = FeeDue::find($dueId);
-        
-        if (!$due) {
+
+        if (! $due) {
             return;
         }
 
         $originalStatus = $due->status;
         $newStatus = $this->calculateStatus($due);
-        
+
         if ($originalStatus !== $newStatus) {
             $due->update(['status' => $newStatus]);
-            
+
             Log::info('Due status updated', [
                 'due_id' => $dueId,
                 'old_status' => $originalStatus,
-                'new_status' => $newStatus
+                'new_status' => $newStatus,
             ]);
         }
     }
@@ -144,7 +142,7 @@ class FeeDuesService
             '0-30' => ['count' => 0, 'amount' => 0],
             '31-60' => ['count' => 0, 'amount' => 0],
             '61-90' => ['count' => 0, 'amount' => 0],
-            '90+' => ['count' => 0, 'amount' => 0]
+            '90+' => ['count' => 0, 'amount' => 0],
         ];
 
         foreach ($dues as $due) {
@@ -162,17 +160,17 @@ class FeeDuesService
     public function applyPaymentToDues($paymentId, $dueIds, $amounts): void
     {
         DB::beginTransaction();
-        
+
         try {
             $payment = FeePayment::find($paymentId);
-            
-            if (!$payment) {
+
+            if (! $payment) {
                 throw new \Exception('Payment not found');
             }
 
             $totalAllocated = 0;
 
-            $auditService = new AuditService();
+            $auditService = new AuditService;
             $student = Student::find($payment->student_id);
 
             foreach ($dueIds as $index => $dueId) {
@@ -186,7 +184,7 @@ class FeeDuesService
 
                     $due->update([
                         'paid_amount' => $newPaidAmount,
-                        'balance_amount' => $newBalanceAmount
+                        'balance_amount' => $newBalanceAmount,
                     ]);
 
                     $this->updateDueStatus($due->id);
@@ -204,8 +202,8 @@ class FeeDuesService
                                 'reason' => 'Payment applied to fee due',
                                 'metadata' => [
                                     'fee_type' => $due->fee_type,
-                                    'payment_method' => $payment->payment_method ?? null
-                                ]
+                                    'payment_method' => $payment->payment_method ?? null,
+                                ],
                             ]);
                         } catch (\Exception $e) {
                             Log::warning('Failed to log audit for payment', ['error' => $e->getMessage()]);
@@ -218,14 +216,14 @@ class FeeDuesService
 
             Log::info('Payment allocated to dues', [
                 'payment_id' => $paymentId,
-                'total_allocated' => $totalAllocated
+                'total_allocated' => $totalAllocated,
             ]);
 
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Error allocating payment to dues', [
                 'payment_id' => $paymentId,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ]);
             throw $e;
         }
@@ -240,7 +238,7 @@ class FeeDuesService
 
         // Apply filters
         if (isset($filters['branch_id'])) {
-            $query->whereHas('student', function($q) use ($filters) {
+            $query->whereHas('student', function ($q) use ($filters) {
                 $q->where('branch_id', $filters['branch_id']);
             });
         }
@@ -260,7 +258,7 @@ class FeeDuesService
             'overdue_fees' => $overdueFees,
             'aging_analysis' => $aging,
             'total_count' => $overdueFees->count(),
-            'total_amount' => $overdueFees->sum('balance_amount')
+            'total_amount' => $overdueFees->sum('balance_amount'),
         ];
     }
 
@@ -273,7 +271,7 @@ class FeeDuesService
 
         // Apply filters
         if (isset($filters['branch_id'])) {
-            $query->whereHas('student', function($q) use ($filters) {
+            $query->whereHas('student', function ($q) use ($filters) {
                 $q->where('branch_id', $filters['branch_id']);
             });
         }
@@ -298,11 +296,11 @@ class FeeDuesService
         $aging = $this->calculateAging($dues);
 
         // Group by fee_type
-        $byFeeType = $dues->groupBy('fee_type')->map(function($group) {
+        $byFeeType = $dues->groupBy('fee_type')->map(function ($group) {
             return [
                 'count' => $group->count(),
                 'total_balance' => $group->sum('balance_amount'),
-                'total_paid' => $group->sum('paid_amount')
+                'total_paid' => $group->sum('paid_amount'),
             ];
         });
 
@@ -311,11 +309,10 @@ class FeeDuesService
             'summary' => [
                 'total_count' => $dues->count(),
                 'total_balance' => $dues->sum('balance_amount'),
-                'total_paid' => $dues->sum('paid_amount')
+                'total_paid' => $dues->sum('paid_amount'),
             ],
             'aging_analysis' => $aging,
-            'by_fee_type' => $byFeeType
+            'by_fee_type' => $byFeeType,
         ];
     }
 }
-

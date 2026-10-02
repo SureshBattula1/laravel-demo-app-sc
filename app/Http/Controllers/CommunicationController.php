@@ -3,10 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Http\Traits\PaginatesAndSorts;
-use App\Models\Notification;
-use App\Models\NotificationCampaignRecipient;
 use App\Models\Announcement;
 use App\Models\Circular;
+use App\Models\Notification;
+use App\Models\NotificationCampaignRecipient;
 use App\Services\AcademicYearContext;
 use App\Services\AssignmentRecipientResolver;
 use App\Services\InboxNotificationService;
@@ -33,9 +33,9 @@ class CommunicationController extends Controller
             $query = Notification::query();
 
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
-            
+
             if ($accessibleBranchIds !== 'all') {
-                if (!empty($accessibleBranchIds)) {
+                if (! empty($accessibleBranchIds)) {
                     $query->whereIn('branch_id', $accessibleBranchIds);
                 } else {
                     $query->whereRaw('1 = 0');
@@ -99,16 +99,16 @@ class CommunicationController extends Controller
                     'total' => $notifications->total(),
                     'last_page' => $notifications->lastPage(),
                     'has_more_pages' => $notifications->hasMorePages(),
-                ]
+                ],
             ]);
 
         } catch (\Exception $e) {
             Log::error('Get notifications error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch notifications',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -119,7 +119,7 @@ class CommunicationController extends Controller
             $user = $request->user();
             $notification = Notification::query()->with(['branch', 'user', 'createdBy'])->findOrFail($id);
 
-            if (!$this->canAccessInboxNotification($request, $notification)) {
+            if (! $this->canAccessInboxNotification($request, $notification)) {
                 return response()->json(['success' => false, 'message' => 'Notification not found'], 404);
             }
 
@@ -177,25 +177,25 @@ class CommunicationController extends Controller
     {
         try {
             $user = $request->user();
-            if (!$user || !in_array($user->role, ['Teacher', 'BranchAdmin', 'SuperAdmin', 'Staff'], true)) {
+            if (! $user || ! in_array($user->role, ['Teacher', 'BranchAdmin', 'SuperAdmin', 'Staff'], true)) {
                 return response()->json(['success' => false, 'message' => 'Not allowed'], 403);
             }
 
             $groupKey = $request->get('group_key');
-            if (!$groupKey && $request->filled('assignment_id')) {
-                $groupKey = 'assignment:' . (int) $request->assignment_id;
+            if (! $groupKey && $request->filled('assignment_id')) {
+                $groupKey = 'assignment:'.(int) $request->assignment_id;
             }
-            if (!$groupKey) {
+            if (! $groupKey) {
                 return response()->json(['success' => false, 'message' => 'group_key is required'], 422);
             }
 
             $sample = Notification::query()
                 ->where('metadata->group_key', $groupKey)
                 ->first();
-            if (!$sample) {
+            if (! $sample) {
                 return response()->json(['success' => false, 'message' => 'No recipients found'], 404);
             }
-            if (!$this->canAccessBranch($request, (int) $sample->branch_id)) {
+            if (! $this->canAccessBranch($request, (int) $sample->branch_id)) {
                 return response()->json(['success' => false, 'message' => 'Not allowed'], 403);
             }
 
@@ -206,7 +206,7 @@ class CommunicationController extends Controller
                     $q->where('user_id', $user->id)->orWhere('created_by', $user->id);
                 })
                 ->exists();
-            if (!$isAdmin && !$involved) {
+            if (! $isAdmin && ! $involved) {
                 return response()->json(['success' => false, 'message' => 'Not allowed'], 403);
             }
 
@@ -215,6 +215,7 @@ class CommunicationController extends Controller
             return response()->json(['success' => true, 'data' => $data]);
         } catch (\Throwable $e) {
             Log::error('Notification receipts error', ['error' => $e->getMessage()]);
+
             return response()->json(['success' => false, 'message' => 'Failed to load views'], 500);
         }
     }
@@ -225,11 +226,11 @@ class CommunicationController extends Controller
         $meta = is_array($notification->metadata) ? $notification->metadata : [];
         $source = $meta['source'] ?? null;
         $groupKey = $meta['group_key'] ?? null;
-        if (!$groupKey && !empty($meta['assignment_id'])) {
-            $groupKey = 'assignment:' . $meta['assignment_id'];
+        if (! $groupKey && ! empty($meta['assignment_id'])) {
+            $groupKey = 'assignment:'.$meta['assignment_id'];
         }
-            $canViewReceipts = $user && in_array($user->role, ['Teacher', 'BranchAdmin', 'SuperAdmin', 'Staff'], true)
-            && in_array($source, ['assignment', 'attendance', 'custom', 'attendance_notify'], true);
+        $canViewReceipts = $user && in_array($user->role, ['Teacher', 'BranchAdmin', 'SuperAdmin', 'Staff'], true)
+        && in_array($source, ['assignment', 'attendance', 'custom', 'attendance_notify'], true);
 
         $details = app(InboxNotificationService::class)->detailsForMeta($meta);
         $row['is_read'] = $notification->read_at !== null;
@@ -263,7 +264,7 @@ class CommunicationController extends Controller
     private function canAccessInboxNotification(Request $request, Notification $notification): bool
     {
         $user = $request->user();
-        if (!$user) {
+        if (! $user) {
             return false;
         }
 
@@ -302,7 +303,7 @@ class CommunicationController extends Controller
     {
         try {
             $user = $request->user();
-            if (!$user || !in_array($user->role, ['Teacher', 'BranchAdmin', 'SuperAdmin', 'Staff'], true)) {
+            if (! $user || ! in_array($user->role, ['Teacher', 'BranchAdmin', 'SuperAdmin', 'Staff'], true)) {
                 return response()->json(['success' => false, 'message' => 'Not allowed'], 403);
             }
 
@@ -323,7 +324,7 @@ class CommunicationController extends Controller
             }
 
             $branchId = $this->resolveWritableBranchId($request, $request->branch_id);
-            if (!$branchId || !$this->canManageBranch($request, $branchId)) {
+            if (! $branchId || ! $this->canManageBranch($request, $branchId)) {
                 return response()->json(['success' => false, 'message' => 'Not allowed'], 403);
             }
 
@@ -350,7 +351,7 @@ class CommunicationController extends Controller
                 ], 422);
             }
 
-            $groupKey = 'custom:' . Str::uuid()->toString();
+            $groupKey = 'custom:'.Str::uuid()->toString();
             $sentAt = now();
             $metadata = [
                 'source' => 'custom',
@@ -408,6 +409,7 @@ class CommunicationController extends Controller
             return response()->json(['success' => false, 'errors' => $e->errors()], 422);
         } catch (\Throwable $e) {
             Log::error('Broadcast notification error', ['error' => $e->getMessage()]);
+
             return response()->json(['success' => false, 'message' => 'Failed to send notification'], 500);
         }
     }
@@ -416,7 +418,7 @@ class CommunicationController extends Controller
     {
         try {
             $user = $request->user();
-            if (!$user) {
+            if (! $user) {
                 return response()->json(['success' => false, 'message' => 'Not allowed'], 403);
             }
 
@@ -426,7 +428,7 @@ class CommunicationController extends Controller
 
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
             if ($accessibleBranchIds !== 'all') {
-                if (!empty($accessibleBranchIds)) {
+                if (! empty($accessibleBranchIds)) {
                     $query->whereIn('branch_id', $accessibleBranchIds);
                 } else {
                     $query->whereRaw('1 = 0');
@@ -469,6 +471,7 @@ class CommunicationController extends Controller
             return response()->json(['success' => true, 'data' => $campaigns]);
         } catch (\Throwable $e) {
             Log::error('Sent notifications error', ['error' => $e->getMessage()]);
+
             return response()->json(['success' => false, 'message' => 'Failed to load sent notifications'], 500);
         }
     }
@@ -494,12 +497,12 @@ class CommunicationController extends Controller
 
     private function audienceLabel($grade, $section): ?string
     {
-        if (!$grade && !$section) {
+        if (! $grade && ! $section) {
             return null;
         }
-        $label = $grade ? ('Grade ' . $grade) : 'Class';
+        $label = $grade ? ('Grade '.$grade) : 'Class';
         if ($section) {
-            $label .= ' - ' . $section;
+            $label .= ' - '.$section;
         }
 
         return $label;
@@ -531,13 +534,13 @@ class CommunicationController extends Controller
                 'type' => 'nullable|in:Info,Warning,Error,Success,Alert',
                 'priority' => 'nullable|in:Low,Medium,High,Urgent',
                 'user_id' => 'nullable|exists:users,id',
-                'branch_id' => 'nullable|exists:branches,id'
+                'branch_id' => 'nullable|exists:branches,id',
             ]);
 
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
@@ -551,22 +554,22 @@ class CommunicationController extends Controller
                 'status' => 'Pending',
                 'action_url' => $request->action_url,
                 'metadata' => $request->metadata ?? [],
-                'created_by' => $request->user()->id
+                'created_by' => $request->user()->id,
             ]);
 
             return response()->json([
                 'success' => true,
                 'message' => 'Notification created successfully',
-                'data' => $notification
+                'data' => $notification,
             ], 201);
 
         } catch (\Exception $e) {
             Log::error('Create notification error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create notification',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -584,16 +587,16 @@ class CommunicationController extends Controller
             $isStaff = in_array($user->role, ['SuperAdmin', 'BranchAdmin'], true)
                 && $this->canAccessBranch($request, (int) $notification->branch_id);
 
-            if (!$isOwner && !$isStaff) {
+            if (! $isOwner && ! $isStaff) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Notification not found'
+                    'message' => 'Notification not found',
                 ], 404);
             }
 
             $notification->update([
                 'read_at' => now(),
-                'status' => 'Read'
+                'status' => 'Read',
             ]);
 
             app(\App\Services\NotificationCampaignService::class)->markViewed((int) $notification->id);
@@ -601,21 +604,21 @@ class CommunicationController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Notification marked as read',
-                'data' => $notification->fresh()
+                'data' => $notification->fresh(),
             ]);
 
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Notification not found'
+                'message' => 'Notification not found',
             ], 404);
         } catch (\Exception $e) {
             Log::error('Mark notification as read error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to mark notification as read',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -674,9 +677,9 @@ class CommunicationController extends Controller
 
             // Branch filtering
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
-            
+
             if ($accessibleBranchIds !== 'all') {
-                if (!empty($accessibleBranchIds)) {
+                if (! empty($accessibleBranchIds)) {
                     $query->whereIn('branch_id', $accessibleBranchIds);
                 } else {
                     $query->whereRaw('1 = 0');
@@ -695,11 +698,11 @@ class CommunicationController extends Controller
             }
 
             // OPTIMIZED Search filter - prefix search for better index usage
-            if ($request->has('search') && !empty($request->search)) {
+            if ($request->has('search') && ! empty($request->search)) {
                 $search = strip_tags($request->search);
-                $query->where(function($q) use ($search) {
+                $query->where(function ($q) use ($search) {
                     $q->where('title', 'like', "{$search}%")
-                      ->orWhere('content', 'like', "{$search}%");
+                        ->orWhere('content', 'like', "{$search}%");
                 });
             }
 
@@ -718,17 +721,17 @@ class CommunicationController extends Controller
                     'current_page' => $announcements->currentPage(),
                     'per_page' => $announcements->perPage(),
                     'total' => $announcements->total(),
-                    'last_page' => $announcements->lastPage()
-                ]
+                    'last_page' => $announcements->lastPage(),
+                ],
             ]);
 
         } catch (\Exception $e) {
             Log::error('Get announcements error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch announcements',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -748,13 +751,13 @@ class CommunicationController extends Controller
                 'start_date' => 'required|date',
                 'end_date' => 'required|date|after:start_date',
                 'priority' => 'nullable|in:Low,Medium,High,Urgent',
-                'is_published' => 'nullable|boolean'
+                'is_published' => 'nullable|boolean',
             ]);
 
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
@@ -770,22 +773,22 @@ class CommunicationController extends Controller
                 'is_published' => $request->boolean('is_published', false),
                 'published_at' => $request->boolean('is_published') ? now() : null,
                 'attachments' => $request->attachments ?? [],
-                'created_by' => $request->user()->id
+                'created_by' => $request->user()->id,
             ]);
 
             return response()->json([
                 'success' => true,
                 'message' => 'Announcement created successfully',
-                'data' => $announcement
+                'data' => $announcement,
             ], 201);
 
         } catch (\Exception $e) {
             Log::error('Create announcement error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create announcement',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -800,13 +803,13 @@ class CommunicationController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data' => $announcement
+                'data' => $announcement,
             ]);
 
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Announcement not found'
+                'message' => 'Announcement not found',
             ], 404);
         }
     }
@@ -823,41 +826,41 @@ class CommunicationController extends Controller
                 'title' => 'sometimes|required|string|max:255',
                 'content' => 'sometimes|required|string',
                 'start_date' => 'sometimes|date',
-                'end_date' => 'sometimes|date|after:start_date'
+                'end_date' => 'sometimes|date|after:start_date',
             ]);
 
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
             $announcement->update(array_merge(
                 $request->only([
                     'title', 'content', 'type', 'target_audience',
-                    'start_date', 'end_date', 'priority', 'attachments'
+                    'start_date', 'end_date', 'priority', 'attachments',
                 ]),
                 [
                     'is_published' => $request->boolean('is_published', $announcement->is_published),
-                    'published_at' => $request->boolean('is_published') && !$announcement->is_published ? now() : $announcement->published_at,
-                    'updated_by' => $request->user()->id
+                    'published_at' => $request->boolean('is_published') && ! $announcement->is_published ? now() : $announcement->published_at,
+                    'updated_by' => $request->user()->id,
                 ]
             ));
 
             return response()->json([
                 'success' => true,
                 'message' => 'Announcement updated successfully',
-                'data' => $announcement->fresh()
+                'data' => $announcement->fresh(),
             ]);
 
         } catch (\Exception $e) {
             Log::error('Update announcement error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update announcement',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -873,16 +876,16 @@ class CommunicationController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Announcement deleted successfully'
+                'message' => 'Announcement deleted successfully',
             ]);
 
         } catch (\Exception $e) {
             Log::error('Delete announcement error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to delete announcement',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -899,9 +902,9 @@ class CommunicationController extends Controller
 
             // Branch filtering
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
-            
+
             if ($accessibleBranchIds !== 'all') {
-                if (!empty($accessibleBranchIds)) {
+                if (! empty($accessibleBranchIds)) {
                     $query->whereIn('branch_id', $accessibleBranchIds);
                 } else {
                     $query->whereRaw('1 = 0');
@@ -920,12 +923,12 @@ class CommunicationController extends Controller
             }
 
             // OPTIMIZED Search filter - prefix search for better index usage
-            if ($request->has('search') && !empty($request->search)) {
+            if ($request->has('search') && ! empty($request->search)) {
                 $search = strip_tags($request->search);
-                $query->where(function($q) use ($search) {
+                $query->where(function ($q) use ($search) {
                     $q->where('title', 'like', "{$search}%")
-                      ->orWhere('content', 'like', "{$search}%")
-                      ->orWhere('circular_number', 'like', "{$search}%");
+                        ->orWhere('content', 'like', "{$search}%")
+                        ->orWhere('circular_number', 'like', "{$search}%");
                 });
             }
 
@@ -944,17 +947,17 @@ class CommunicationController extends Controller
                     'current_page' => $circulars->currentPage(),
                     'per_page' => $circulars->perPage(),
                     'total' => $circulars->total(),
-                    'last_page' => $circulars->lastPage()
-                ]
+                    'last_page' => $circulars->lastPage(),
+                ],
             ]);
 
         } catch (\Exception $e) {
             Log::error('Get circulars error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch circulars',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -975,13 +978,13 @@ class CommunicationController extends Controller
                 'effective_date' => 'required|date',
                 'expiry_date' => 'required|date|after:effective_date',
                 'priority' => 'nullable|in:Low,Medium,High,Urgent',
-                'requires_acknowledgment' => 'nullable|boolean'
+                'requires_acknowledgment' => 'nullable|boolean',
             ]);
 
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
@@ -991,9 +994,9 @@ class CommunicationController extends Controller
             $lastCircular = Circular::whereYear('issue_date', $year)
                 ->orderBy('id', 'desc')
                 ->first();
-            
-            $sequence = $lastCircular ? (int)substr($lastCircular->circular_number, -4) + 1 : 1;
-            $circularNumber = ($branch ? $branch->code . '/' : '') . 'CIR/' . $year . '/' . str_pad($sequence, 4, '0', STR_PAD_LEFT);
+
+            $sequence = $lastCircular ? (int) substr($lastCircular->circular_number, -4) + 1 : 1;
+            $circularNumber = ($branch ? $branch->code.'/' : '').'CIR/'.$year.'/'.str_pad($sequence, 4, '0', STR_PAD_LEFT);
 
             $circular = Circular::create([
                 'branch_id' => $request->branch_id,
@@ -1010,22 +1013,22 @@ class CommunicationController extends Controller
                 'is_published' => $request->boolean('is_published', false),
                 'published_at' => $request->boolean('is_published') ? now() : null,
                 'attachments' => $request->attachments ?? [],
-                'created_by' => $request->user()->id
+                'created_by' => $request->user()->id,
             ]);
 
             return response()->json([
                 'success' => true,
                 'message' => 'Circular created successfully',
-                'data' => $circular
+                'data' => $circular,
             ], 201);
 
         } catch (\Exception $e) {
             Log::error('Create circular error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create circular',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -1040,13 +1043,13 @@ class CommunicationController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data' => $circular
+                'data' => $circular,
             ]);
 
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Circular not found'
+                'message' => 'Circular not found',
             ], 404);
         }
     }
@@ -1063,13 +1066,13 @@ class CommunicationController extends Controller
                 'title' => 'sometimes|required|string|max:255',
                 'content' => 'sometimes|required|string',
                 'effective_date' => 'sometimes|date',
-                'expiry_date' => 'sometimes|date|after:effective_date'
+                'expiry_date' => 'sometimes|date|after:effective_date',
             ]);
 
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
@@ -1077,28 +1080,28 @@ class CommunicationController extends Controller
                 $request->only([
                     'title', 'content', 'type', 'target_audience',
                     'issue_date', 'effective_date', 'expiry_date', 'priority',
-                    'requires_acknowledgment', 'attachments'
+                    'requires_acknowledgment', 'attachments',
                 ]),
                 [
                     'is_published' => $request->boolean('is_published', $circular->is_published),
-                    'published_at' => $request->boolean('is_published') && !$circular->is_published ? now() : $circular->published_at,
-                    'updated_by' => $request->user()->id
+                    'published_at' => $request->boolean('is_published') && ! $circular->is_published ? now() : $circular->published_at,
+                    'updated_by' => $request->user()->id,
                 ]
             ));
 
             return response()->json([
                 'success' => true,
                 'message' => 'Circular updated successfully',
-                'data' => $circular->fresh()
+                'data' => $circular->fresh(),
             ]);
 
         } catch (\Exception $e) {
             Log::error('Update circular error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update circular',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -1114,16 +1117,16 @@ class CommunicationController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Circular deleted successfully'
+                'message' => 'Circular deleted successfully',
             ]);
 
         } catch (\Exception $e) {
             Log::error('Delete circular error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to delete circular',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -1140,30 +1143,29 @@ class CommunicationController extends Controller
             DB::table('circular_acknowledgments')->updateOrInsert(
                 [
                     'circular_id' => $circular->id,
-                    'user_id' => $user->id
+                    'user_id' => $user->id,
                 ],
                 [
                     'acknowledged_at' => now(),
                     'remarks' => $request->remarks,
                     'created_at' => now(),
-                    'updated_at' => now()
+                    'updated_at' => now(),
                 ]
             );
 
             return response()->json([
                 'success' => true,
-                'message' => 'Circular acknowledged successfully'
+                'message' => 'Circular acknowledged successfully',
             ]);
 
         } catch (\Exception $e) {
             Log::error('Acknowledge circular error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to acknowledge circular',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
 }
-

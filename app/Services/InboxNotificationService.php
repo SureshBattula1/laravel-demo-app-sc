@@ -180,6 +180,7 @@ class InboxNotificationService
                 $meta['date'] ?? null,
                 $meta['status'] ?? null,
             ]);
+
             return [
                 'description' => $bits === [] ? null : implode(' · ', $bits),
                 'optional_description' => null,
@@ -208,7 +209,7 @@ class InboxNotificationService
         }
 
         $campaignId = isset($meta['campaign_id']) ? (int) $meta['campaign_id'] : 0;
-        if ($campaignId <= 0 && !empty($meta['group_key']) && str_starts_with((string) $meta['group_key'], 'custom:')) {
+        if ($campaignId <= 0 && ! empty($meta['group_key']) && str_starts_with((string) $meta['group_key'], 'custom:')) {
             $campaignId = (int) Notification::withoutTenantScope()
                 ->where('metadata->group_key', $meta['group_key'])
                 ->min('id');
@@ -226,7 +227,7 @@ class InboxNotificationService
     public function syncNotificationAttachments(int $moduleId, array $items): void
     {
         foreach ($items as $item) {
-            if (!is_array($item) || empty($item['file_path'])) {
+            if (! is_array($item) || empty($item['file_path'])) {
                 continue;
             }
             $path = ltrim((string) $item['file_path'], '/');
@@ -305,7 +306,7 @@ class InboxNotificationService
             $viewers[] = [
                 'user_id' => $row->user_id,
                 'name' => $user
-                    ? trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? ''))
+                    ? trim(($user->first_name ?? '').' '.($user->last_name ?? ''))
                     : 'Member',
                 'role' => $user?->role,
                 'audience' => $meta['audience'] ?? null,

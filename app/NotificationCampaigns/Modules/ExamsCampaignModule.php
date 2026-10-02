@@ -165,6 +165,7 @@ class ExamsCampaignModule implements NotificationCampaignModule
                 foreach ($this->sectionKeysForGrade($branchId, $grade, $map) as $key) {
                     $scheduleIdsBySectionKey[$key][$scheduleId] = $scheduleId;
                 }
+
                 continue;
             }
 
@@ -362,6 +363,7 @@ class ExamsCampaignModule implements NotificationCampaignModule
                 if (($summary['marks_count'] ?? 0) > 0) {
                     $keys[] = $key;
                 }
+
                 continue;
             }
             if (($summary['schedule_count'] ?? 0) > 0) {

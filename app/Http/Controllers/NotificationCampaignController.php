@@ -2,10 +2,10 @@
 
 namespace App\Http\Controllers;
 
-use App\Services\NotificationCampaignDispatchService;
 use App\Models\NotificationCampaign;
 use App\Models\NotificationCampaignRecipient;
 use App\Models\SmsTemplate;
+use App\Services\NotificationCampaignDispatchService;
 use App\Services\NotificationCampaignService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -30,7 +30,7 @@ class NotificationCampaignController extends Controller
     public function eligibleTargets(Request $request)
     {
         $module = (string) $request->query('module', 'attendance');
-        if (!isset($this->campaigns->modules()[$module])) {
+        if (! isset($this->campaigns->modules()[$module])) {
             return response()->json(['success' => false, 'message' => 'Unknown module'], 422);
         }
 
@@ -160,7 +160,7 @@ class NotificationCampaignController extends Controller
     public function index(Request $request)
     {
         $module = (string) $request->query('module', 'attendance');
-        if (!isset($this->campaigns->modules()[$module])) {
+        if (! isset($this->campaigns->modules()[$module])) {
             return response()->json(['success' => false, 'message' => 'Unknown module'], 422);
         }
 
@@ -193,7 +193,7 @@ class NotificationCampaignController extends Controller
                 if ($statusFilter === 'pending') {
                     $targetPending = in_array($target->status, ['pending', 'sending'], true);
                     $campaignActive = in_array($campaign->status, ['materializing', 'queued', 'sending', 'pending'], true);
-                    if (!$targetPending && !$campaignActive) {
+                    if (! $targetPending && ! $campaignActive) {
                         continue;
                     }
                 }
@@ -229,7 +229,7 @@ class NotificationCampaignController extends Controller
                         (string) $target->section,
                         (string) $row['status'],
                     ]));
-                    if (!str_contains($haystack, $search)) {
+                    if (! str_contains($haystack, $search)) {
                         continue;
                     }
                 }
@@ -257,7 +257,7 @@ class NotificationCampaignController extends Controller
     public function show(Request $request, int $id)
     {
         $campaign = NotificationCampaign::with(['branch:id,name', 'targets'])->findOrFail($id);
-        if (!$this->canAccessBranch($request, (int) $campaign->branch_id)) {
+        if (! $this->canAccessBranch($request, (int) $campaign->branch_id)) {
             return response()->json(['success' => false, 'message' => 'Not found'], 404);
         }
 
@@ -299,7 +299,7 @@ class NotificationCampaignController extends Controller
     public function progress(Request $request, int $id)
     {
         $campaign = NotificationCampaign::query()->findOrFail($id);
-        if (!$this->canAccessBranch($request, (int) $campaign->branch_id)) {
+        if (! $this->canAccessBranch($request, (int) $campaign->branch_id)) {
             return response()->json(['success' => false, 'message' => 'Not found'], 404);
         }
 
@@ -312,7 +312,7 @@ class NotificationCampaignController extends Controller
     public function recipients(Request $request, int $id)
     {
         $campaign = NotificationCampaign::query()->findOrFail($id);
-        if (!$this->canAccessBranch($request, (int) $campaign->branch_id)) {
+        if (! $this->canAccessBranch($request, (int) $campaign->branch_id)) {
             return response()->json(['success' => false, 'message' => 'Not found'], 404);
         }
 
@@ -360,7 +360,7 @@ class NotificationCampaignController extends Controller
     public function retryFailed(Request $request, int $id)
     {
         $campaign = NotificationCampaign::query()->findOrFail($id);
-        if (!$this->canAccessBranch($request, (int) $campaign->branch_id)) {
+        if (! $this->canAccessBranch($request, (int) $campaign->branch_id)) {
             return response()->json(['success' => false, 'message' => 'Not found'], 404);
         }
 
@@ -405,7 +405,7 @@ class NotificationCampaignController extends Controller
     public function templates(Request $request)
     {
         $branchId = (int) $request->query('branch_id');
-        if ($branchId <= 0 || !$this->canAccessBranch($request, $branchId)) {
+        if ($branchId <= 0 || ! $this->canAccessBranch($request, $branchId)) {
             return response()->json(['success' => false, 'message' => 'Branch is required'], 422);
         }
 
@@ -422,10 +422,10 @@ class NotificationCampaignController extends Controller
     {
         $branchId = (int) $request->query('branch_id');
         $date = (string) $request->query('date', '');
-        if ($branchId <= 0 || !$this->canAccessBranch($request, $branchId)) {
+        if ($branchId <= 0 || ! $this->canAccessBranch($request, $branchId)) {
             return response()->json(['success' => false, 'message' => 'Branch is required'], 422);
         }
-        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+        if (! preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
             return response()->json(['success' => false, 'message' => 'Date is required'], 422);
         }
 
@@ -514,7 +514,7 @@ class NotificationCampaignController extends Controller
             ->where('user_id', $user->id)
             ->first();
 
-        if (!$recipient) {
+        if (! $recipient) {
             return response()->json(['success' => false, 'message' => 'Notification not found'], 404);
         }
 
@@ -530,7 +530,7 @@ class NotificationCampaignController extends Controller
     {
         $modules = implode(',', array_keys($this->campaigns->modules()));
         $validator = Validator::make($request->all(), [
-            'module' => 'required|in:' . $modules,
+            'module' => 'required|in:'.$modules,
             'branch_id' => 'required|integer|exists:branches,id',
             'event_date' => 'nullable|date',
             'targets' => 'required|array|min:1',
@@ -552,7 +552,7 @@ class NotificationCampaignController extends Controller
         $allowed = $this->campaigns->statusKeys($request->module);
         $map = [];
         foreach ($request->template_map as $key => $templateId) {
-            if (!in_array($key, $allowed, true) || !$templateId) {
+            if (! in_array($key, $allowed, true) || ! $templateId) {
                 continue;
             }
             $map[$key] = (int) $templateId;
@@ -569,7 +569,7 @@ class NotificationCampaignController extends Controller
             ->map(fn ($id) => (int) $id)
             ->all();
         foreach ($map as $templateId) {
-            if (!in_array($templateId, $validIds, true)) {
+            if (! in_array($templateId, $validIds, true)) {
                 return response()->json(['success' => false, 'message' => 'Template does not belong to this branch'], 422);
             }
         }

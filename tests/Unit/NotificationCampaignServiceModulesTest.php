@@ -17,15 +17,15 @@ class NotificationCampaignServiceModulesTest extends TestCase
 {
     public function test_modules_meta_is_present_for_each_module(): void
     {
-        $registry = new NotificationCampaignModuleRegistry();
-        $registry->register(new AttendanceCampaignModule());
-        $registry->register(new ExamsCampaignModule());
-        $registry->register(new FeesCampaignModule());
-        $registry->register(new HolidaysCampaignModule());
-        $registry->register(new AssignmentsCampaignModule());
+        $registry = new NotificationCampaignModuleRegistry;
+        $registry->register(new AttendanceCampaignModule);
+        $registry->register(new ExamsCampaignModule);
+        $registry->register(new FeesCampaignModule);
+        $registry->register(new HolidaysCampaignModule);
+        $registry->register(new AssignmentsCampaignModule);
 
         $inbox = $this->createMock(InboxNotificationService::class);
-        $service = new NotificationCampaignService(new SmsTemplateTagRenderer(), $inbox, $registry);
+        $service = new NotificationCampaignService(new SmsTemplateTagRenderer, $inbox, $registry);
 
         $modules = $service->modules();
         $meta = $service->modulesMeta();

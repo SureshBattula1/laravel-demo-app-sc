@@ -21,7 +21,7 @@ class StartNotificationCampaignJob implements ShouldQueue
     public function handle(NotificationCampaignDispatchService $dispatch): void
     {
         $campaign = NotificationCampaign::query()->find($this->campaignId);
-        if (!$campaign) {
+        if (! $campaign) {
             return;
         }
 
