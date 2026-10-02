@@ -56,6 +56,9 @@ jobs:
             php artisan config:cache
             php artisan route:cache
             php artisan view:cache
+
+            # Restart queue worker to load updated application code
+            php artisan queue:restart
             
             # Reload PHP-FPM to clear OPcache
             sudo systemctl reload php8.5-fpm
