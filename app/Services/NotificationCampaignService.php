@@ -345,13 +345,32 @@ class NotificationCampaignService
 
     public function attendanceSummaryBySection(string $module, int $branchId, string $date): array
     {
-        if ($module !== 'attendance') {
+        if ($module === 'attendance') {
+            $plugin = $this->registry->get('attendance');
+            if ($plugin instanceof \App\NotificationCampaigns\Modules\AttendanceCampaignModule) {
+                return $plugin->sectionAttendanceSummaries($branchId, $date);
+            }
+
             return [];
         }
 
-        $plugin = $this->registry->get('attendance');
-        if ($plugin instanceof \App\NotificationCampaigns\Modules\AttendanceCampaignModule) {
-            return $plugin->sectionAttendanceSummaries($branchId, $date);
+        if ($module === 'teacher_attendance') {
+            $plugin = $this->registry->get('teacher_attendance');
+            if ($plugin instanceof \App\NotificationCampaigns\Modules\TeacherAttendanceCampaignModule) {
+                $summaries = $plugin->departmentAttendanceSummaries($branchId, $date);
+                $out = [];
+                foreach ($summaries as $deptKey => $row) {
+                    $out[$deptKey.'|'.\App\NotificationCampaigns\Modules\TeacherAttendanceCampaignModule::SECTION_KEY] = [
+                        'enrolled_count' => $row['enrolled_count'],
+                        'marked_count' => $row['marked_count'],
+                        'present' => $row['present'],
+                        'absent' => $row['absent'],
+                        'leave' => $row['leave'],
+                    ];
+                }
+
+                return $out;
+            }
         }
 
         return [];
@@ -662,33 +681,24 @@ class NotificationCampaignService
         ?string $feeNotifyMode = null,
         ?string $feeStructureId = null,
     ): array {
-        $query = DB::table('notification_campaign_targets as t')
+        $map = [];
+
+        $targetQuery = DB::table('notification_campaign_targets as t')
             ->join('notification_campaigns as c', 'c.id', '=', 't.campaign_id')
             ->where('c.module', $module)
             ->where('c.branch_id', $branchId)
-            ->orderByDesc('c.id');
+            ->orderByDesc('c.id')
+            ->orderByDesc('t.id');
+        $this->applyDeliveryScopeToCampaignQuery(
+            $targetQuery,
+            $date,
+            $examId,
+            $feeType,
+            $feeNotifyMode,
+            $feeStructureId,
+        );
 
-        if ($date !== null && $date !== '') {
-            $query->whereDate('c.event_date', $date);
-        }
-
-        if ($examId !== null) {
-            $query->where('c.exam_id', $examId);
-        }
-
-        if ($feeType !== null && $feeType !== '') {
-            $query->where('c.fee_type', $feeType);
-        }
-
-        if ($feeNotifyMode !== null && $feeNotifyMode !== '') {
-            $query->where('c.fee_notify_mode', $feeNotifyMode);
-        }
-
-        if ($feeStructureId !== null && $feeStructureId !== '') {
-            $query->where('c.fee_structure_id', $feeStructureId);
-        }
-
-        $rows = $query->get([
+        $rows = $targetQuery->get([
             't.grade',
             't.section',
             't.status as target_status',
@@ -698,7 +708,6 @@ class NotificationCampaignService
             'c.template_map',
         ]);
 
-        $map = [];
         foreach ($rows as $row) {
             if ($notifyMode !== null && $notifyMode !== '') {
                 $templateMap = json_decode((string) ($row->template_map ?? ''), true);
@@ -719,11 +728,7 @@ class NotificationCampaignService
                 }
             }
 
-            $key = $this->sectionMapKey((string) $row->grade, (string) $row->section);
-            if (isset($map[$key])) {
-                continue;
-            }
-            $map[$key] = [
+            $entry = [
                 'notification_status' => $this->resolveSectionNotificationStatus(
                     (string) $row->target_status,
                     (string) $row->campaign_status,
@@ -731,6 +736,74 @@ class NotificationCampaignService
                 'campaign_id' => (int) $row->campaign_id,
                 'sent_count' => (int) $row->sent_count,
             ];
+            $this->putSectionDeliveryEntry($map, (string) $row->grade, (string) $row->section, $entry);
+        }
+
+        $recipientQuery = DB::table('notification_campaign_recipients as r')
+            ->join('notification_campaigns as c', 'c.id', '=', 'r.campaign_id')
+            ->where('c.module', $module)
+            ->where('c.branch_id', $branchId)
+            ->whereNotNull('r.grade')
+            ->where('r.grade', '!=', '')
+            ->whereNotNull('r.section')
+            ->where('r.section', '!=', '')
+            ->orderByDesc('r.id');
+        $this->applyDeliveryScopeToCampaignQuery(
+            $recipientQuery,
+            $date,
+            $examId,
+            $feeType,
+            $feeNotifyMode,
+            $feeStructureId,
+            'c',
+        );
+
+        $recipientRows = $recipientQuery->get([
+            'r.grade',
+            'r.section',
+            'r.delivery_status',
+            'c.id as campaign_id',
+            'c.status as campaign_status',
+            'c.template_map',
+        ]);
+
+        foreach ($recipientRows as $row) {
+            $grade = trim((string) ($row->grade ?? ''));
+            $section = trim((string) ($row->section ?? ''));
+            if ($grade === '' || $section === '' || strcasecmp($grade, 'Staff') === 0) {
+                continue;
+            }
+            if ($notifyMode !== null && $notifyMode !== '') {
+                $templateMap = json_decode((string) ($row->template_map ?? ''), true);
+                if (! is_array($templateMap) || empty($templateMap[$notifyMode])) {
+                    continue;
+                }
+            }
+            if ($module === 'fees' && $feeNotifyMode !== null && $feeNotifyMode !== '') {
+                $templateMap = json_decode((string) ($row->template_map ?? ''), true);
+                if (! is_array($templateMap)) {
+                    continue;
+                }
+                if ($feeNotifyMode === 'structure' && empty($templateMap['structure'])) {
+                    continue;
+                }
+                if ($feeNotifyMode === 'due' && empty($templateMap['due']) && empty($templateMap['overdue'])) {
+                    continue;
+                }
+            }
+
+            $status = $this->resolveSectionNotificationStatus(
+                (string) $row->delivery_status,
+                (string) $row->campaign_status,
+            );
+            if (! $this->notificationStatusBlocksResend($status)) {
+                continue;
+            }
+            $this->putSectionDeliveryEntry($map, (string) $row->grade, (string) $row->section, [
+                'notification_status' => $status,
+                'campaign_id' => (int) $row->campaign_id,
+                'sent_count' => 0,
+            ]);
         }
 
         return $map;
@@ -816,8 +889,8 @@ class NotificationCampaignService
         );
 
         return array_map(function (array $row) use ($delivery) {
-            $key = $this->sectionMapKey($row['grade'], $row['section']);
-            $info = $delivery[$key] ?? ['notification_status' => 'not_sent'];
+            $info = $this->resolveDeliveryForSection($delivery, $row['grade'], $row['section'])
+                ?? ['notification_status' => 'not_sent'];
 
             return array_merge($row, [
                 'notification_status' => $info['notification_status'],
@@ -847,6 +920,9 @@ class NotificationCampaignService
         if ($targetStatus === 'sending') {
             return 'sending';
         }
+        if ($targetStatus === 'pending' && in_array($campaignStatus, ['sent', 'partial', 'sending'], true)) {
+            return $campaignStatus;
+        }
 
         return 'not_sent';
     }
@@ -867,10 +943,22 @@ class NotificationCampaignService
         ?string $academicYear = null,
         ?string $feeNotifyMode = null,
         ?string $feeStructureId = null,
+        ?array $teacherUserIds = null,
     ): array {
         $plugin = $this->registry->get($module);
         if (! $plugin) {
             return [];
+        }
+
+        if ($module === 'teacher_attendance') {
+            return $this->resolveTeacherAttendanceRecipients(
+                $branchId,
+                $eventDate,
+                $targets,
+                $templateMap,
+                $plugin,
+                $teacherUserIds,
+            );
         }
 
         $students = $this->studentsForTargets($branchId, $targets);
@@ -997,6 +1085,7 @@ class NotificationCampaignService
         ?string $academicYear = null,
         ?array $staffUserIds = null,
         ?int $staffTemplateId = null,
+        ?array $teacherUserIds = null,
     ): array {
         $year = $academicYear ?? $this->academicYearNameForCampaigns();
         if ($module === 'fees') {
@@ -1014,6 +1103,7 @@ class NotificationCampaignService
             $year,
             $feeNotifyMode,
             $feeStructureId,
+            $teacherUserIds,
         );
         $templates = SmsTemplate::query()
             ->where('branch_id', $branchId)
@@ -1089,6 +1179,7 @@ class NotificationCampaignService
         ?string $academicYear = null,
         ?array $staffUserIds = null,
         ?int $staffTemplateId = null,
+        ?array $teacherUserIds = null,
     ): NotificationCampaign {
         return DB::transaction(function () use (
             $module,
@@ -1105,6 +1196,7 @@ class NotificationCampaignService
             $academicYear,
             $staffUserIds,
             $staffTemplateId,
+            $teacherUserIds,
         ) {
             $campaign = NotificationCampaign::create([
                 'module' => $module,
@@ -1120,6 +1212,7 @@ class NotificationCampaignService
                 'template_map' => $templateMap,
                 'staff_user_ids' => $staffUserIds ?: null,
                 'staff_template_id' => $staffTemplateId,
+                'teacher_user_ids' => $teacherUserIds ?: null,
                 'target_count' => count($targets),
                 'recipient_count' => 0,
                 'expected_recipient_count' => max(0, $expectedRecipientCount),
@@ -1184,6 +1277,36 @@ class NotificationCampaignService
         $targets = $campaign->targets()->orderBy('id')->get();
         $index = (int) $campaign->materialize_target_index;
         if ($index >= $targets->count()) {
+            if (
+                $campaign->module === 'teacher_attendance'
+                && $index === 0
+                && $targets->isEmpty()
+            ) {
+                $teacherIds = is_array($campaign->teacher_user_ids) ? $campaign->teacher_user_ids : [];
+                if ($teacherIds !== []) {
+                    $academicYear = $campaign->academic_year
+                        ? (string) $campaign->academic_year
+                        : $this->academicYearNameForCampaigns();
+                    $recipients = $this->resolveRecipients(
+                        'teacher_attendance',
+                        (int) $campaign->branch_id,
+                        optional($campaign->event_date)->toDateString(),
+                        [],
+                        $campaign->template_map ?? [],
+                        null,
+                        null,
+                        $academicYear,
+                        null,
+                        null,
+                        $teacherIds,
+                    );
+                    $added = $this->insertRecipientRows($campaign, $recipients, []);
+                    $campaign->update([
+                        'materialize_target_index' => 1,
+                        'recipient_count' => $campaign->recipient_count + $added,
+                    ]);
+                }
+            }
             $this->materializeStaffIfNeeded($campaign);
             $this->finishMaterializing($campaign->fresh());
 
@@ -1624,6 +1747,172 @@ class NotificationCampaignService
 
     /**
      * @param  list<array{grade:string,section:string}>  $targets
+     * @param  array<string, int>  $templateMap
+     * @return list<array<string, mixed>>
+     */
+    private function resolveTeacherAttendanceRecipients(
+        int $branchId,
+        ?string $eventDate,
+        array $targets,
+        array $templateMap,
+        \App\NotificationCampaigns\NotificationCampaignModule $plugin,
+        ?array $teacherUserIds = null,
+    ): array {
+        if (! $plugin instanceof \App\NotificationCampaigns\Modules\TeacherAttendanceCampaignModule) {
+            return [];
+        }
+
+        $date = ($eventDate !== null && trim($eventDate) !== '') ? trim($eventDate) : now()->toDateString();
+        $mapped = array_keys(array_filter($templateMap));
+
+        if ($teacherUserIds !== null && $teacherUserIds !== []) {
+            $userIds = array_values(array_unique(array_map('intval', $teacherUserIds)));
+            $users = User::query()
+                ->whereIn('id', $userIds)
+                ->where('is_active', 1)
+                ->whereNull('deleted_at')
+                ->get(['id', 'first_name', 'last_name', 'phone', 'role']);
+            $teacherByUser = Teacher::query()
+                ->whereIn('user_id', $userIds)
+                ->get(['user_id', 'designation', 'employee_id'])
+                ->keyBy('user_id');
+            $statusByUser = $plugin->classifyTeacherUserIds($branchId, $date, $userIds);
+            $rows = [];
+            foreach ($users as $user) {
+                $userId = (int) $user->id;
+                $rawStatus = $statusByUser[$userId] ?? null;
+                if (! $rawStatus) {
+                    continue;
+                }
+                $statusKey = $this->resolveStatusKeyForTemplateMap($rawStatus, $mapped);
+                if ($statusKey === null) {
+                    continue;
+                }
+                $name = trim(($user->first_name ?? '').' '.($user->last_name ?? ''));
+                $teacher = $teacherByUser->get($userId);
+                $subtitle = $teacher
+                    ? trim((string) ($teacher->designation ?: $teacher->employee_id ?: 'Teacher'))
+                    : (string) $user->role;
+                $baseContext = [
+                    'student_name' => $name,
+                    'teacher_name' => $name,
+                    'grade' => 'Staff',
+                    'section' => (string) $user->role,
+                    'class_name' => $subtitle,
+                    'mobile' => (string) ($user->phone ?? ''),
+                    'date' => Carbon::parse($date)->format('d M Y'),
+                    'attendance_date' => Carbon::parse($date)->format('d M Y'),
+                    'status' => ucfirst($statusKey),
+                ];
+                $context = $plugin->enrichContext($baseContext, $user, $statusKey, $date, $branchId);
+
+                $rows[] = [
+                    'user_id' => $userId,
+                    'student_id' => null,
+                    'student_name' => $name,
+                    'grade' => 'Staff',
+                    'section' => (string) $user->role,
+                    'status_key' => $statusKey,
+                    'context' => $context,
+                ];
+            }
+
+            return $rows;
+        }
+
+        $teachers = $this->teachersForTargets($branchId, $targets);
+        if ($teachers->isEmpty()) {
+            return [];
+        }
+
+        $userIds = $teachers->pluck('user_id')->filter()->map(fn ($id) => (int) $id)->all();
+        $statusByUser = $plugin->classifyTeacherUserIds($branchId, $date, $userIds);
+
+        $rows = [];
+        foreach ($teachers as $teacher) {
+            $userId = (int) $teacher->user_id;
+            if ($userId <= 0) {
+                continue;
+            }
+            $rawStatus = $statusByUser[$userId] ?? null;
+            if (! $rawStatus) {
+                continue;
+            }
+            $statusKey = $this->resolveStatusKeyForTemplateMap($rawStatus, $mapped);
+            if ($statusKey === null) {
+                continue;
+            }
+            $user = $teacher->user;
+            $name = $user ? trim(($user->first_name ?? '').' '.($user->last_name ?? '')) : '';
+            $deptKey = (string) (int) ($teacher->department_id ?? 0);
+            $baseContext = [
+                'student_name' => $name,
+                'teacher_name' => $name,
+                'grade' => $deptKey,
+                'section' => \App\NotificationCampaigns\Modules\TeacherAttendanceCampaignModule::SECTION_KEY,
+                'class_name' => (string) ($teacher->designation ?? 'Teacher'),
+                'mobile' => (string) ($user->phone ?? ''),
+                'date' => Carbon::parse($date)->format('d M Y'),
+                'attendance_date' => Carbon::parse($date)->format('d M Y'),
+                'status' => ucfirst($statusKey),
+            ];
+            $context = $plugin->enrichContext($baseContext, $teacher, $statusKey, $date, $branchId);
+
+            $rows[] = [
+                'user_id' => $userId,
+                'student_id' => null,
+                'student_name' => $name,
+                'grade' => $deptKey,
+                'section' => \App\NotificationCampaigns\Modules\TeacherAttendanceCampaignModule::SECTION_KEY,
+                'status_key' => $statusKey,
+                'context' => $context,
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
+     * @param  list<array{grade:string,section:string}>  $targets
+     * @return \Illuminate\Support\Collection<int, Teacher>
+     */
+    private function teachersForTargets(int $branchId, array $targets)
+    {
+        $deptKeys = [];
+        foreach ($targets as $target) {
+            if (($target['section'] ?? '') !== \App\NotificationCampaigns\Modules\TeacherAttendanceCampaignModule::SECTION_KEY) {
+                continue;
+            }
+            $deptKeys[] = (int) $target['grade'];
+        }
+        $deptKeys = array_values(array_unique($deptKeys));
+        if ($deptKeys === []) {
+            return collect();
+        }
+
+        $query = Teacher::query()
+            ->where('branch_id', $branchId)
+            ->where('teacher_status', 'Active')
+            ->whereNotNull('user_id')
+            ->with(['user:id,first_name,last_name,phone']);
+
+        $query->where(function ($q) use ($deptKeys) {
+            foreach ($deptKeys as $deptId) {
+                $q->orWhere(function ($inner) use ($deptId) {
+                    if ($deptId === 0) {
+                        $inner->whereNull('department_id');
+                    } else {
+                        $inner->where('department_id', $deptId);
+                    }
+                });
+            }
+        });
+
+        return $query->get();
+    }
+
+    /**
+     * @param  list<array{grade:string,section:string}>  $targets
      */
     private function studentsForTargets(int $branchId, array $targets)
     {
@@ -1648,14 +1937,120 @@ class NotificationCampaignService
         return trim($grade).'|'.trim($section);
     }
 
+    /**
+     * @return list<string>
+     */
+    private function sectionLookupKeys(string $grade, string $section): array
+    {
+        $grade = trim($grade);
+        $section = trim($section);
+        $keys = [$this->sectionMapKey($grade, $section)];
+        if (preg_match('/^grade\s*(.+)$/i', $grade, $match)) {
+            $keys[] = $this->sectionMapKey(trim($match[1]), $section);
+        } elseif (preg_match('/^\d+(\.\d+)?$/', $grade)) {
+            $keys[] = $this->sectionMapKey('Grade '.$grade, $section);
+        }
+
+        return array_values(array_unique($keys));
+    }
+
+    /**
+     * @param  array<string, array{notification_status:string,campaign_id?:int,sent_count?:int}>  $map
+     * @param  array{notification_status:string,campaign_id?:int,sent_count?:int}  $entry
+     */
+    private function putSectionDeliveryEntry(array &$map, string $grade, string $section, array $entry): void
+    {
+        foreach ($this->sectionLookupKeys($grade, $section) as $key) {
+            if (! isset($map[$key])) {
+                $map[$key] = $entry;
+
+                continue;
+            }
+            $existing = $map[$key]['notification_status'] ?? 'not_sent';
+            $incoming = $entry['notification_status'] ?? 'not_sent';
+            if (! $this->notificationStatusBlocksResend($existing) && $this->notificationStatusBlocksResend($incoming)) {
+                $map[$key] = $entry;
+            }
+        }
+    }
+
+    /**
+     * @param  array<string, array{notification_status:string,campaign_id?:int,sent_count?:int}>  $delivery
+     * @return array{notification_status:string,campaign_id?:int,sent_count?:int}|null
+     */
+    public function resolveDeliveryForSection(array $delivery, string $grade, string $section): ?array
+    {
+        foreach ($this->sectionLookupKeys($grade, $section) as $key) {
+            if (isset($delivery[$key])) {
+                return $delivery[$key];
+            }
+        }
+
+        $sectionName = trim($section);
+        $wantGrade = trim($grade);
+        if (preg_match('/^grade\s*(.+)$/i', $wantGrade, $match)) {
+            $wantGrade = trim($match[1]);
+        }
+
+        foreach ($delivery as $key => $value) {
+            $parts = explode('|', (string) $key, 2);
+            if (count($parts) !== 2) {
+                continue;
+            }
+            $g = trim($parts[0]);
+            $s = trim($parts[1]);
+            if ($s !== $sectionName) {
+                continue;
+            }
+            $gNorm = preg_match('/^grade\s*(.+)$/i', $g, $m) ? trim($m[1]) : $g;
+            if (strcasecmp($gNorm, $wantGrade) === 0) {
+                return $value;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  \Illuminate\Database\Query\Builder  $query
+     */
+    private function applyDeliveryScopeToCampaignQuery(
+        $query,
+        ?string $date,
+        ?int $examId,
+        ?string $feeType,
+        ?string $feeNotifyMode,
+        ?string $feeStructureId,
+        string $campaignAlias = 'c',
+    ): void {
+        if ($date !== null && $date !== '') {
+            $query->whereDate("{$campaignAlias}.event_date", $date);
+        }
+        if ($examId !== null) {
+            $query->where("{$campaignAlias}.exam_id", $examId);
+        }
+        if ($feeType !== null && $feeType !== '') {
+            $query->where("{$campaignAlias}.fee_type", $feeType);
+        }
+        if ($feeNotifyMode !== null && $feeNotifyMode !== '') {
+            $query->where("{$campaignAlias}.fee_notify_mode", $feeNotifyMode);
+        }
+        if ($feeStructureId !== null && $feeStructureId !== '') {
+            $query->where("{$campaignAlias}.fee_structure_id", $feeStructureId);
+        }
+    }
+
     public const STAFF_STATUS_KEY = 'staff';
 
     /**
-     * @return array{groups: list<array{key:string,label:string,people:list<array{user_id:int,name:string,subtitle:string}>}>}
+     * @return array{groups: list<array{key:string,label:string,people:list<array{user_id:int,name:string,subtitle:string,attendance_marked:bool,present:int,absent:int,leave:int}>}>}
      */
-    public function staffRecipientOptions(int $branchId): array
+    public function staffRecipientOptions(int $branchId, ?string $date = null): array
     {
         $schoolId = (int) (DB::table('branches')->where('id', $branchId)->value('school_id') ?? 0);
+        $resolvedDate = ($date !== null && preg_match('/^\d{4}-\d{2}-\d{2}$/', $date))
+            ? $this->resolveEventDateForModule('teacher_attendance', $date)
+            : now()->toDateString();
 
         $teachers = Teacher::query()
             ->where('branch_id', $branchId)
@@ -1730,14 +2125,194 @@ class NotificationCampaignService
             ->values()
             ->all();
 
-        return [
-            'groups' => [
-                ['key' => 'teachers', 'label' => 'Teachers', 'people' => $teachers],
-                ['key' => 'admins', 'label' => 'Admins & super admins', 'people' => $admins],
-                ['key' => 'staff', 'label' => 'Staff', 'people' => $staff],
-                ['key' => 'accounts', 'label' => 'Accounts', 'people' => $accounts],
-            ],
+        $groups = [
+            ['key' => 'teachers', 'label' => 'Teachers', 'people' => $teachers],
+            ['key' => 'admins', 'label' => 'Admins & super admins', 'people' => $admins],
+            ['key' => 'staff', 'label' => 'Staff', 'people' => $staff],
+            ['key' => 'accounts', 'label' => 'Accounts', 'people' => $accounts],
         ];
+
+        $allUserIds = [];
+        foreach ($groups as $group) {
+            foreach ($group['people'] as $person) {
+                $allUserIds[] = (int) $person['user_id'];
+            }
+        }
+        $allUserIds = array_values(array_unique($allUserIds));
+
+        $plugin = $this->registry->get('teacher_attendance');
+        $statusByUser = ($plugin instanceof \App\NotificationCampaigns\Modules\TeacherAttendanceCampaignModule)
+            ? $plugin->classifyTeacherUserIds($branchId, $resolvedDate, $allUserIds)
+            : [];
+
+        foreach ($groups as $gi => $group) {
+            $people = [];
+            foreach ($group['people'] as $person) {
+                $uid = (int) $person['user_id'];
+                $status = $statusByUser[$uid] ?? null;
+                $people[] = array_merge($person, [
+                    'attendance_marked' => $status !== null,
+                    'present' => $status === 'present' ? 1 : 0,
+                    'absent' => $status === 'absent' ? 1 : 0,
+                    'leave' => $status === 'leave' ? 1 : 0,
+                ]);
+            }
+            $groups[$gi]['people'] = $people;
+        }
+
+        return [
+            'groups' => $groups,
+            'event_date' => $resolvedDate,
+        ];
+    }
+
+    /**
+     * Latest campaign notify state per user (teacher attendance campaigns).
+     *
+     * @return array<int, array{notification_status:string,campaign_id?:int,sent_count?:int}>
+     */
+    public function deliveryStatusByUserId(string $module, int $branchId, ?string $date): array
+    {
+        $query = DB::table('notification_campaign_recipients as r')
+            ->join('notification_campaigns as c', 'c.id', '=', 'r.campaign_id')
+            ->where('c.module', $module)
+            ->where('c.branch_id', $branchId)
+            ->orderByDesc('r.id');
+
+        if ($date !== null && $date !== '') {
+            $query->whereDate('c.event_date', $date);
+        }
+
+        $rows = $query->get([
+            'r.user_id',
+            'r.delivery_status',
+            'c.id as campaign_id',
+            'c.status as campaign_status',
+        ]);
+
+        $map = [];
+        foreach ($rows as $row) {
+            $userId = (int) $row->user_id;
+            if ($userId <= 0 || isset($map[$userId])) {
+                continue;
+            }
+            $map[$userId] = [
+                'notification_status' => $this->resolveSectionNotificationStatus(
+                    (string) $row->delivery_status,
+                    (string) $row->campaign_status,
+                ),
+                'campaign_id' => (int) $row->campaign_id,
+            ];
+        }
+
+        if ($module === 'teacher_attendance') {
+            $campaignQuery = DB::table('notification_campaigns')
+                ->where('module', $module)
+                ->where('branch_id', $branchId)
+                ->whereNotNull('teacher_user_ids')
+                ->orderByDesc('id');
+
+            if ($date !== null && $date !== '') {
+                $campaignQuery->whereDate('event_date', $date);
+            }
+
+            foreach ($campaignQuery->get(['id', 'status', 'teacher_user_ids']) as $campaign) {
+                $campaignStatus = $this->resolveSectionNotificationStatus(
+                    'pending',
+                    (string) $campaign->status,
+                );
+                if (! $this->notificationStatusBlocksResend($campaignStatus)) {
+                    continue;
+                }
+                $ids = json_decode((string) ($campaign->teacher_user_ids ?? '[]'), true);
+                if (! is_array($ids)) {
+                    continue;
+                }
+                foreach ($ids as $rawUserId) {
+                    $userId = (int) $rawUserId;
+                    if ($userId <= 0 || isset($map[$userId])) {
+                        continue;
+                    }
+                    $map[$userId] = [
+                        'notification_status' => $campaignStatus,
+                        'campaign_id' => (int) $campaign->id,
+                    ];
+                }
+            }
+        }
+
+        return $map;
+    }
+
+    public function notificationStatusBlocksResend(string $status): bool
+    {
+        $status = strtolower(trim($status));
+
+        return in_array($status, ['sent', 'sending', 'partial'], true);
+    }
+
+    /**
+     * @param  list<int>  $userIds
+     * @return list<int> User ids that already have a blocking notification for this date.
+     */
+    public function blockedTeacherUserIdsForDate(int $branchId, string $date, array $userIds): array
+    {
+        $userIds = array_values(array_unique(array_filter(array_map('intval', $userIds), fn ($id) => $id > 0)));
+        if ($userIds === []) {
+            return [];
+        }
+
+        $delivery = $this->deliveryStatusByUserId('teacher_attendance', $branchId, $date);
+        $blocked = [];
+        foreach ($userIds as $userId) {
+            $status = $delivery[$userId]['notification_status'] ?? 'not_sent';
+            if ($this->notificationStatusBlocksResend($status)) {
+                $blocked[] = $userId;
+            }
+        }
+
+        return $blocked;
+    }
+
+    /**
+     * @param  list<array{grade:string,section:string}>  $targets
+     * @return list<array{grade:string,section:string}>
+     */
+    public function blockedSectionTargets(
+        string $module,
+        int $branchId,
+        ?string $date,
+        array $targets,
+        ?int $examId = null,
+        ?string $notifyMode = null,
+        ?string $feeType = null,
+        ?string $feeNotifyMode = null,
+        ?string $feeStructureId = null,
+    ): array {
+        if ($targets === []) {
+            return [];
+        }
+
+        $delivery = $this->deliveryStatusBySection(
+            $module,
+            $branchId,
+            $date,
+            $examId,
+            $notifyMode,
+            $feeType,
+            $feeNotifyMode,
+            $feeStructureId,
+        );
+        $blocked = [];
+        foreach ($targets as $target) {
+            $info = $this->resolveDeliveryForSection($delivery, $target['grade'], $target['section']);
+            $status = $info['notification_status'] ?? 'not_sent';
+            if ($this->notificationStatusBlocksResend($status)) {
+                $blocked[] = $target;
+            }
+        }
+
+        return $blocked;
     }
 
     /**

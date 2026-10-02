@@ -58,12 +58,7 @@ class NotificationCampaignController extends Controller
         $notifyMode = trim((string) $request->query('notify_mode', ''));
         $notifyMode = in_array($notifyMode, ['scheduled', 'result'], true) ? $notifyMode : null;
 
-        $feeNotifyMode = trim((string) $request->query('fee_notify_mode', 'due'));
-        $feeNotifyMode = in_array($feeNotifyMode, ['structure', 'due'], true) ? $feeNotifyMode : 'due';
-        $feeType = trim((string) $request->query('fee_type', ''));
-        $feeType = $feeType !== '' ? $feeType : null;
-        $feeStructureId = trim((string) $request->query('fee_structure_id', ''));
-        $feeStructureId = $feeStructureId !== '' ? $feeStructureId : null;
+        [$feeType, $feeNotifyMode, $feeStructureId] = $this->resolveFeeScopeQueryParams($request, $module);
         $academicYear = $this->campaigns->academicYearNameForCampaigns();
 
         if ($module === 'fees' && $feeNotifyMode === 'due') {
@@ -94,9 +89,9 @@ class NotificationCampaignController extends Controller
         );
         $meta = [
             'event_date' => $resolvedDate,
-            'delivery_by_section' => $delivery,
+            'delivery_by_section' => (object) $delivery,
         ];
-        if ($module === 'attendance') {
+        if ($module === 'attendance' || $module === 'teacher_attendance') {
             $meta['attendance_by_section'] = $this->campaigns->attendanceSummaryBySection($module, $branchId, $resolvedDate);
         }
         if ($module === 'exams') {
@@ -135,6 +130,58 @@ class NotificationCampaignController extends Controller
             'success' => true,
             'data' => $data,
             'meta' => $meta,
+        ]);
+    }
+
+    public function sectionDeliveryStatus(Request $request)
+    {
+        $module = (string) $request->query('module', 'attendance');
+        if (! isset($this->campaigns->modules()[$module])) {
+            return response()->json(['success' => false, 'message' => 'Unknown module'], 422);
+        }
+
+        $branchId = $this->resolveBranchIdFromRequest($request);
+        $date = (string) $request->query('date', '');
+        if ($branchId === null || $branchId <= 0 || ! $this->canAccessBranch($request, $branchId)) {
+            return response()->json(['success' => false, 'message' => 'Branch is required'], 422);
+        }
+
+        if ($module === 'exams' || $module === 'custom') {
+            $resolvedDate = null;
+        } elseif ($module === 'fees') {
+            $resolvedDate = preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)
+                ? $this->campaigns->resolveEventDateForModule($module, $date)
+                : null;
+        } else {
+            if (! preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+                return response()->json(['success' => false, 'message' => 'Date is required'], 422);
+            }
+            $resolvedDate = $this->campaigns->resolveEventDateForModule($module, $date);
+        }
+
+        $examId = $this->resolveExamIdFromRequest($request);
+        $notifyMode = trim((string) $request->query('notify_mode', ''));
+        $notifyMode = in_array($notifyMode, ['scheduled', 'result'], true) ? $notifyMode : null;
+        [$feeType, $feeNotifyMode, $feeStructureId] = $this->resolveFeeScopeQueryParams($request, $module);
+
+        $delivery = $this->campaigns->deliveryStatusBySection(
+            $module,
+            $branchId,
+            $resolvedDate,
+            $examId,
+            $notifyMode,
+            $feeType,
+            $feeNotifyMode,
+            $feeStructureId,
+        );
+
+        return response()->json([
+            'success' => true,
+            'data' => [],
+            'meta' => [
+                'event_date' => $resolvedDate,
+                'delivery_by_section' => (object) $delivery,
+            ],
         ]);
     }
 
@@ -584,7 +631,7 @@ class NotificationCampaignController extends Controller
             'data' => $data,
             'meta' => [
                 'event_date' => $resolvedDate,
-                'delivery_by_section' => $delivery,
+                'delivery_by_section' => (object) $delivery,
                 'attendance_by_section' => $this->campaigns->attendanceSummaryBySection('attendance', $branchId, $resolvedDate),
             ],
         ]);
@@ -597,9 +644,23 @@ class NotificationCampaignController extends Controller
             return response()->json(['success' => false, 'message' => 'Branch is required'], 422);
         }
 
+        $date = (string) $request->query('date', '');
+        $resolvedDate = preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)
+            ? $this->campaigns->resolveEventDateForModule('teacher_attendance', $date)
+            : now()->toDateString();
+        $payload = $this->campaigns->staffRecipientOptions($branchId, $resolvedDate);
+
         return response()->json([
             'success' => true,
-            'data' => $this->campaigns->staffRecipientOptions($branchId),
+            'data' => ['groups' => $payload['groups']],
+            'meta' => [
+                'event_date' => $payload['event_date'] ?? $resolvedDate,
+                'delivery_by_user' => $this->campaigns->deliveryStatusByUserId(
+                    'teacher_attendance',
+                    $branchId,
+                    $payload['event_date'] ?? $resolvedDate,
+                ),
+            ],
         ]);
     }
 
@@ -623,6 +684,7 @@ class NotificationCampaignController extends Controller
             $payload['academic_year'] ?? null,
             $payload['staff_user_ids'] ?? null,
             $payload['staff_template_id'] ?? null,
+            $payload['teacher_user_ids'] ?? null,
         );
 
         return response()->json(['success' => true, 'data' => $samples]);
@@ -650,6 +712,7 @@ class NotificationCampaignController extends Controller
             $payload['academic_year'] ?? null,
             $payload['staff_user_ids'] ?? null,
             $payload['staff_template_id'] ?? null,
+            $payload['teacher_user_ids'] ?? null,
         );
 
         $this->campaigns->materializeAll($campaign);
@@ -703,6 +766,8 @@ class NotificationCampaignController extends Controller
             'staff_user_ids' => 'nullable|array',
             'staff_user_ids.*' => 'integer|min:1',
             'staff_template_id' => 'nullable|integer',
+            'teacher_user_ids' => 'nullable|array',
+            'teacher_user_ids.*' => 'integer|min:1',
             'expected_recipient_count' => 'nullable|integer|min:0',
         ]);
 
@@ -727,15 +792,42 @@ class NotificationCampaignController extends Controller
             $branchId,
             array_map('intval', $request->input('staff_user_ids', []) ?? [])
         );
+        $teacherUserIds = $this->campaigns->filterValidStaffUserIds(
+            $branchId,
+            array_map('intval', $request->input('teacher_user_ids', []) ?? [])
+        );
         $staffTemplateId = $request->input('staff_template_id');
         $staffTemplateId = $staffTemplateId !== null && $staffTemplateId !== '' ? (int) $staffTemplateId : null;
+        $module = (string) $request->module;
+        $eventDate = $request->event_date ? (string) $request->event_date : null;
 
         $targets = array_map(fn ($row) => [
             'grade' => (string) $row['grade'],
             'section' => (string) $row['section'],
         ], $request->targets ?? []);
 
-        if ($targets === [] && $staffUserIds === []) {
+        if ($module === 'teacher_attendance') {
+            if ($teacherUserIds === []) {
+                return response()->json(['success' => false, 'message' => 'Select at least one person to notify'], 422);
+            }
+            if ($map === []) {
+                return response()->json(['success' => false, 'message' => 'Select at least one attendance template'], 422);
+            }
+            $teacherEventDate = $eventDate
+                ? $this->campaigns->resolveEventDateForModule('teacher_attendance', (string) $eventDate)
+                : now()->toDateString();
+            $alreadyNotified = $this->campaigns->blockedTeacherUserIdsForDate(
+                $branchId,
+                $teacherEventDate,
+                $teacherUserIds,
+            );
+            if ($alreadyNotified !== []) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'One or more selected people already have a notification for this date. Refresh the schedule page.',
+                ], 422);
+            }
+        } elseif ($targets === [] && $staffUserIds === []) {
             return response()->json(['success' => false, 'message' => 'Select at least one class section or staff member'], 422);
         }
 
@@ -773,7 +865,6 @@ class NotificationCampaignController extends Controller
             }
         }
 
-        $eventDate = $request->event_date ? (string) $request->event_date : null;
         $dateError = $this->campaigns->validateEventDatePolicy((string) $request->module, $eventDate);
         if ($dateError !== null) {
             return response()->json(['success' => false, 'message' => $dateError], 422);
@@ -824,6 +915,38 @@ class NotificationCampaignController extends Controller
 
         $academicYear = $this->campaigns->academicYearNameForCampaigns();
 
+        if ($targets !== [] && $module !== 'teacher_attendance') {
+            $deliveryDate = null;
+            $examNotifyMode = trim((string) $request->input('notify_mode', ''));
+            $examNotifyMode = in_array($examNotifyMode, ['scheduled', 'result'], true) ? $examNotifyMode : null;
+
+            if (in_array($module, ['attendance', 'holidays', 'assignments'], true)) {
+                $deliveryDate = $eventDate
+                    ? $this->campaigns->resolveEventDateForModule($module, (string) $eventDate)
+                    : now()->toDateString();
+            } elseif ($module === 'fees' && $eventDate) {
+                $deliveryDate = $this->campaigns->resolveEventDateForModule('fees', (string) $eventDate);
+            }
+
+            $alreadySentSections = $this->campaigns->blockedSectionTargets(
+                $module,
+                $branchId,
+                $deliveryDate,
+                $targets,
+                $module === 'exams' ? $examId : null,
+                $module === 'exams' ? $examNotifyMode : null,
+                $module === 'fees' && $feeNotifyMode === 'due' ? $feeType : null,
+                $module === 'fees' ? $feeNotifyMode : null,
+                $module === 'fees' && $feeNotifyMode === 'structure' ? $feeStructureId : null,
+            );
+            if ($alreadySentSections !== []) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'One or more selected sections already have a notification for this scope. Refresh the schedule page.',
+                ], 422);
+            }
+        }
+
         return [
             'module' => $request->module,
             'branch_id' => $branchId,
@@ -833,12 +956,35 @@ class NotificationCampaignController extends Controller
             'template_map' => $map,
             'staff_user_ids' => $staffUserIds !== [] ? $staffUserIds : null,
             'staff_template_id' => $staffUserIds !== [] ? $staffTemplateId : null,
+            'teacher_user_ids' => $teacherUserIds !== [] ? $teacherUserIds : null,
             'expected_recipient_count' => (int) $request->input('expected_recipient_count', 0),
             'exam_id' => (string) $request->module === 'exams' ? $examId : null,
             'fee_type' => (string) $request->module === 'fees' && $feeNotifyMode === 'due' ? $feeType : null,
             'fee_notify_mode' => (string) $request->module === 'fees' ? $feeNotifyMode : null,
             'fee_structure_id' => (string) $request->module === 'fees' && $feeNotifyMode === 'structure' ? $feeStructureId : null,
         ];
+    }
+
+    /**
+     * Fee filters apply only to the fees module; defaulting fee_notify_mode to "due" for other
+     * modules would exclude campaigns where fee_notify_mode is null (holidays, assignments, etc.).
+     *
+     * @return array{0:?string,1:?string,2:?string}
+     */
+    private function resolveFeeScopeQueryParams(Request $request, string $module): array
+    {
+        if ($module !== 'fees') {
+            return [null, null, null];
+        }
+
+        $feeNotifyMode = trim((string) $request->query('fee_notify_mode', 'due'));
+        $feeNotifyMode = in_array($feeNotifyMode, ['structure', 'due'], true) ? $feeNotifyMode : 'due';
+        $feeType = trim((string) $request->query('fee_type', ''));
+        $feeType = $feeType !== '' ? $feeType : null;
+        $feeStructureId = trim((string) $request->query('fee_structure_id', ''));
+        $feeStructureId = $feeStructureId !== '' ? $feeStructureId : null;
+
+        return [$feeType, $feeNotifyMode, $feeStructureId];
     }
 
     private function resolveBranchIdFromRequest(Request $request): ?int

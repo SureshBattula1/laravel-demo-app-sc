@@ -22,6 +22,7 @@ class NotificationCampaign extends Model
         'template_map',
         'staff_user_ids',
         'staff_template_id',
+        'teacher_user_ids',
         'staff_materialized_at',
         'target_count',
         'recipient_count',
@@ -37,6 +38,7 @@ class NotificationCampaign extends Model
         'scheduled_at' => 'datetime',
         'template_map' => 'array',
         'staff_user_ids' => 'array',
+        'teacher_user_ids' => 'array',
         'staff_materialized_at' => 'datetime',
     ];
 

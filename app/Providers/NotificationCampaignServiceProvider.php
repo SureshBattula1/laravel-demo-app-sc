@@ -8,6 +8,7 @@ use App\NotificationCampaigns\Modules\CustomCampaignModule;
 use App\NotificationCampaigns\Modules\ExamsCampaignModule;
 use App\NotificationCampaigns\Modules\FeesCampaignModule;
 use App\NotificationCampaigns\Modules\HolidaysCampaignModule;
+use App\NotificationCampaigns\Modules\TeacherAttendanceCampaignModule;
 use App\NotificationCampaigns\NotificationCampaignModuleRegistry;
 use Illuminate\Support\ServiceProvider;
 
@@ -18,6 +19,7 @@ class NotificationCampaignServiceProvider extends ServiceProvider
         $this->app->singleton(NotificationCampaignModuleRegistry::class, function () {
             $registry = new NotificationCampaignModuleRegistry;
             $registry->register(new AttendanceCampaignModule);
+            $registry->register(new TeacherAttendanceCampaignModule);
             $registry->register(new ExamsCampaignModule);
             $registry->register(new FeesCampaignModule);
             $registry->register(new HolidaysCampaignModule);
