@@ -74,7 +74,8 @@ class DashboardController extends Controller
                 'fees_by_class' => $this->getFeesByGradeSection($accessibleBranchIds),
                 'trends' => $this->getTrendData($accessibleBranchIds, $fromDate, $toDate),
                 'quick_stats' => $this->getQuickStats($accessibleBranchIds, $fromDate, $toDate),
-                'financial' => $this->getFinancialStats($accessibleBranchIds, $fromDate, $toDate)
+                'financial' => $this->getFinancialStats($accessibleBranchIds, $fromDate, $toDate),
+                'birthdays' => $this->getTodayBirthdays($accessibleBranchIds),
             ];
 
             $stats = $this->applyRoleDashboardContext($stats, $user);
@@ -176,6 +177,115 @@ class DashboardController extends Controller
             'total_students' => $studentQuery->count(),
             'total_teachers' => $teacherQuery->count(),
             'total_branches' => count($branchIdsArray),
+        ];
+    }
+
+    /**
+     * Students and teachers whose birthday is today, scoped to the dashboard branches.
+     */
+    private function getTodayBirthdays($branchIds): array
+    {
+        $today = Carbon::today();
+        $empty = [
+            'date' => $today->toDateString(),
+            'label' => $today->format('l, M j'),
+            'students' => [],
+            'teachers' => [],
+        ];
+
+        $branchIdsArray = is_array($branchIds) ? $branchIds : [];
+        if (empty($branchIdsArray)) {
+            return $empty;
+        }
+
+        $gradeLabelSql = Schema::hasTable('grades')
+            ? 'COALESCE((SELECT g.label FROM grades g WHERE g.value = students.grade AND g.school_id = students.school_id LIMIT 1), CONCAT("Grade ", students.grade))'
+            : 'CONCAT("Grade ", students.grade)';
+
+        $studentQuery = DB::table('students')
+            ->join('users', 'students.user_id', '=', 'users.id')
+            ->whereIn('students.branch_id', $branchIdsArray)
+            ->where('students.student_status', 'Active')
+            ->whereNotNull('students.date_of_birth');
+
+        if (Schema::hasColumn('students', 'deleted_at')) {
+            $studentQuery->whereNull('students.deleted_at');
+        }
+
+        $students = $studentQuery
+            ->whereMonth('students.date_of_birth', $today->month)
+            ->whereDay('students.date_of_birth', $today->day)
+            ->orderBy('users.first_name')
+            ->orderBy('users.last_name')
+            ->select(
+                'students.id',
+                'students.admission_number',
+                'students.grade',
+                'students.section',
+                'students.date_of_birth',
+                'users.first_name',
+                'users.last_name',
+                DB::raw($gradeLabelSql.' as grade_label')
+            )
+            ->get()
+            ->map(function ($row) {
+                $dob = Carbon::parse($row->date_of_birth);
+
+                return [
+                    'id' => $row->id,
+                    'name' => trim(($row->first_name ?? '').' '.($row->last_name ?? '')),
+                    'admission_number' => $row->admission_number,
+                    'grade' => $row->grade_label ?: ($row->grade ? 'Grade '.$row->grade : null),
+                    'section' => $row->section,
+                    'age' => $dob->age,
+                ];
+            })
+            ->values()
+            ->all();
+
+        $teacherQuery = DB::table('teachers')
+            ->join('users', 'teachers.user_id', '=', 'users.id')
+            ->whereIn('teachers.branch_id', $branchIdsArray)
+            ->where('teachers.teacher_status', 'Active')
+            ->whereNotNull('teachers.date_of_birth');
+
+        if (Schema::hasColumn('teachers', 'deleted_at')) {
+            $teacherQuery->whereNull('teachers.deleted_at');
+        }
+
+        $teachers = $teacherQuery
+            ->whereMonth('teachers.date_of_birth', $today->month)
+            ->whereDay('teachers.date_of_birth', $today->day)
+            ->orderBy('users.first_name')
+            ->orderBy('users.last_name')
+            ->select(
+                'teachers.id',
+                'teachers.employee_id',
+                'teachers.designation',
+                'teachers.date_of_birth',
+                'users.first_name',
+                'users.last_name'
+            )
+            ->get()
+            ->map(function ($row) {
+                $dob = Carbon::parse($row->date_of_birth);
+
+                return [
+                    'id' => $row->id,
+                    'name' => trim(($row->first_name ?? '').' '.($row->last_name ?? '')),
+                    'employee_id' => $row->employee_id,
+                    'designation' => $row->designation,
+                    'age' => $dob->age,
+                ];
+            })
+            ->values()
+            ->all();
+
+        return [
+            'date' => $today->toDateString(),
+            'label' => $today->format('l, M j'),
+            'students' => $students,
+            'teachers' => $teachers,
         ];
     }
     

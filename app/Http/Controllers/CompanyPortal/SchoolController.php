@@ -271,7 +271,7 @@ class SchoolController extends Controller
                 'company_id' => $companyId,
                 'is_active' => true,
             ]);
-            $this->attachSchoolRole($adminUser, 'super-admin', (int) $branch->id, 'SuperAdmin');
+            $this->attachSchoolRole($adminUser, 'super-admin', null, 'SuperAdmin');
 
             // Create BranchAdmin from principal name/email + password
             [$branchFirstName, $branchLastName] = $this->splitPersonName($branch->principal_name);
@@ -823,7 +823,7 @@ class SchoolController extends Controller
             ->first();
     }
 
-    private function attachSchoolRole(User $user, string $roleSlug, int $branchId, string $fallbackRole): void
+    private function attachSchoolRole(User $user, string $roleSlug, ?int $branchId, string $fallbackRole): void
     {
         $role = Role::findBySlug($roleSlug);
         if ($role) {
