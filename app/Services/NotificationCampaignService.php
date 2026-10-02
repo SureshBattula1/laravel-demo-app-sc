@@ -7,10 +7,13 @@ use App\Models\NotificationCampaignRecipient;
 use App\Models\NotificationCampaignTarget;
 use App\Models\SmsTemplate;
 use App\Models\Student;
+use App\Models\Teacher;
+use App\Models\User;
 use App\NotificationCampaigns\NotificationCampaignModuleRegistry;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 class NotificationCampaignService
@@ -992,6 +995,8 @@ class NotificationCampaignService
         ?string $feeNotifyMode = null,
         ?string $feeStructureId = null,
         ?string $academicYear = null,
+        ?array $staffUserIds = null,
+        ?int $staffTemplateId = null,
     ): array {
         $year = $academicYear ?? $this->academicYearNameForCampaigns();
         if ($module === 'fees') {
@@ -1041,6 +1046,27 @@ class NotificationCampaignService
             ];
         }
 
+        $staffIds = $staffUserIds ?? [];
+        if ($staffIds !== [] && $staffTemplateId) {
+            $staffTemplate = SmsTemplate::query()
+                ->where('branch_id', $branchId)
+                ->where('id', $staffTemplateId)
+                ->where('is_active', true)
+                ->first();
+            $staffRows = $this->resolveStaffRecipients($branchId, $staffIds);
+            if ($staffTemplate && $staffRows !== []) {
+                $example = $staffRows[0];
+                $context = $example['context'] ?? [];
+                $samples[] = [
+                    'status_key' => self::STAFF_STATUS_KEY,
+                    'label' => 'Staff',
+                    'student_name' => $example['student_name'] ?? 'Sample Staff',
+                    'message' => $this->renderer->render((string) $staffTemplate->body, $context),
+                    'recipient_count' => count($staffRows),
+                ];
+            }
+        }
+
         return $samples;
     }
 
@@ -1061,6 +1087,8 @@ class NotificationCampaignService
         ?string $feeNotifyMode = null,
         ?string $feeStructureId = null,
         ?string $academicYear = null,
+        ?array $staffUserIds = null,
+        ?int $staffTemplateId = null,
     ): NotificationCampaign {
         return DB::transaction(function () use (
             $module,
@@ -1075,6 +1103,8 @@ class NotificationCampaignService
             $feeNotifyMode,
             $feeStructureId,
             $academicYear,
+            $staffUserIds,
+            $staffTemplateId,
         ) {
             $campaign = NotificationCampaign::create([
                 'module' => $module,
@@ -1088,6 +1118,8 @@ class NotificationCampaignService
                 'scheduled_at' => now(),
                 'status' => 'materializing',
                 'template_map' => $templateMap,
+                'staff_user_ids' => $staffUserIds ?: null,
+                'staff_template_id' => $staffTemplateId,
                 'target_count' => count($targets),
                 'recipient_count' => 0,
                 'expected_recipient_count' => max(0, $expectedRecipientCount),
@@ -1152,7 +1184,8 @@ class NotificationCampaignService
         $targets = $campaign->targets()->orderBy('id')->get();
         $index = (int) $campaign->materialize_target_index;
         if ($index >= $targets->count()) {
-            $this->finishMaterializing($campaign);
+            $this->materializeStaffIfNeeded($campaign);
+            $this->finishMaterializing($campaign->fresh());
 
             return;
         }
@@ -1211,7 +1244,9 @@ class NotificationCampaignService
         ]);
 
         if ($newIndex >= $targets->count()) {
-            $this->finishMaterializing($campaign->fresh());
+            $fresh = $campaign->fresh();
+            $this->materializeStaffIfNeeded($fresh);
+            $this->finishMaterializing($fresh->fresh());
         }
     }
 
@@ -1236,9 +1271,13 @@ class NotificationCampaignService
             return ['processed' => 0, 'sent' => 0, 'failed' => 0];
         }
 
+        $templateIds = array_values($campaign->template_map ?? []);
+        if ($campaign->staff_template_id) {
+            $templateIds[] = (int) $campaign->staff_template_id;
+        }
         $templates = SmsTemplate::query()
             ->where('branch_id', $campaign->branch_id)
-            ->whereIn('id', array_values($campaign->template_map ?? []))
+            ->whereIn('id', array_unique($templateIds))
             ->get()
             ->keyBy('id');
 
@@ -1249,7 +1288,11 @@ class NotificationCampaignService
 
         foreach ($recipients as $recipient) {
             try {
-                $templateId = (int) ($campaign->template_map[$recipient->status_key] ?? 0);
+                if ($recipient->status_key === self::STAFF_STATUS_KEY) {
+                    $templateId = (int) ($campaign->staff_template_id ?? 0);
+                } else {
+                    $templateId = (int) ($campaign->template_map[$recipient->status_key] ?? 0);
+                }
                 $template = $templates->get($templateId);
                 if (! $template) {
                     throw new \RuntimeException('Template missing for '.$recipient->status_key);
@@ -1603,5 +1646,193 @@ class NotificationCampaignService
     private function sectionMapKey(string $grade, string $section): string
     {
         return trim($grade).'|'.trim($section);
+    }
+
+    public const STAFF_STATUS_KEY = 'staff';
+
+    /**
+     * @return array{groups: list<array{key:string,label:string,people:list<array{user_id:int,name:string,subtitle:string}>}>}
+     */
+    public function staffRecipientOptions(int $branchId): array
+    {
+        $schoolId = (int) (DB::table('branches')->where('id', $branchId)->value('school_id') ?? 0);
+
+        $teachers = Teacher::query()
+            ->where('branch_id', $branchId)
+            ->where('teacher_status', 'Active')
+            ->with(['user:id,first_name,last_name,phone,role,is_active'])
+            ->orderBy('id')
+            ->get()
+            ->filter(fn (Teacher $t) => $t->user && $t->user->is_active)
+            ->map(function (Teacher $t) {
+                $u = $t->user;
+
+                return [
+                    'user_id' => (int) $u->id,
+                    'name' => trim(($u->first_name ?? '').' '.($u->last_name ?? '')),
+                    'subtitle' => trim((string) ($t->designation ?: $t->employee_id ?: 'Teacher')),
+                ];
+            })
+            ->values()
+            ->all();
+
+        $adminsQuery = User::query()
+            ->whereIn('role', ['SuperAdmin', 'BranchAdmin'])
+            ->where('is_active', 1)
+            ->whereNull('deleted_at')
+            ->where(function ($q) use ($branchId, $schoolId) {
+                $q->where('branch_id', $branchId);
+                if ($schoolId > 0 && Schema::hasColumn('users', 'school_id')) {
+                    $q->orWhere(function ($inner) use ($schoolId) {
+                        $inner->where('role', 'SuperAdmin')->where('school_id', $schoolId);
+                    });
+                }
+            });
+
+        $admins = $adminsQuery
+            ->orderBy('first_name')
+            ->get(['id', 'first_name', 'last_name', 'role', 'phone'])
+            ->map(fn (User $u) => [
+                'user_id' => (int) $u->id,
+                'name' => trim(($u->first_name ?? '').' '.($u->last_name ?? '')),
+                'subtitle' => (string) $u->role,
+            ])
+            ->values()
+            ->all();
+
+        $staff = User::query()
+            ->where('branch_id', $branchId)
+            ->where('role', 'Staff')
+            ->where('is_active', 1)
+            ->whereNull('deleted_at')
+            ->orderBy('first_name')
+            ->get(['id', 'first_name', 'last_name', 'phone'])
+            ->map(fn (User $u) => [
+                'user_id' => (int) $u->id,
+                'name' => trim(($u->first_name ?? '').' '.($u->last_name ?? '')),
+                'subtitle' => 'Staff',
+            ])
+            ->values()
+            ->all();
+
+        $accounts = User::query()
+            ->where('branch_id', $branchId)
+            ->where('role', 'Accountant')
+            ->where('is_active', 1)
+            ->whereNull('deleted_at')
+            ->orderBy('first_name')
+            ->get(['id', 'first_name', 'last_name', 'phone'])
+            ->map(fn (User $u) => [
+                'user_id' => (int) $u->id,
+                'name' => trim(($u->first_name ?? '').' '.($u->last_name ?? '')),
+                'subtitle' => 'Accountant',
+            ])
+            ->values()
+            ->all();
+
+        return [
+            'groups' => [
+                ['key' => 'teachers', 'label' => 'Teachers', 'people' => $teachers],
+                ['key' => 'admins', 'label' => 'Admins & super admins', 'people' => $admins],
+                ['key' => 'staff', 'label' => 'Staff', 'people' => $staff],
+                ['key' => 'accounts', 'label' => 'Accounts', 'people' => $accounts],
+            ],
+        ];
+    }
+
+    /**
+     * @param  list<int>  $staffUserIds
+     * @return list<int>
+     */
+    public function filterValidStaffUserIds(int $branchId, array $staffUserIds): array
+    {
+        $staffUserIds = array_values(array_unique(array_filter(array_map('intval', $staffUserIds), fn ($id) => $id > 0)));
+        if ($staffUserIds === []) {
+            return [];
+        }
+
+        $allowed = [];
+        foreach ($this->staffRecipientOptions($branchId)['groups'] as $group) {
+            foreach ($group['people'] as $person) {
+                $allowed[(int) $person['user_id']] = true;
+            }
+        }
+
+        return array_values(array_filter($staffUserIds, fn ($id) => isset($allowed[$id])));
+    }
+
+    /**
+     * @param  list<int>  $staffUserIds
+     * @return list<array<string, mixed>>
+     */
+    public function resolveStaffRecipients(int $branchId, array $staffUserIds): array
+    {
+        $staffUserIds = $this->filterValidStaffUserIds($branchId, $staffUserIds);
+        if ($staffUserIds === []) {
+            return [];
+        }
+
+        $groupByUser = [];
+        foreach ($this->staffRecipientOptions($branchId)['groups'] as $group) {
+            foreach ($group['people'] as $person) {
+                $groupByUser[(int) $person['user_id']] = $group['key'];
+            }
+        }
+
+        $users = User::query()
+            ->whereIn('id', $staffUserIds)
+            ->where('is_active', 1)
+            ->whereNull('deleted_at')
+            ->get(['id', 'first_name', 'last_name', 'phone', 'role']);
+
+        $dateLabel = now()->format('d M Y');
+        $rows = [];
+        foreach ($users as $user) {
+            $userId = (int) $user->id;
+            $name = trim(($user->first_name ?? '').' '.($user->last_name ?? ''));
+            $groupKey = $groupByUser[$userId] ?? 'staff';
+            $rows[] = [
+                'user_id' => $userId,
+                'student_id' => null,
+                'student_name' => $name,
+                'grade' => 'Staff',
+                'section' => $groupKey,
+                'status_key' => self::STAFF_STATUS_KEY,
+                'context' => [
+                    'student_name' => $name,
+                    'mobile' => (string) ($user->phone ?? ''),
+                    'role' => (string) $user->role,
+                    'date' => $dateLabel,
+                    'attendance_date' => $dateLabel,
+                    'status' => 'Staff',
+                ],
+            ];
+        }
+
+        return $rows;
+    }
+
+    public function materializeStaffIfNeeded(NotificationCampaign $campaign): void
+    {
+        if ($campaign->staff_materialized_at !== null) {
+            return;
+        }
+        $ids = is_array($campaign->staff_user_ids) ? $campaign->staff_user_ids : [];
+        if ($ids === [] || ! $campaign->staff_template_id) {
+            return;
+        }
+
+        $recipients = $this->resolveStaffRecipients((int) $campaign->branch_id, $ids);
+        if ($recipients === []) {
+            $campaign->update(['staff_materialized_at' => now()]);
+
+            return;
+        }
+
+        $added = $this->insertRecipientRows($campaign, $recipients, []);
+        $campaign->update([
+            'staff_materialized_at' => now(),
+            'recipient_count' => $campaign->recipient_count + $added,
+        ]);
     }
 }

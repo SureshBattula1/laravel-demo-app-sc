@@ -49,9 +49,10 @@ class AttendanceCampaignModule implements NotificationCampaignModule
     {
         // Use enrolled student grade so keys match class picker (students.grade) and campaign targets.
         $rows = DB::table('student_attendance as sa')
-            ->join('students as s', 's.id', '=', 'sa.student_id')
+            ->join('students as s', 's.user_id', '=', 'sa.student_id')
             ->where('sa.branch_id', $branchId)
             ->whereDate('sa.date', $date)
+            ->whereNull('s.deleted_at')
             ->whereNotNull('sa.section')
             ->where('sa.section', '!=', '')
             ->selectRaw('s.grade as grade, sa.section as section, COUNT(*) as marked_count')
@@ -94,9 +95,10 @@ class AttendanceCampaignModule implements NotificationCampaignModule
         }
 
         $statusRows = DB::table('student_attendance as sa')
-            ->join('students as s', 's.id', '=', 'sa.student_id')
+            ->join('students as s', 's.user_id', '=', 'sa.student_id')
             ->where('sa.branch_id', $branchId)
             ->whereDate('sa.date', $date)
+            ->whereNull('s.deleted_at')
             ->whereNotNull('sa.section')
             ->where('sa.section', '!=', '')
             ->selectRaw('s.grade as grade, sa.section as section, sa.status as status, COUNT(*) as tally')

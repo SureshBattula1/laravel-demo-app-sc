@@ -4,6 +4,7 @@ namespace Tests\Unit;
 
 use App\NotificationCampaigns\Modules\AssignmentsCampaignModule;
 use App\NotificationCampaigns\Modules\AttendanceCampaignModule;
+use App\NotificationCampaigns\Modules\CustomCampaignModule;
 use App\NotificationCampaigns\Modules\ExamsCampaignModule;
 use App\NotificationCampaigns\Modules\FeesCampaignModule;
 use App\NotificationCampaigns\Modules\HolidaysCampaignModule;
@@ -20,6 +21,7 @@ class NotificationCampaignModuleRegistryTest extends TestCase
         $registry->register(new FeesCampaignModule);
         $registry->register(new HolidaysCampaignModule);
         $registry->register(new AssignmentsCampaignModule);
+        $registry->register(new CustomCampaignModule);
 
         return $registry;
     }
@@ -33,6 +35,7 @@ class NotificationCampaignModuleRegistryTest extends TestCase
         $this->assertArrayHasKey('fees', $statuses);
         $this->assertArrayHasKey('holidays', $statuses);
         $this->assertArrayHasKey('assignments', $statuses);
+        $this->assertArrayHasKey('custom', $statuses);
     }
 
     public function test_attendance_meta_requires_date_and_confirm(): void
