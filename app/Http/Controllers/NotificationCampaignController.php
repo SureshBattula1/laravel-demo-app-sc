@@ -42,6 +42,8 @@ class NotificationCampaignController extends Controller
         if ($module === 'exams') {
             // Exam notifications are scoped by exam_id, not calendar date (ignore client date).
             $resolvedDate = null;
+        } elseif ($module === 'custom') {
+            $resolvedDate = null;
         } elseif ($module === 'fees') {
             $resolvedDate = preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)
                 ? $this->campaigns->resolveEventDateForModule($module, $date)
@@ -138,23 +140,167 @@ class NotificationCampaignController extends Controller
 
     public function dashboard(Request $request)
     {
-        $query = NotificationCampaign::query();
-        $this->applyBranchFilter($query, $request, 'branch_id');
-        $rows = $query->get(['module', 'status', 'sent_count', 'failed_count', 'recipient_count']);
+        $includeRaw = strtolower(trim((string) $request->query('include', 'all')));
+        $includes = $includeRaw === 'all'
+            ? ['core', 'extras']
+            : array_filter(array_map('trim', explode(',', $includeRaw)));
+        if ($includes === []) {
+            $includes = ['core', 'extras'];
+        }
+        $wantCore = in_array('core', $includes, true);
+        $wantExtras = in_array('extras', $includes, true);
+
+        $data = [];
+
+        if ($wantCore) {
+            $data = array_merge($data, $this->dashboardCorePayload($request));
+        }
+
+        if ($wantExtras) {
+            $data = array_merge($data, $this->dashboardExtrasPayload($request));
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => $data,
+        ]);
+    }
+
+    /** Single grouped SQL query — KPIs, module cards, status + bar/doughnut charts. */
+    protected function dashboardCorePayload(Request $request): array
+    {
+        $pendingStatuses = ['pending', 'materializing', 'queued', 'sending'];
+        $failedStatuses = ['failed', 'partial'];
+
+        $aggregateSelect = [
+            DB::raw('COUNT(*) as campaigns'),
+            DB::raw('COALESCE(SUM(recipient_count), 0) as recipients'),
+            DB::raw("SUM(CASE WHEN status = 'sent' THEN 1 ELSE 0 END) as sent"),
+            DB::raw(sprintf(
+                "SUM(CASE WHEN status IN ('%s') THEN 1 ELSE 0 END) as pending",
+                implode("','", $pendingStatuses)
+            )),
+            DB::raw(sprintf(
+                "SUM(CASE WHEN status IN ('%s') THEN 1 ELSE 0 END) as failed",
+                implode("','", $failedStatuses)
+            )),
+        ];
+
+        $moduleAggregates = $this->newDashboardQuery($request)
+            ->select(array_merge(['module'], $aggregateSelect))
+            ->groupBy('module')
+            ->get()
+            ->keyBy('module');
 
         $byModule = [];
         foreach (array_keys($this->campaigns->modules()) as $module) {
-            $slice = $rows->where('module', $module);
+            $row = $moduleAggregates->get($module);
             $byModule[$module] = [
-                'campaigns' => $slice->count(),
-                'pending' => $slice->whereIn('status', ['pending', 'materializing', 'queued', 'sending'])->count(),
-                'sent' => $slice->where('status', 'sent')->count(),
-                'failed' => $slice->whereIn('status', ['failed', 'partial'])->count(),
-                'recipients' => (int) $slice->sum('recipient_count'),
+                'campaigns' => (int) ($row?->campaigns ?? 0),
+                'pending' => (int) ($row?->pending ?? 0),
+                'sent' => (int) ($row?->sent ?? 0),
+                'failed' => (int) ($row?->failed ?? 0),
+                'recipients' => (int) ($row?->recipients ?? 0),
             ];
         }
 
-        return response()->json(['success' => true, 'data' => $byModule]);
+        $totals = [
+            'campaigns' => 0,
+            'pending' => 0,
+            'sent' => 0,
+            'failed' => 0,
+            'recipients' => 0,
+        ];
+        foreach ($byModule as $stats) {
+            $totals['campaigns'] += $stats['campaigns'];
+            $totals['pending'] += $stats['pending'];
+            $totals['sent'] += $stats['sent'];
+            $totals['failed'] += $stats['failed'];
+            $totals['recipients'] += $stats['recipients'];
+        }
+
+        return [
+            'by_module' => $byModule,
+            'totals' => $totals,
+            'status_breakdown' => [
+                'sent' => $totals['sent'],
+                'pending' => $totals['pending'],
+                'failed' => $totals['failed'],
+            ],
+        ];
+    }
+
+    /** Recent list + 7-day activity (loaded after core on the client). */
+    protected function dashboardExtrasPayload(Request $request): array
+    {
+        $recent = $this->newDashboardQuery($request)
+            ->with('branch:id,name')
+            ->orderByDesc('id')
+            ->limit(10)
+            ->get(['id', 'module', 'branch_id', 'status', 'scheduled_at', 'recipient_count'])
+            ->map(fn (NotificationCampaign $campaign) => [
+                'id' => $campaign->id,
+                'module' => $campaign->module,
+                'branch_name' => $campaign->branch?->name,
+                'status' => $campaign->status,
+                'scheduled_at' => $campaign->scheduled_at?->toIso8601String(),
+                'recipient_count' => (int) $campaign->recipient_count,
+            ])
+            ->values()
+            ->all();
+
+        $fromActivity = now()->subDays(6)->startOfDay();
+        $activityDayExpr = 'DATE(COALESCE(scheduled_at, created_at))';
+        $activityRows = $this->newDashboardQuery($request)
+            ->selectRaw("{$activityDayExpr} as day, COUNT(*) as campaigns")
+            ->whereRaw("{$activityDayExpr} >= ?", [$fromActivity->toDateString()])
+            ->groupByRaw($activityDayExpr)
+            ->orderByRaw($activityDayExpr)
+            ->get()
+            ->keyBy(fn ($row) => substr((string) $row->day, 0, 10));
+
+        $activityByDay = [];
+        for ($i = 0; $i < 7; $i++) {
+            $day = $fromActivity->copy()->addDays($i)->toDateString();
+            $match = $activityRows->get($day);
+            $activityByDay[] = [
+                'date' => $day,
+                'campaigns' => (int) ($match?->campaigns ?? 0),
+            ];
+        }
+
+        return [
+            'recent' => $recent,
+            'activity_by_day' => $activityByDay,
+        ];
+    }
+
+    protected function newDashboardQuery(Request $request)
+    {
+        $query = NotificationCampaign::query();
+        $this->applyDashboardScope($query, $request);
+
+        return $query;
+    }
+
+    /** Branch, optional branch_id, and scheduled_at date range for dashboard analytics. */
+    protected function applyDashboardScope($query, Request $request): void
+    {
+        $this->applyBranchFilter($query, $request, 'branch_id');
+
+        $branchId = (int) $request->query('branch_id', 0);
+        if ($branchId > 0) {
+            $query->where('branch_id', $branchId);
+        }
+
+        $from = trim((string) $request->query('from', ''));
+        $to = trim((string) $request->query('to', ''));
+        if ($from !== '') {
+            $query->whereRaw('DATE(COALESCE(scheduled_at, created_at)) >= ?', [$from]);
+        }
+        if ($to !== '') {
+            $query->whereRaw('DATE(COALESCE(scheduled_at, created_at)) <= ?', [$to]);
+        }
     }
 
     public function index(Request $request)
@@ -444,6 +590,19 @@ class NotificationCampaignController extends Controller
         ]);
     }
 
+    public function staffRecipientOptions(Request $request)
+    {
+        $branchId = $this->resolveBranchIdFromRequest($request);
+        if ($branchId === null || $branchId <= 0 || ! $this->canAccessBranch($request, $branchId)) {
+            return response()->json(['success' => false, 'message' => 'Branch is required'], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => $this->campaigns->staffRecipientOptions($branchId),
+        ]);
+    }
+
     public function preview(Request $request)
     {
         $payload = $this->validated($request);
@@ -462,6 +621,8 @@ class NotificationCampaignController extends Controller
             $payload['fee_notify_mode'] ?? null,
             $payload['fee_structure_id'] ?? null,
             $payload['academic_year'] ?? null,
+            $payload['staff_user_ids'] ?? null,
+            $payload['staff_template_id'] ?? null,
         );
 
         return response()->json(['success' => true, 'data' => $samples]);
@@ -487,6 +648,8 @@ class NotificationCampaignController extends Controller
             $payload['fee_notify_mode'] ?? null,
             $payload['fee_structure_id'] ?? null,
             $payload['academic_year'] ?? null,
+            $payload['staff_user_ids'] ?? null,
+            $payload['staff_template_id'] ?? null,
         );
 
         $this->campaigns->materializeAll($campaign);
@@ -533,10 +696,13 @@ class NotificationCampaignController extends Controller
             'module' => 'required|in:'.$modules,
             'branch_id' => 'required|integer|exists:branches,id',
             'event_date' => 'nullable|date',
-            'targets' => 'required|array|min:1',
+            'targets' => 'present|array',
             'targets.*.grade' => 'required|string|max:32',
             'targets.*.section' => 'required|string|max:32',
-            'template_map' => 'required|array|min:1',
+            'template_map' => 'present|array',
+            'staff_user_ids' => 'nullable|array',
+            'staff_user_ids.*' => 'integer|min:1',
+            'staff_template_id' => 'nullable|integer',
             'expected_recipient_count' => 'nullable|integer|min:0',
         ]);
 
@@ -557,20 +723,53 @@ class NotificationCampaignController extends Controller
             }
             $map[$key] = (int) $templateId;
         }
-        if ($map === []) {
+        $staffUserIds = $this->campaigns->filterValidStaffUserIds(
+            $branchId,
+            array_map('intval', $request->input('staff_user_ids', []) ?? [])
+        );
+        $staffTemplateId = $request->input('staff_template_id');
+        $staffTemplateId = $staffTemplateId !== null && $staffTemplateId !== '' ? (int) $staffTemplateId : null;
+
+        $targets = array_map(fn ($row) => [
+            'grade' => (string) $row['grade'],
+            'section' => (string) $row['section'],
+        ], $request->targets ?? []);
+
+        if ($targets === [] && $staffUserIds === []) {
+            return response()->json(['success' => false, 'message' => 'Select at least one class section or staff member'], 422);
+        }
+
+        if ($targets !== [] && $map === []) {
+            return response()->json(['success' => false, 'message' => 'Select at least one student template'], 422);
+        }
+
+        if ($staffUserIds !== [] && ($staffTemplateId === null || $staffTemplateId <= 0)) {
+            return response()->json(['success' => false, 'message' => 'Staff template is required when staff are selected'], 422);
+        }
+
+        if ($map === [] && $staffUserIds === []) {
             return response()->json(['success' => false, 'message' => 'Select at least one template'], 422);
         }
 
-        $validIds = SmsTemplate::query()
-            ->where('branch_id', $branchId)
-            ->where('is_active', true)
-            ->whereIn('id', array_values($map))
-            ->pluck('id')
-            ->map(fn ($id) => (int) $id)
-            ->all();
-        foreach ($map as $templateId) {
-            if (! in_array($templateId, $validIds, true)) {
-                return response()->json(['success' => false, 'message' => 'Template does not belong to this branch'], 422);
+        $templateIdsToValidate = array_values($map);
+        if ($staffTemplateId) {
+            $templateIdsToValidate[] = $staffTemplateId;
+        }
+        if ($templateIdsToValidate !== []) {
+            $validIds = SmsTemplate::query()
+                ->where('branch_id', $branchId)
+                ->where('is_active', true)
+                ->whereIn('id', $templateIdsToValidate)
+                ->pluck('id')
+                ->map(fn ($id) => (int) $id)
+                ->all();
+            foreach ($map as $templateId) {
+                if (! in_array($templateId, $validIds, true)) {
+                    return response()->json(['success' => false, 'message' => 'Template does not belong to this branch'], 422);
+                }
+            }
+            if ($staffTemplateId && ! in_array($staffTemplateId, $validIds, true)) {
+                return response()->json(['success' => false, 'message' => 'Staff template does not belong to this branch'], 422);
             }
         }
 
@@ -630,11 +829,10 @@ class NotificationCampaignController extends Controller
             'branch_id' => $branchId,
             'academic_year' => $academicYear,
             'event_date' => $request->event_date,
-            'targets' => array_map(fn ($row) => [
-                'grade' => (string) $row['grade'],
-                'section' => (string) $row['section'],
-            ], $request->targets),
+            'targets' => $targets,
             'template_map' => $map,
+            'staff_user_ids' => $staffUserIds !== [] ? $staffUserIds : null,
+            'staff_template_id' => $staffUserIds !== [] ? $staffTemplateId : null,
             'expected_recipient_count' => (int) $request->input('expected_recipient_count', 0),
             'exam_id' => (string) $request->module === 'exams' ? $examId : null,
             'fee_type' => (string) $request->module === 'fees' && $feeNotifyMode === 'due' ? $feeType : null,

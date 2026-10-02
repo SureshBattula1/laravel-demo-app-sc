@@ -3,12 +3,32 @@
 # Activated automatically by `composer install`/`composer update` (see composer.json
 # post-install-cmd/post-update-cmd), which run `git config core.hooksPath .githooks`.
 
+STAGED_PHP=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.php$' || true)
+
+if [ -z "$STAGED_PHP" ]; then
+  exit 0
+fi
+
 echo "Running Laravel Pint on staged PHP files..."
+./vendor/bin/pint --dirty
+
+if [ $? -ne 0 ]; then
+  echo ""
+  echo "Pint failed to run."
+  exit 1
+fi
+
+echo "$STAGED_PHP" | while IFS= read -r file; do
+  if [ -n "$file" ] && [ -f "$file" ]; then
+    git add "$file"
+  fi
+done
+
 ./vendor/bin/pint --dirty --test
 
 if [ $? -ne 0 ]; then
   echo ""
-  echo "Pint found style issues in staged files."
+  echo "Pint found style issues that could not be fixed automatically."
   echo "Run: ./vendor/bin/pint --dirty   (then re-stage and commit again)"
   exit 1
 fi

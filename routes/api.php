@@ -656,6 +656,8 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
             ->middleware('permission:notifications.view');
         Route::get('/notification-campaigns/fees-due-notify-meta', [NotificationCampaignController::class, 'feesDueNotifyMeta'])
             ->middleware('permission:notifications.view');
+        Route::get('/notification-campaigns/staff-recipient-options', [NotificationCampaignController::class, 'staffRecipientOptions'])
+            ->middleware('permission:notifications.create');
         Route::get('/notification-campaigns/eligible-targets', [NotificationCampaignController::class, 'eligibleTargets'])
             ->middleware('permission:notifications.view');
         Route::post('/notification-campaigns/preview', [NotificationCampaignController::class, 'preview'])

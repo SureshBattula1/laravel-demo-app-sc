@@ -20,6 +20,9 @@ class NotificationCampaign extends Model
         'scheduled_at',
         'status',
         'template_map',
+        'staff_user_ids',
+        'staff_template_id',
+        'staff_materialized_at',
         'target_count',
         'recipient_count',
         'expected_recipient_count',
@@ -33,6 +36,8 @@ class NotificationCampaign extends Model
         'event_date' => 'date',
         'scheduled_at' => 'datetime',
         'template_map' => 'array',
+        'staff_user_ids' => 'array',
+        'staff_materialized_at' => 'datetime',
     ];
 
     public function branch(): BelongsTo
