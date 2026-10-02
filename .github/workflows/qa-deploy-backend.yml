@@ -59,6 +59,9 @@ jobs:
 
             # Restart queue worker to load updated application code
             php artisan queue:restart
+
+            # Restart Supervisor workers directly
+            sudo supervisorctl restart laravel-worker:*
             
             # Reload PHP-FPM to clear OPcache
             sudo systemctl reload php8.5-fpm
