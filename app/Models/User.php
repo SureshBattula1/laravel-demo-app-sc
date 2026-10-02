@@ -3,13 +3,13 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
-use Laravel\Sanctum\HasApiTokens;
-use Illuminate\Database\Eloquent\SoftDeletes;
-use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Laravel\Sanctum\HasApiTokens;
 
 class User extends Authenticatable
 {
@@ -71,8 +71,8 @@ class User extends Authenticatable
     public function roles(): BelongsToMany
     {
         return $this->belongsToMany(Role::class, 'user_roles')
-                    ->withPivot(['is_primary', 'branch_id'])
-                    ->withTimestamps();
+            ->withPivot(['is_primary', 'branch_id'])
+            ->withTimestamps();
     }
 
     /**
@@ -81,8 +81,8 @@ class User extends Authenticatable
     public function permissions(): BelongsToMany
     {
         return $this->belongsToMany(Permission::class, 'user_permissions')
-                    ->withPivot(['granted', 'branch_id'])
-                    ->withTimestamps();
+            ->withPivot(['granted', 'branch_id'])
+            ->withTimestamps();
     }
 
     /**
@@ -96,13 +96,25 @@ class User extends Authenticatable
     // Accessors
     public function getFullNameAttribute()
     {
-        return $this->first_name . ' ' . $this->last_name;
+        return $this->first_name.' '.$this->last_name;
     }
 
     // Helper methods
-    public function isSuperAdmin()
+    public function isSuperAdmin(): bool
     {
-        return $this->role === 'SuperAdmin';
+        if ($this->role === 'SuperAdmin') {
+            return true;
+        }
+
+        if (! $this->id) {
+            return false;
+        }
+
+        return DB::table('user_roles')
+            ->join('roles', 'roles.id', '=', 'user_roles.role_id')
+            ->where('user_roles.user_id', $this->id)
+            ->where('roles.slug', 'super-admin')
+            ->exists();
     }
 
     public function isCompanyAdmin()
@@ -142,15 +154,16 @@ class User extends Authenticatable
      */
     public function hasPermission(string $permissionSlug, ?int $branchId = null): bool
     {
-        // REMOVED SuperAdmin bypass - SuperAdmin now follows permissions like everyone else
-        // If you want SuperAdmin to have all permissions, assign them to the SuperAdmin role
+        if ($this->isSuperAdmin()) {
+            return true;
+        }
 
         // ✅ OPTIMIZED: Single query using UNION to check both user_permissions and role_permissions
         $permission = DB::table('permissions')
             ->where('slug', $permissionSlug)
             ->first();
 
-        if (!$permission) {
+        if (! $permission) {
             return false;
         }
 
@@ -161,7 +174,7 @@ class User extends Authenticatable
             ->where('user_id', $this->id)
             ->where('permission_id', $permissionId)
             // A null branch_id grant applies to all branches (see the branch role query below).
-            ->when($branchId, fn($q) => $q->where(fn($qq) => $qq->whereNull('branch_id')->orWhere('branch_id', $branchId)))
+            ->when($branchId, fn ($q) => $q->where(fn ($qq) => $qq->whereNull('branch_id')->orWhere('branch_id', $branchId)))
             ->first();
 
         // If user has explicit override, use it (granted=true means YES, granted=false means NO)
@@ -175,7 +188,7 @@ class User extends Authenticatable
             ->where('user_roles.user_id', $this->id)
             ->where('role_permissions.permission_id', $permissionId)
             // Grant is satisfied by an all-branches assignment (branch_id null) OR the specific branch.
-            ->when($branchId, fn($q) => $q->where(fn($qq) => $qq->whereNull('user_roles.branch_id')->orWhere('user_roles.branch_id', $branchId)))
+            ->when($branchId, fn ($q) => $q->where(fn ($qq) => $qq->whereNull('user_roles.branch_id')->orWhere('user_roles.branch_id', $branchId)))
             ->exists();
     }
 
@@ -185,6 +198,10 @@ class User extends Authenticatable
      */
     public function hasAnyPermission(array $permissions, ?int $branchId = null): bool
     {
+        if ($this->isSuperAdmin()) {
+            return true;
+        }
+
         if (empty($permissions)) {
             return false;
         }
@@ -203,7 +220,7 @@ class User extends Authenticatable
         $userOverride = DB::table('user_permissions')
             ->where('user_id', $this->id)
             ->whereIn('permission_id', $permissionIds)
-            ->when($branchId, fn($q) => $q->where(fn($qq) => $qq->whereNull('branch_id')->orWhere('branch_id', $branchId)))
+            ->when($branchId, fn ($q) => $q->where(fn ($qq) => $qq->whereNull('branch_id')->orWhere('branch_id', $branchId)))
             ->where('granted', true)
             ->exists();
 
@@ -215,7 +232,7 @@ class User extends Authenticatable
         $deniedPermission = DB::table('user_permissions')
             ->where('user_id', $this->id)
             ->whereIn('permission_id', $permissionIds)
-            ->when($branchId, fn($q) => $q->where(fn($qq) => $qq->whereNull('branch_id')->orWhere('branch_id', $branchId)))
+            ->when($branchId, fn ($q) => $q->where(fn ($qq) => $qq->whereNull('branch_id')->orWhere('branch_id', $branchId)))
             ->where('granted', false)
             ->pluck('permission_id')
             ->toArray();
@@ -232,7 +249,7 @@ class User extends Authenticatable
             ->join('role_permissions', 'user_roles.role_id', '=', 'role_permissions.role_id')
             ->where('user_roles.user_id', $this->id)
             ->whereIn('role_permissions.permission_id', $allowedPermissionIds)
-            ->when($branchId, fn($q) => $q->where(fn($qq) => $qq->whereNull('user_roles.branch_id')->orWhere('user_roles.branch_id', $branchId)))
+            ->when($branchId, fn ($q) => $q->where(fn ($qq) => $qq->whereNull('user_roles.branch_id')->orWhere('user_roles.branch_id', $branchId)))
             ->exists();
     }
 
@@ -242,31 +259,35 @@ class User extends Authenticatable
     public function hasAllPermissions(array $permissions, ?int $branchId = null): bool
     {
         foreach ($permissions as $permission) {
-            if (!$this->hasPermission($permission, $branchId)) {
+            if (! $this->hasPermission($permission, $branchId)) {
                 return false;
             }
         }
+
         return true;
     }
 
     /**
      * Get all user permissions (from roles + overrides)
      * NO CACHING - Always fresh from database
-     * 
+     *
      * Logic:
      * 1. Get all permissions from user's roles
      * 2. Apply user-specific overrides (granted=true adds, granted=false removes)
-     * 
-     * Note: SuperAdmin bypass removed - SuperAdmin must have permissions assigned to role
+     *
+     * SuperAdmin receives every permission slug (login payload + frontend guards).
      */
     public function getAllPermissions(?int $branchId = null): Collection
     {
+        if ($this->isSuperAdmin()) {
+            return collect(DB::table('permissions')->get());
+        }
+
         // STEP 1: Get all permissions from all assigned roles
         $rolePermissionIds = \DB::table('user_roles')
             ->join('role_permissions', 'user_roles.role_id', '=', 'role_permissions.role_id')
             ->where('user_roles.user_id', $this->id)
-            ->when($branchId, fn($q) => $q->where(fn($qq) =>
-                $qq->whereNull('user_roles.branch_id')->orWhere('user_roles.branch_id', $branchId)
+            ->when($branchId, fn ($q) => $q->where(fn ($qq) => $qq->whereNull('user_roles.branch_id')->orWhere('user_roles.branch_id', $branchId)
             ))
             ->distinct()
             ->pluck('role_permissions.permission_id')
@@ -283,15 +304,14 @@ class User extends Authenticatable
         // STEP 2: Apply user-specific permission overrides
         $userOverrides = \DB::table('user_permissions')
             ->where('user_id', $this->id)
-            ->when($branchId, fn($q) => $q->where(fn($qq) =>
-                $qq->whereNull('branch_id')->orWhere('branch_id', $branchId)
+            ->when($branchId, fn ($q) => $q->where(fn ($qq) => $qq->whereNull('branch_id')->orWhere('branch_id', $branchId)
             ))
             ->get();
 
         foreach ($userOverrides as $override) {
             if ($override->granted) {
                 // GRANT: Add this permission (even if not in role)
-                if (!$finalPermissions->has($override->permission_id)) {
+                if (! $finalPermissions->has($override->permission_id)) {
                     $permission = \DB::table('permissions')
                         ->where('id', $override->permission_id)
                         ->first();
@@ -326,10 +346,10 @@ class User extends Authenticatable
         return $this->hasAnyPermission([
             'system.cross_branch_access',
             'system.manage_all_branches',
-            'system.view_all_branches'
+            'system.view_all_branches',
         ]);
     }
-    
+
     /**
      * Check if user can manage (edit/delete) across branches
      */
@@ -337,10 +357,10 @@ class User extends Authenticatable
     {
         return $this->hasAnyPermission([
             'system.cross_branch_access',
-            'system.manage_all_branches'
+            'system.manage_all_branches',
         ]);
     }
-    
+
     /**
      * Check if user can view all branches (read-only)
      */
@@ -349,7 +369,7 @@ class User extends Authenticatable
         return $this->hasAnyPermission([
             'system.cross_branch_access',
             'system.manage_all_branches',
-            'system.view_all_branches'
+            'system.view_all_branches',
         ]);
     }
 }

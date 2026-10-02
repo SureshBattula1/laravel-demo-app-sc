@@ -16,27 +16,31 @@ class CheckPermission
      */
     public function handle(Request $request, Closure $next, string $permission): Response
     {
-        if (!$request->user()) {
+        if (! $request->user()) {
             return response()->json([
                 'success' => false,
-                'message' => 'Unauthenticated'
+                'message' => 'Unauthenticated',
             ], 401);
         }
 
-        // Get branch_id from request (query param, route param, or body)
-        $branchId = $request->input('branch_id') 
-                    ?? $request->route('branch_id') 
-                    ?? $request->query('branch_id');
+        $rawBranchId = $request->input('branch_id')
+            ?? $request->route('branch_id')
+            ?? $request->query('branch_id');
+        $branchId = ($rawBranchId !== null && $rawBranchId !== '')
+            ? (int) $rawBranchId
+            : null;
+        if ($branchId === 0) {
+            $branchId = null;
+        }
 
-        if (!$request->user()->hasPermission($permission, $branchId)) {
+        if (! $request->user()->hasPermission($permission, $branchId)) {
             return response()->json([
                 'success' => false,
                 'message' => 'You do not have permission to perform this action',
-                'required_permission' => $permission
+                'required_permission' => $permission,
             ], 403);
         }
 
         return $next($request);
     }
 }
-
