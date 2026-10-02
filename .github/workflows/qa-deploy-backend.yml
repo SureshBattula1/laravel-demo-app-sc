@@ -3,7 +3,7 @@ name: Deploy Laravel Backend to AWS EC2
 on:
   push:
     branches:
-      - api-v1-4.0 # Triggers automatically when code is pushed or merged into api-v1-4.0
+      - qa-api-v1-5.0 # Triggers automatically when code is pushed or merged into api-v1-4.0
 
 jobs:
   deploy:
