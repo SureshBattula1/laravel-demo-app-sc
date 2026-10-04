@@ -65,16 +65,18 @@ class NotificationCampaignController extends Controller
             $this->campaigns->warmFeesReminderCache($branchId, $academicYear);
         }
 
-        $delivery = $this->campaigns->deliveryStatusBySection(
-            $module,
-            $branchId,
-            $resolvedDate,
-            $examId,
-            $notifyMode,
-            $feeType,
-            $feeNotifyMode,
-            $feeStructureId,
-        );
+        $delivery = $module === 'assignments' && $resolvedDate !== null
+            ? $this->campaigns->assignmentDeliveryStatusBySection($branchId, $resolvedDate)
+            : $this->campaigns->deliveryStatusBySection(
+                $module,
+                $branchId,
+                $resolvedDate,
+                $examId,
+                $notifyMode,
+                $feeType,
+                $feeNotifyMode,
+                $feeStructureId,
+            );
         $data = $this->campaigns->eligibleTargetsWithDelivery(
             $module,
             $branchId,
@@ -124,6 +126,8 @@ class NotificationCampaignController extends Controller
         }
         if ($module === 'assignments' && $resolvedDate !== null) {
             $meta['assignment_status_keys'] = $this->campaigns->assignmentStatusKeysForDate($branchId, $resolvedDate);
+            $meta['assignment_by_section'] = (object) $this->campaigns->assignmentSummaryBySection($branchId, $resolvedDate);
+            $meta['published_assignment_count'] = $this->campaigns->publishedAssignmentsCount($branchId, $resolvedDate);
         }
 
         return response()->json([
@@ -164,24 +168,31 @@ class NotificationCampaignController extends Controller
         $notifyMode = in_array($notifyMode, ['scheduled', 'result'], true) ? $notifyMode : null;
         [$feeType, $feeNotifyMode, $feeStructureId] = $this->resolveFeeScopeQueryParams($request, $module);
 
-        $delivery = $this->campaigns->deliveryStatusBySection(
-            $module,
-            $branchId,
-            $resolvedDate,
-            $examId,
-            $notifyMode,
-            $feeType,
-            $feeNotifyMode,
-            $feeStructureId,
-        );
+        $delivery = $module === 'assignments' && $resolvedDate !== null
+            ? $this->campaigns->assignmentDeliveryStatusBySection($branchId, $resolvedDate)
+            : $this->campaigns->deliveryStatusBySection(
+                $module,
+                $branchId,
+                $resolvedDate,
+                $examId,
+                $notifyMode,
+                $feeType,
+                $feeNotifyMode,
+                $feeStructureId,
+            );
+
+        $meta = [
+            'event_date' => $resolvedDate,
+            'delivery_by_section' => (object) $delivery,
+        ];
+        if ($module === 'assignments' && $resolvedDate !== null) {
+            $meta['assignment_by_section'] = (object) $this->campaigns->assignmentSummaryBySection($branchId, $resolvedDate);
+        }
 
         return response()->json([
             'success' => true,
             'data' => [],
-            'meta' => [
-                'event_date' => $resolvedDate,
-                'delivery_by_section' => (object) $delivery,
-            ],
+            'meta' => $meta,
         ]);
     }
 
@@ -662,6 +673,17 @@ class NotificationCampaignController extends Controller
         $branchId = $this->resolveBranchIdFromRequest($request);
         if ($branchId === null || $branchId <= 0 || ! $this->canAccessBranch($request, $branchId)) {
             return response()->json(['success' => false, 'message' => 'Branch is required'], 422);
+        }
+
+        $compose = filter_var($request->query('compose', false), FILTER_VALIDATE_BOOLEAN);
+        if ($compose) {
+            $payload = $this->campaigns->staffRecipientOptions($branchId, now()->toDateString());
+
+            return response()->json([
+                'success' => true,
+                'data' => ['groups' => $payload['groups'] ?? []],
+                'meta' => ['compose' => true],
+            ]);
         }
 
         $date = (string) $request->query('date', '');

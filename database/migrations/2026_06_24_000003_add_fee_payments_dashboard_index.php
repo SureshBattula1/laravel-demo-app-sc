@@ -13,12 +13,16 @@ return new class extends Migration
 {
     public function up(): void
     {
-        if (!Schema::hasTable('fee_payments')) {
+        if (DB::getDriverName() === 'sqlite') {
+            return;
+        }
+
+        if (! Schema::hasTable('fee_payments')) {
             return;
         }
         $exists = collect(DB::select('SHOW INDEX FROM fee_payments'))
             ->contains(fn ($i) => $i->Key_name === 'fee_payments_branch_date_status_index');
-        if (!$exists) {
+        if (! $exists) {
             Schema::table('fee_payments', function (Blueprint $table) {
                 $table->index(['branch_id', 'payment_date', 'payment_status'], 'fee_payments_branch_date_status_index');
             });
@@ -27,7 +31,11 @@ return new class extends Migration
 
     public function down(): void
     {
-        if (!Schema::hasTable('fee_payments')) {
+        if (DB::getDriverName() === 'sqlite') {
+            return;
+        }
+
+        if (! Schema::hasTable('fee_payments')) {
             return;
         }
         $exists = collect(DB::select('SHOW INDEX FROM fee_payments'))

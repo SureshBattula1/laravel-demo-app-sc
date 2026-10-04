@@ -5,12 +5,14 @@ namespace App\Http\Controllers;
 use App\Http\Traits\PaginatesAndSorts;
 use App\Jobs\DispatchAssignmentNotificationsJob;
 use App\Models\Assignment;
+use App\Models\AssignmentSubmission;
 use App\Models\Branch;
 use App\Models\Student;
 use App\Models\Subject;
 use App\Models\UniversalAttachment;
 use App\Services\AcademicYearContext;
 use App\Services\AssignmentRecipientResolver;
+use App\Services\AssignmentSubmissionService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -25,7 +27,8 @@ class AssignmentController extends Controller
 
     public function __construct(
         protected AcademicYearContext $academicYearContext,
-        protected AssignmentRecipientResolver $recipientResolver
+        protected AssignmentRecipientResolver $recipientResolver,
+        protected AssignmentSubmissionService $submissionService,
     ) {}
 
     public function index(Request $request)
@@ -92,7 +95,19 @@ class AssignmentController extends Controller
             );
 
             $viewerId = $request->user()?->id;
-            $data = collect($paginator->items())->map(fn (Assignment $a) => $this->present($a, false, $viewerId))->values();
+            $studentId = $user->role === 'Student'
+                ? $this->submissionService->studentIdForUser($user)
+                : null;
+            $mySubmissions = [];
+            if ($studentId) {
+                $assignmentIds = collect($paginator->items())->pluck('id')->map(fn ($id) => (int) $id)->all();
+                $mySubmissions = $this->submissionService->submissionsForStudentAssignments($studentId, $assignmentIds);
+            }
+            $data = collect($paginator->items())->map(function (Assignment $a) use ($viewerId, $user, $mySubmissions) {
+                $mySubmission = $mySubmissions[(int) $a->id] ?? null;
+
+                return $this->present($a, false, $viewerId, $user, $mySubmission);
+            })->values();
 
             return response()->json([
                 'success' => true,
@@ -123,12 +138,74 @@ class AssignmentController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data' => $this->present($assignment, true, $request->user()?->id),
+                'data' => $this->present(
+                    $assignment,
+                    true,
+                    $request->user()?->id,
+                    $request->user(),
+                    $this->mySubmissionForViewer($request, $assignment),
+                ),
             ]);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json(['success' => false, 'message' => 'Assignment not found'], 404);
         } catch (\Throwable $e) {
             return $this->serverErrorResponse('Failed to fetch assignment', $e);
+        }
+    }
+
+    public function storeMySubmission(Request $request, $id)
+    {
+        try {
+            $user = $request->user();
+            if (! $user || $user->role !== 'Student') {
+                return $this->forbiddenResponse('Only students can mark assignments complete');
+            }
+
+            $assignment = Assignment::query()->findOrFail($id);
+            if (! $this->canViewAssignment($request, $assignment)) {
+                return response()->json(['success' => false, 'message' => 'Assignment not found'], 404);
+            }
+
+            $studentId = $this->submissionService->studentIdForUser($user);
+            if (! $studentId || ! $this->submissionService->canStudentSubmit($request, $assignment, $studentId)) {
+                return $this->forbiddenResponse('You cannot submit this assignment');
+            }
+
+            $validator = Validator::make($request->all(), [
+                'submission_text' => 'nullable|string|max:2000',
+            ]);
+            if ($validator->fails()) {
+                return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
+            }
+
+            $text = $request->input('submission_text');
+            try {
+                $result = $this->submissionService->submitForStudent(
+                    $assignment,
+                    $studentId,
+                    is_string($text) ? $text : null,
+                );
+            } catch (\RuntimeException $e) {
+                if ($e->getMessage() === 'already_submitted') {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Assignment already marked complete',
+                    ], 409);
+                }
+                throw $e;
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Assignment marked complete',
+                'data' => [
+                    'my_submission' => $result['payload'],
+                ],
+            ]);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json(['success' => false, 'message' => 'Assignment not found'], 404);
+        } catch (\Throwable $e) {
+            return $this->serverErrorResponse('Failed to submit assignment', $e);
         }
     }
 
@@ -325,14 +402,14 @@ class AssignmentController extends Controller
             $assignment->load(['subject:id,name,code', 'teacher:id,first_name,last_name'])
                 ->loadCount(['recipients', 'submissions']);
 
-            if ($assignment->is_published) {
+            if ($assignment->is_published && config('notification_campaigns.assignment_auto_inbox_notify')) {
                 DispatchAssignmentNotificationsJob::dispatchFor($assignment->id, 'created');
             }
 
             return response()->json([
                 'success' => true,
                 'message' => 'Assignment created successfully',
-                'data' => $this->present($assignment, true, $request->user()?->id),
+                'data' => $this->present($assignment, true, $request->user()?->id, $request->user()),
             ], 201);
         } catch (ValidationException $e) {
             return response()->json(['success' => false, 'errors' => $e->errors()], 422);
@@ -395,7 +472,7 @@ class AssignmentController extends Controller
             $notifyRequested = $request->has('notify') ? $request->boolean('notify') : true;
             $becamePublished = ! $wasPublished && $assignment->is_published;
             $shouldNotify = ($notifyRequested || $becamePublished) && $assignment->is_published;
-            if ($shouldNotify) {
+            if ($shouldNotify && config('notification_campaigns.assignment_auto_inbox_notify')) {
                 DispatchAssignmentNotificationsJob::dispatchFor(
                     $assignment->id,
                     $becamePublished ? 'created' : 'updated'
@@ -405,7 +482,7 @@ class AssignmentController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Assignment updated successfully',
-                'data' => $this->present($assignment, true, $request->user()?->id),
+                'data' => $this->present($assignment, true, $request->user()?->id, $request->user()),
             ]);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json(['success' => false, 'message' => 'Assignment not found'], 404);
@@ -435,8 +512,13 @@ class AssignmentController extends Controller
         }
     }
 
-    private function present(Assignment $assignment, bool $detailed = false, $viewerId = null): array
-    {
+    private function present(
+        Assignment $assignment,
+        bool $detailed = false,
+        $viewerId = null,
+        $viewer = null,
+        ?AssignmentSubmission $mySubmission = null,
+    ): array {
         $due = $assignment->due_date;
         $status = ! $assignment->is_published
             ? 'Draft'
@@ -465,7 +547,7 @@ class AssignmentController extends Controller
             'assignment_type' => $assignment->assignment_type,
             'teacher_id' => $assignment->teacher_id,
             'created_by' => $assignment->created_by,
-            'can_edit' => $viewerId !== null && (int) $assignment->created_by === (int) $viewerId,
+            'can_edit' => $this->assignmentEditableByViewer($assignment, $viewerId, $viewer),
         ];
 
         if ($detailed) {
@@ -477,7 +559,29 @@ class AssignmentController extends Controller
                 : [];
         }
 
+        if ($viewer && $viewer->role === 'Student') {
+            $payload['my_status'] = $this->submissionService->myStatusKey($mySubmission);
+            $payload['my_submission'] = $this->submissionService->presentSubmission($mySubmission);
+        }
+
         return $payload;
+    }
+
+    private function mySubmissionForViewer(Request $request, Assignment $assignment): ?AssignmentSubmission
+    {
+        $user = $request->user();
+        if (! $user || $user->role !== 'Student') {
+            return null;
+        }
+        $studentId = $this->submissionService->studentIdForUser($user);
+        if (! $studentId) {
+            return null;
+        }
+
+        return AssignmentSubmission::query()
+            ->where('assignment_id', $assignment->id)
+            ->where('student_id', $studentId)
+            ->first();
     }
 
     private function syncUniversalAttachments(Assignment $assignment, $items, bool $replace = false): void
@@ -551,6 +655,25 @@ class AssignmentController extends Controller
     private function canCreateAssignments($user): bool
     {
         return $user && in_array($user->role, ['Teacher', 'BranchAdmin', 'SuperAdmin', 'Staff'], true);
+    }
+
+    private function assignmentEditableByViewer(Assignment $assignment, $viewerId, $viewer): bool
+    {
+        if ($viewerId === null) {
+            return false;
+        }
+        $viewerId = (int) $viewerId;
+        if ((int) $assignment->created_by === $viewerId) {
+            return true;
+        }
+        if ((int) $assignment->teacher_id === $viewerId) {
+            return true;
+        }
+        if ($viewer && in_array($viewer->role, ['BranchAdmin', 'SuperAdmin'], true)) {
+            return true;
+        }
+
+        return false;
     }
 
     private function canViewAssignment(Request $request, Assignment $assignment): bool

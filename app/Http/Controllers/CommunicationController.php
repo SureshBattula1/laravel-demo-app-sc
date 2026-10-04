@@ -8,8 +8,9 @@ use App\Models\Circular;
 use App\Models\Notification;
 use App\Models\NotificationCampaignRecipient;
 use App\Services\AcademicYearContext;
-use App\Services\AssignmentRecipientResolver;
+use App\Services\CustomBroadcastService;
 use App\Services\InboxNotificationService;
+use App\Services\NotificationCampaignService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -79,6 +80,11 @@ class CommunicationController extends Controller
                 $query->whereDate('created_at', now()->toDateString());
             } elseif ($period === 'older') {
                 $query->whereDate('created_at', '<', now()->toDateString());
+            }
+
+            $module = strip_tags((string) $request->get('module', ''));
+            if ($module !== '' && in_array($module, InboxNotificationService::INBOX_MODULE_FILTERS, true)) {
+                app(InboxNotificationService::class)->applyModuleFilter($query, $module);
             }
 
             $query->orderBy('created_at', 'desc');
@@ -307,70 +313,33 @@ class CommunicationController extends Controller
                 return response()->json(['success' => false, 'message' => 'Not allowed'], 403);
             }
 
-            $validator = Validator::make($request->all(), [
-                'title' => 'required|string|max:255',
-                'description' => 'required|string',
-                'optional_description' => 'nullable|string',
-                'grade' => 'required|string|max:50',
-                'section' => 'required|string|max:50',
-                'audience_mode' => 'required|in:all,custom',
-                'student_ids' => 'nullable|array',
-                'student_ids.*' => 'integer',
-                'attachments' => 'nullable|array',
-                'branch_id' => 'nullable|exists:branches,id',
-            ]);
-            if ($validator->fails()) {
-                return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
-            }
-
             $branchId = $this->resolveWritableBranchId($request, $request->branch_id);
             if (! $branchId || ! $this->canManageBranch($request, $branchId)) {
                 return response()->json(['success' => false, 'message' => 'Not allowed'], 403);
             }
 
-            $grade = strip_tags($request->grade);
-            $section = strip_tags($request->section);
-            $title = strip_tags($request->title);
-            $description = strip_tags($request->description);
-            $optional = $request->optional_description ? strip_tags($request->optional_description) : null;
+            $broadcast = app(CustomBroadcastService::class);
+            $payload = $broadcast->parseAndValidate($request->all());
 
             $academicYearId = app(AcademicYearContext::class)->id(false);
-            $studentIds = app(AssignmentRecipientResolver::class)->resolveStudentIds(
-                $branchId,
-                $grade,
-                $section,
-                $academicYearId,
-                $request->audience_mode,
-                $request->student_ids
-            );
-            $userIds = app(AssignmentRecipientResolver::class)->studentUserIds($studentIds);
-            if ($userIds === []) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No students with login accounts found for this class and section.',
-                ], 422);
-            }
+            $resolved = $broadcast->resolveRecipientUserIds($branchId, $academicYearId, $payload);
+            $userIds = $resolved['user_ids'];
 
             $groupKey = 'custom:'.Str::uuid()->toString();
             $sentAt = now();
-            $metadata = [
-                'source' => 'custom',
-                'event' => 'broadcast',
-                'group_key' => $groupKey,
-                'grade' => $grade,
-                'section' => $section,
-                'audience_mode' => $request->audience_mode,
-                'student_count' => count($userIds),
-                'description' => $description,
-                'optional_description' => $optional,
-            ];
+            $metadata = $broadcast->buildMetadata(
+                $groupKey,
+                $payload,
+                $resolved['student_user_count'],
+                $resolved['staff_user_count']
+            );
 
             $inbox = app(InboxNotificationService::class);
             $inbox->insertForUsers(
                 $userIds,
                 $branchId,
-                $title,
-                $description,
+                $payload['title'],
+                $payload['description'],
                 $metadata,
                 $user->id,
                 'Info',
@@ -380,8 +349,8 @@ class CommunicationController extends Controller
             $campaignId = (int) Notification::withoutTenantScope()
                 ->where('metadata->group_key', $groupKey)
                 ->min('id');
-            if ($campaignId > 0) {
-                $inbox->syncNotificationAttachments($campaignId, $request->attachments ?? []);
+            if ($campaignId > 0 && $payload['attachments'] !== []) {
+                $inbox->syncNotificationAttachments($campaignId, $payload['attachments']);
                 $rows = Notification::withoutTenantScope()
                     ->where('metadata->group_key', $groupKey)
                     ->get();
@@ -393,6 +362,10 @@ class CommunicationController extends Controller
                 }
             }
 
+            $firstTarget = $payload['targets'][0] ?? ['grade' => '', 'section' => ''];
+            $grade = $payload['legacy_grade'] ?? $firstTarget['grade'];
+            $section = $payload['legacy_section'] ?? $firstTarget['section'];
+
             return response()->json([
                 'success' => true,
                 'message' => 'Notification sent successfully',
@@ -401,7 +374,9 @@ class CommunicationController extends Controller
                     'grade' => $grade,
                     'section' => $section,
                     'class' => $this->audienceLabel($grade, $section),
-                    'student_count' => count($userIds),
+                    'student_count' => $resolved['student_user_count'],
+                    'staff_count' => $resolved['staff_user_count'],
+                    'recipient_count' => count($userIds),
                     'sent_at' => $sentAt->toDateTimeString(),
                 ],
             ], 201);
@@ -412,6 +387,25 @@ class CommunicationController extends Controller
 
             return response()->json(['success' => false, 'message' => 'Failed to send notification'], 500);
         }
+    }
+
+    public function composeStaffRecipientOptions(Request $request)
+    {
+        $branchId = $this->resolveWritableBranchId($request, $request->query('branch_id'));
+        if (! $branchId || ! $this->canManageBranch($request, $branchId)) {
+            return response()->json(['success' => false, 'message' => 'Not allowed'], 403);
+        }
+
+        $payload = app(NotificationCampaignService::class)->staffRecipientOptions(
+            $branchId,
+            now()->toDateString()
+        );
+
+        return response()->json([
+            'success' => true,
+            'data' => ['groups' => $payload['groups'] ?? []],
+            'meta' => ['compose' => true],
+        ]);
     }
 
     public function getSentNotifications(Request $request)

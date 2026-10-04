@@ -14,12 +14,16 @@ return new class extends Migration
 {
     public function up(): void
     {
-        if (!Schema::hasTable('subjects')) {
+        if (DB::getDriverName() === 'sqlite') {
+            return;
+        }
+
+        if (! Schema::hasTable('subjects')) {
             return;
         }
 
         // Drop the global unique index on `code` if present.
-        $hasGlobalUnique = collect(DB::select("SHOW INDEX FROM subjects"))
+        $hasGlobalUnique = collect(DB::select('SHOW INDEX FROM subjects'))
             ->contains(fn ($i) => $i->Key_name === 'subjects_code_unique');
 
         if ($hasGlobalUnique) {
@@ -29,10 +33,10 @@ return new class extends Migration
         }
 
         // Add composite unique (branch_id, code) if not already present.
-        $hasComposite = collect(DB::select("SHOW INDEX FROM subjects"))
+        $hasComposite = collect(DB::select('SHOW INDEX FROM subjects'))
             ->contains(fn ($i) => $i->Key_name === 'subjects_branch_id_code_unique');
 
-        if (!$hasComposite) {
+        if (! $hasComposite) {
             Schema::table('subjects', function (Blueprint $table) {
                 $table->unique(['branch_id', 'code'], 'subjects_branch_id_code_unique');
             });
@@ -41,11 +45,15 @@ return new class extends Migration
 
     public function down(): void
     {
-        if (!Schema::hasTable('subjects')) {
+        if (DB::getDriverName() === 'sqlite') {
             return;
         }
 
-        $hasComposite = collect(DB::select("SHOW INDEX FROM subjects"))
+        if (! Schema::hasTable('subjects')) {
+            return;
+        }
+
+        $hasComposite = collect(DB::select('SHOW INDEX FROM subjects'))
             ->contains(fn ($i) => $i->Key_name === 'subjects_branch_id_code_unique');
 
         if ($hasComposite) {
@@ -54,10 +62,10 @@ return new class extends Migration
             });
         }
 
-        $hasGlobalUnique = collect(DB::select("SHOW INDEX FROM subjects"))
+        $hasGlobalUnique = collect(DB::select('SHOW INDEX FROM subjects'))
             ->contains(fn ($i) => $i->Key_name === 'subjects_code_unique');
 
-        if (!$hasGlobalUnique) {
+        if (! $hasGlobalUnique) {
             Schema::table('subjects', function (Blueprint $table) {
                 $table->unique('code', 'subjects_code_unique');
             });

@@ -47,6 +47,10 @@ class SmsTemplateTagRenderer
         'holiday_date',
         'exam_name',
         'assignment_title',
+        'assignment_titles',
+        'assignment_list',
+        'assignment_count',
+        'subject_names',
     ];
 
     /**

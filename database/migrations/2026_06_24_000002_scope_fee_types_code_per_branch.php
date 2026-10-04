@@ -13,7 +13,11 @@ return new class extends Migration
 {
     public function up(): void
     {
-        if (!Schema::hasTable('fee_types')) {
+        if (DB::getDriverName() === 'sqlite') {
+            return;
+        }
+
+        if (! Schema::hasTable('fee_types')) {
             return;
         }
 
@@ -27,7 +31,7 @@ return new class extends Migration
 
         $hasComposite = collect(DB::select('SHOW INDEX FROM fee_types'))
             ->contains(fn ($i) => $i->Key_name === 'fee_types_branch_id_code_unique');
-        if (!$hasComposite) {
+        if (! $hasComposite) {
             Schema::table('fee_types', function (Blueprint $table) {
                 $table->unique(['branch_id', 'code'], 'fee_types_branch_id_code_unique');
             });
@@ -36,7 +40,11 @@ return new class extends Migration
 
     public function down(): void
     {
-        if (!Schema::hasTable('fee_types')) {
+        if (DB::getDriverName() === 'sqlite') {
+            return;
+        }
+
+        if (! Schema::hasTable('fee_types')) {
             return;
         }
         $hasComposite = collect(DB::select('SHOW INDEX FROM fee_types'))

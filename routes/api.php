@@ -281,6 +281,7 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
         Route::post('/', [AssignmentController::class, 'store']);
         Route::get('eligible-students', [AssignmentController::class, 'eligibleStudents']);
         Route::post('preview-recipients', [AssignmentController::class, 'previewRecipients']);
+        Route::post('{id}/my-submission', [AssignmentController::class, 'storeMySubmission']);
         Route::get('{id}', [AssignmentController::class, 'show']);
         Route::put('{id}', [AssignmentController::class, 'update']);
         Route::delete('{id}', [AssignmentController::class, 'destroy']);
@@ -643,6 +644,8 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
         Route::post('/notifications', [CommunicationController::class, 'createNotification'])
             ->middleware('permission:notifications.create');
         Route::post('/notifications/broadcast', [CommunicationController::class, 'broadcastNotification'])
+            ->middleware('permission:notifications.create');
+        Route::get('/notifications/compose/staff-recipient-options', [CommunicationController::class, 'composeStaffRecipientOptions'])
             ->middleware('permission:notifications.create');
 
         Route::get('/notification-campaigns/modules', [NotificationCampaignController::class, 'modules'])

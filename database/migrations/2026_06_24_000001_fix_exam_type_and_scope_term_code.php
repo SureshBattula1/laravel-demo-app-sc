@@ -19,13 +19,13 @@ return new class extends Migration
 {
     public function up(): void
     {
-        if (Schema::hasTable('exams') && Schema::hasColumn('exams', 'type') && !Schema::hasColumn('exams', 'exam_type')) {
+        if (Schema::hasTable('exams') && Schema::hasColumn('exams', 'type') && ! Schema::hasColumn('exams', 'exam_type')) {
             Schema::table('exams', function (Blueprint $table) {
                 $table->renameColumn('type', 'exam_type');
             });
         }
 
-        if (Schema::hasTable('exam_terms')) {
+        if (Schema::hasTable('exam_terms') && DB::getDriverName() !== 'sqlite') {
             $hasGlobalUnique = collect(DB::select('SHOW INDEX FROM exam_terms'))
                 ->contains(fn ($i) => $i->Key_name === 'exam_terms_code_unique');
             if ($hasGlobalUnique) {
@@ -36,7 +36,7 @@ return new class extends Migration
 
             $hasComposite = collect(DB::select('SHOW INDEX FROM exam_terms'))
                 ->contains(fn ($i) => $i->Key_name === 'exam_terms_branch_id_code_unique');
-            if (!$hasComposite) {
+            if (! $hasComposite) {
                 Schema::table('exam_terms', function (Blueprint $table) {
                     $table->unique(['branch_id', 'code'], 'exam_terms_branch_id_code_unique');
                 });
@@ -46,13 +46,13 @@ return new class extends Migration
 
     public function down(): void
     {
-        if (Schema::hasTable('exams') && Schema::hasColumn('exams', 'exam_type') && !Schema::hasColumn('exams', 'type')) {
+        if (Schema::hasTable('exams') && Schema::hasColumn('exams', 'exam_type') && ! Schema::hasColumn('exams', 'type')) {
             Schema::table('exams', function (Blueprint $table) {
                 $table->renameColumn('exam_type', 'type');
             });
         }
 
-        if (Schema::hasTable('exam_terms')) {
+        if (Schema::hasTable('exam_terms') && DB::getDriverName() !== 'sqlite') {
             $hasComposite = collect(DB::select('SHOW INDEX FROM exam_terms'))
                 ->contains(fn ($i) => $i->Key_name === 'exam_terms_branch_id_code_unique');
             if ($hasComposite) {

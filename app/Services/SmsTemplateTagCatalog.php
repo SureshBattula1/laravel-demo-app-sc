@@ -52,7 +52,11 @@ class SmsTemplateTagCatalog
             'fee_type' => ['label' => 'Fee type', 'hint' => 'Fee category name', 'group' => 'fees'],
             'holiday_name' => ['label' => 'Holiday name', 'hint' => 'Holiday title', 'group' => 'holidays'],
             'exam_name' => ['label' => 'Exam name', 'hint' => 'exams.name', 'group' => 'exams'],
-            'assignment_title' => ['label' => 'Assignment title', 'hint' => 'assignments.title', 'group' => 'assignments'],
+            'assignment_title' => ['label' => 'Assignment title', 'hint' => 'First assignment line (subject – title)', 'group' => 'assignments'],
+            'assignment_titles' => ['label' => 'Assignment titles', 'hint' => 'All titles; semicolon-separated', 'group' => 'assignments'],
+            'assignment_list' => ['label' => 'Assignment list', 'hint' => 'All assignments for this student on the publish date', 'group' => 'assignments'],
+            'assignment_count' => ['label' => 'Assignment count', 'hint' => 'Number of assignments for this student', 'group' => 'assignments'],
+            'subject_names' => ['label' => 'Subject names', 'hint' => 'Unique subjects; comma-separated', 'group' => 'assignments'],
         ];
     }
 
@@ -111,7 +115,7 @@ class SmsTemplateTagCatalog
                 'amount_due', 'due_date', 'fee_type', 'date',
             ]),
             'assignments' => array_merge($common, [
-                'assignment_title', 'date',
+                'assignment_title', 'assignment_titles', 'assignment_list', 'assignment_count', 'subject_names', 'date',
             ]),
             'custom' => array_values(array_unique(array_merge(
                 $common,
