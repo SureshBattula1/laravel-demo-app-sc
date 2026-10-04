@@ -1036,6 +1036,49 @@ return [
         'sheet_name' => 'Holidays',
     ],
 
+    'users' => [
+        'columns' => [
+            'full_name' => [
+                'label' => 'Full Name',
+                'enabled' => true,
+                'width' => 24,
+            ],
+            'email' => [
+                'label' => 'Email',
+                'enabled' => true,
+                'width' => 28,
+            ],
+            'phone' => [
+                'label' => 'Phone',
+                'enabled' => true,
+                'width' => 16,
+            ],
+            'role' => [
+                'label' => 'Role',
+                'enabled' => true,
+                'width' => 16,
+            ],
+            'branch_name' => [
+                'label' => 'Branch',
+                'enabled' => true,
+                'width' => 22,
+            ],
+            'is_active' => [
+                'label' => 'Status',
+                'enabled' => true,
+                'width' => 12,
+            ],
+            'last_login' => [
+                'label' => 'Last Login',
+                'enabled' => false,
+                'width' => 18,
+                'format' => 'datetime',
+            ],
+        ],
+        'filename_prefix' => 'users',
+        'sheet_name' => 'Users',
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Global Export Settings

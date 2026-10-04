@@ -32,9 +32,9 @@ abstract class Controller
         $schoolId = $this->getCurrentSchoolId($request);
         if ($schoolId) {
             $schoolBranches = $this->getBranchIdsForSchool((int) $schoolId);
-            $scopeBranchIds = !empty($scopeBranchIds)
+            $scopeBranchIds = ! empty($scopeBranchIds)
                 ? array_values(array_intersect($scopeBranchIds, $schoolBranches))
-                : $schoolBranches;
+                : [];
         }
 
         return $query->where(function ($q) use ($scopeBranchIds, $actor) {

@@ -60,6 +60,48 @@ class GradeController extends Controller
         return null;
     }
 
+    /**
+     * Restrict grades to branches the user may access (shared by index + export).
+     */
+    private function applyGradesBranchScope($query, Request $request, ?int $branchId, array|string $accessibleBranchIds, $user): void
+    {
+        if ($branchId) {
+            $query->where('grades.branch_id', $branchId);
+
+            return;
+        }
+
+        if ($user && $user->role === 'SuperAdmin' && ! empty($user->company_id)) {
+            $query->where('schools.company_id', (int) $user->company_id);
+
+            return;
+        }
+
+        if ($accessibleBranchIds === 'all') {
+            $schoolId = $this->getCurrentSchoolId($request);
+            if ($schoolId) {
+                $branchIds = DB::table('branches')
+                    ->where('school_id', $schoolId)
+                    ->whereNull('deleted_at')
+                    ->pluck('id')
+                    ->toArray();
+                if (! empty($branchIds)) {
+                    $query->whereIn('grades.branch_id', $branchIds);
+                } else {
+                    $query->whereRaw('1 = 0');
+                }
+            }
+
+            return;
+        }
+
+        if (! empty($accessibleBranchIds)) {
+            $query->whereIn('grades.branch_id', $accessibleBranchIds);
+        } else {
+            $query->whereRaw('1 = 0');
+        }
+    }
+
     private function resolveRequestedBranchId(Request $request): ?int
     {
         $accessibleBranchIds = $this->getAccessibleBranchIds($request);
@@ -124,38 +166,7 @@ class GradeController extends Controller
                     'branches.name as branch_name'
                 );
 
-            if ($branchId) {
-                $query->where('grades.branch_id', $branchId);
-            } else {
-                // SuperAdmin in company context: filter by company via join (fast, avoids huge whereIn lists).
-                if ($user && $user->role === 'SuperAdmin' && !empty($user->company_id)) {
-                    $query->where('schools.company_id', (int) $user->company_id);
-                } elseif ($accessibleBranchIds === 'all') {
-                    // SuperAdmin: scope to the current school's branches if a school context exists;
-                    // otherwise (global SuperAdmin with no school/company context) show grades across ALL branches.
-                    $schoolId = $this->getCurrentSchoolId($request);
-                    if ($schoolId) {
-                        $branchIds = DB::table('branches')
-                            ->where('school_id', $schoolId)
-                            ->whereNull('deleted_at')
-                            ->pluck('id')
-                            ->toArray();
-                        if (!empty($branchIds)) {
-                            $query->whereIn('grades.branch_id', $branchIds);
-                        } else {
-                            $query->whereRaw('1 = 0');
-                        }
-                    }
-                    // No school context for a global SuperAdmin: no branch restriction (show all grades).
-                } else {
-                    // Other users: show all branches they can access.
-                    if (!empty($accessibleBranchIds)) {
-                        $query->whereIn('grades.branch_id', $accessibleBranchIds);
-                    } else {
-                        $query->whereRaw('1 = 0');
-                    }
-                }
-            }
+            $this->applyGradesBranchScope($query, $request, $branchId, $accessibleBranchIds, $user);
 
             // Search (grade value/label/category/branch name)
             if ($request->filled('search')) {
@@ -535,9 +546,32 @@ class GradeController extends Controller
                 ], 422);
             }
 
-            // Get all grades (simple query, no complex filtering needed)
+            $user = $request->user();
+            $accessibleBranchIds = $this->getAccessibleBranchIds($request);
             $branchId = $this->resolveRequestedBranchId($request);
-            $grades = DB::table('grades')->where('branch_id', $branchId)->get();
+
+            $query = DB::table('grades')
+                ->leftJoin('branches', 'branches.id', '=', 'grades.branch_id')
+                ->leftJoin('schools', 'schools.id', '=', 'branches.school_id')
+                ->select('grades.*');
+
+            $this->applyGradesBranchScope($query, $request, $branchId, $accessibleBranchIds, $user);
+
+            if ($request->filled('search')) {
+                $search = strip_tags((string) $request->search);
+                $query->where(function ($q) use ($search) {
+                    $q->where('grades.value', 'like', '%'.$search.'%')
+                        ->orWhere('grades.label', 'like', '%'.$search.'%')
+                        ->orWhere('grades.category', 'like', '%'.$search.'%')
+                        ->orWhere('branches.name', 'like', '%'.$search.'%');
+                });
+            }
+
+            if ($request->has('is_active') && $request->is_active !== '') {
+                $query->where('grades.is_active', $request->boolean('is_active'));
+            }
+
+            $grades = $query->orderBy('grades.branch_id')->orderBy('grades.order')->get();
 
             // Transform data for export
             $exportData = collect($grades)->map(function($grade) {

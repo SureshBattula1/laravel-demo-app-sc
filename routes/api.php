@@ -511,6 +511,7 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
     Route::prefix('users')->group(function () {
         Route::get('/', [UserController::class, 'index']);
         Route::get('/all', [UserController::class, 'all']);
+        Route::get('export', [UserController::class, 'export']);
         Route::get('/{id}', [UserController::class, 'show']);
         Route::post('/', [UserController::class, 'store']);
         Route::put('/{id}', [UserController::class, 'update']);

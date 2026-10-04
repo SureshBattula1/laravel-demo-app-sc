@@ -75,31 +75,7 @@ class BranchController extends Controller
                 }
             }
 
-            // Filter by school (school-level isolation)
-            // Company SuperAdmin: do NOT pin to a single school — company branch filter below covers all schools.
-            $user = $request->user();
-            $isCompanySuperAdmin = $user && $user->role === 'SuperAdmin' && ! empty($user->company_id);
-            if (! $isCompanySuperAdmin) {
-                $schoolId = $this->getCurrentSchoolId($request);
-                if ($schoolId) {
-                    $query->where('school_id', $schoolId);
-                }
-            }
-
-            // Apply branch access filtering (use 'id' column for branches table).
-            // IMPORTANT: For SuperAdmin with company_id (company context), include inactive branches too.
-            // The generic accessible-branch logic may return only active branches; branch management list must show all.
-            if ($isCompanySuperAdmin) {
-                // Filter by company via SQL subquery (fast, avoids plucking IDs into PHP memory).
-                $query->whereIn('school_id', function ($q) use ($user) {
-                    $q->select('id')
-                        ->from('schools')
-                        ->where('company_id', (int) $user->company_id)
-                        ->whereNull('deleted_at');
-                });
-            } else {
-                $this->applyBranchFilter($query, $request, 'id');
-            }
+            $this->applyBranchListScope($query, $request);
 
             // Search functionality
             if ($request->has('search')) {
@@ -1298,11 +1274,40 @@ class BranchController extends Controller
     }
 
     /**
+     * Tenant scope for branch list/export (must match index()).
+     */
+    protected function applyBranchListScope($query, Request $request): void
+    {
+        $user = $request->user();
+        $isCompanySuperAdmin = $user && $user->role === 'SuperAdmin' && ! empty($user->company_id);
+
+        if (! $isCompanySuperAdmin) {
+            $schoolId = $this->getCurrentSchoolId($request);
+            if ($schoolId) {
+                $query->where('school_id', $schoolId);
+            }
+        }
+
+        if ($isCompanySuperAdmin) {
+            $query->whereIn('school_id', function ($q) use ($user) {
+                $q->select('id')
+                    ->from('schools')
+                    ->where('company_id', (int) $user->company_id)
+                    ->whereNull('deleted_at');
+            });
+        } else {
+            $this->applyBranchFilter($query, $request, 'id');
+        }
+    }
+
+    /**
      * Build branch query with filters (reusable for index and export)
      */
     protected function buildBranchQuery(Request $request)
     {
         $query = Branch::with(['parentBranch', 'childBranches']);
+
+        $this->applyBranchListScope($query, $request);
 
         // Filter by active status
         if ($request->has('is_active') && $request->is_active !== '') {

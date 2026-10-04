@@ -1371,6 +1371,7 @@ class StudentController extends Controller
      */
     protected function buildStudentQuery(Request $request)
     {
+        $academicYearId = $this->academicYearContext->id(false);
         $schoolId = $this->getCurrentSchoolId($request);
         $hasGradesBranchId = Schema::hasColumn('grades', 'branch_id');
         $query = DB::table('students')
@@ -1416,6 +1417,26 @@ class StudentController extends Controller
                 DB::raw('JSON_OBJECT("id", branches.id, "name", branches.name, "code", branches.code) as branch')
             );
 
+        if ($schoolId) {
+            $query->where(function ($q) use ($schoolId) {
+                $q->where('students.school_id', $schoolId)
+                    ->orWhere(function ($q2) use ($schoolId) {
+                        $q2->whereNull('students.school_id')
+                            ->whereIn('students.branch_id', function ($sq) use ($schoolId) {
+                                $sq->select('id')
+                                    ->from('branches')
+                                    ->where('school_id', (int) $schoolId)
+                                    ->whereNull('deleted_at');
+                            });
+                    });
+            });
+        }
+
+        $user = $request->user();
+        if ($user && $user->role === 'Student') {
+            $query->where('students.user_id', $user->id);
+        }
+
         // Apply branch filtering
         $accessibleBranchIds = $this->getAccessibleBranchIds($request);
         if ($accessibleBranchIds !== 'all') {
@@ -1426,25 +1447,45 @@ class StudentController extends Controller
             }
         }
 
+        if ($academicYearId) {
+            $query->where('students.academic_year_id', $academicYearId);
+        }
+
         // Apply filters
-        if ($request->has('grade')) {
+        if ($request->filled('grade')) {
             $query->where('students.grade', $request->grade);
         }
 
-        if ($request->has('section')) {
+        if ($request->filled('section')) {
             $query->where('students.section', $request->section);
         }
 
-        if ($request->has('status')) {
+        if ($request->has('status') && $request->status !== '') {
             $query->where('students.student_status', $request->status);
         }
 
-        if ($request->has('gender')) {
+        if ($request->has('gender') && $request->gender !== '') {
             $query->where('students.gender', $request->gender);
         }
 
-        if ($request->has('branch_id')) {
-            $query->where('students.branch_id', $request->branch_id);
+        if ($request->filled('branch_id')) {
+            $query->where('students.branch_id', (int) $request->branch_id);
+        }
+
+        if ($request->filled('admission_number')) {
+            $query->where('students.admission_number', 'like', strip_tags($request->admission_number).'%');
+        }
+
+        if ($request->filled('roll_number')) {
+            $query->where('students.roll_number', 'like', strip_tags($request->roll_number).'%');
+        }
+
+        if ($request->has('is_active') && $request->is_active !== '') {
+            $isActive = filter_var($request->is_active, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+            if ($isActive !== null) {
+                $query->whereNull('users.deleted_at')
+                    ->where('users.is_active', $isActive ? 1 : 0);
+            }
         }
 
         if ($request->has('search')) {
