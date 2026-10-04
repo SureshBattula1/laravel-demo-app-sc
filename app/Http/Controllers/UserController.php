@@ -2,12 +2,18 @@
 
 namespace App\Http\Controllers;
 
+use App\Exports\UsersExport;
 use App\Models\User;
+use App\Services\CsvExportService;
+use App\Services\ExportService;
+use App\Services\PdfExportService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
+use Maatwebsite\Excel\Facades\Excel;
 
 class UserController extends Controller
 {
@@ -17,35 +23,10 @@ class UserController extends Controller
     public function index(Request $request)
     {
         $perPage = $request->get('per_page', 10);
-        $search = $request->get('search');
-        $role = $request->get('role');
-        $branch = $request->get('branch_id');
+        $query = $this->buildUserQuery($request);
 
-        $query = User::with(['branch']);
-        $this->applyUserTenantFilter($query, $request);
-        $this->applyManageableUserFilter($query, $request);
-
-        // OPTIMIZED Search filter - prefix search for better index usage
-        if ($search) {
-            $search = strip_tags($search);
-            $query->where(function ($q) use ($search) {
-                $q->where('first_name', 'like', "{$search}%")
-                  ->orWhere('last_name', 'like', "{$search}%")
-                  ->orWhere('email', 'like', "{$search}%");
-            });
-        }
-
-        // Apply role filter
-        if ($role) {
-            $query->where('role', $role);
-        }
-
-        // Apply branch filter (must still be within tenant)
-        if ($branch) {
-            if (!$this->canAccessBranch($request, (int) $branch)) {
-                return $this->forbiddenResponse('You do not have access to this branch');
-            }
-            $query->where('branch_id', $branch);
+        if ($request->filled('branch_id') && ! $this->canAccessBranch($request, (int) $request->branch_id)) {
+            return $this->forbiddenResponse('You do not have access to this branch');
         }
 
         $users = $query->latest()->paginate($perPage);
@@ -104,6 +85,133 @@ class UserController extends Controller
                 'to' => $users->lastItem()
             ]
         ]);
+    }
+
+    /**
+     * Export users using the same filters as the list screen (role, branch, status, etc.).
+     */
+    public function export(Request $request)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'format' => 'required|in:excel,pdf,csv',
+                'columns' => 'nullable|array',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'errors' => $validator->errors(),
+                ], 422);
+            }
+
+            if ($request->filled('branch_id') && ! $this->canAccessBranch($request, (int) $request->branch_id)) {
+                return $this->forbiddenResponse('You do not have access to this branch');
+            }
+
+            $users = $this->buildUserQuery($request)->latest()->get();
+
+            $exportData = $users->map(function ($user) {
+                return [
+                    'full_name' => $user->full_name,
+                    'email' => $user->email,
+                    'phone' => $user->phone,
+                    'role' => $user->role,
+                    'branch_name' => $user->branch->name ?? '',
+                    'is_active' => $user->is_active ? 'Active' : 'Inactive',
+                    'last_login' => $user->last_login,
+                ];
+            });
+
+            $format = $request->format;
+            $columns = $request->columns;
+
+            return match ($format) {
+                'excel' => $this->exportExcel($exportData, $columns),
+                'pdf' => $this->exportPdf($exportData, $columns),
+                'csv' => $this->exportCsv($exportData, $columns),
+            };
+        } catch (\Exception $e) {
+            Log::error('Export users error', ['error' => $e->getMessage()]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to export users',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+            ], 500);
+        }
+    }
+
+    protected function buildUserQuery(Request $request)
+    {
+        $query = User::with(['branch']);
+        $this->applyUserTenantFilter($query, $request);
+        $this->applyManageableUserFilter($query, $request);
+
+        if ($request->filled('search')) {
+            $search = strip_tags($request->search);
+            $query->where(function ($q) use ($search) {
+                $q->where('first_name', 'like', "{$search}%")
+                    ->orWhere('last_name', 'like', "{$search}%")
+                    ->orWhere('email', 'like', "{$search}%");
+            });
+        }
+
+        if ($request->filled('role')) {
+            $query->where('role', $request->role);
+        }
+
+        if ($request->filled('branch_id')) {
+            $query->where('branch_id', $request->branch_id);
+        }
+
+        if ($request->filled('email')) {
+            $email = strip_tags($request->email);
+            $query->where('email', 'like', "{$email}%");
+        }
+
+        if ($request->has('is_active') && $request->is_active !== '') {
+            $isActive = filter_var($request->is_active, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+            if ($isActive !== null) {
+                $query->where('is_active', $isActive ? 1 : 0);
+            }
+        }
+
+        return $query;
+    }
+
+    protected function exportExcel($data, ?array $columns)
+    {
+        $export = new UsersExport(collect($data), $columns);
+        $filename = (new ExportService('users'))->generateFilename('xlsx');
+
+        return Excel::download($export, $filename);
+    }
+
+    protected function exportPdf($data, ?array $columns)
+    {
+        $pdfService = new PdfExportService('users');
+
+        if ($columns) {
+            $pdfService->setColumns($columns);
+        }
+
+        $filename = (new ExportService('users'))->generateFilename('pdf');
+
+        return $pdfService->generate(collect($data), $filename);
+    }
+
+    protected function exportCsv($data, ?array $columns)
+    {
+        $csvService = new CsvExportService('users');
+
+        if ($columns) {
+            $csvService->setColumns($columns);
+        }
+
+        $filename = (new ExportService('users'))->generateFilename('csv');
+
+        return $csvService->generate(collect($data), $filename);
     }
 
     /**

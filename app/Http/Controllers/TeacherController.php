@@ -133,6 +133,13 @@ class TeacherController extends Controller
                 });
             }
 
+            if ($request->filled('email')) {
+                $email = strip_tags($request->email);
+                $query->whereHas('user', function ($userQuery) use ($email) {
+                    $userQuery->where('email', 'like', "{$email}%");
+                });
+            }
+
             // OPTIMIZED Search functionality - removed leading wildcards for better index usage
             if ($request->has('search')) {
                 $search = strip_tags($request->search);
@@ -1255,9 +1262,29 @@ class TeacherController extends Controller
     {
         $query = Teacher::with(['user', 'branch', 'department']);
 
+        $schoolId = $this->getCurrentSchoolId($request);
+        if ($schoolId) {
+            $query->where('school_id', $schoolId);
+        }
+
+        $user = $request->user();
+        if ($user && $user->role === 'Teacher') {
+            $query->where('user_id', $user->id);
+        }
+
         // Apply branch filtering - Restrict to accessible branches
         $accessibleBranchIds = $this->getAccessibleBranchIds($request);
-        if ($accessibleBranchIds !== 'all') {
+
+        if ($user && $user->role === 'SuperAdmin' && ! empty($user->company_id) && ! $request->filled('branch_id')) {
+            $query->whereIn('branch_id', function ($q) use ($user) {
+                $q->select('branches.id')
+                    ->from('branches')
+                    ->join('schools', 'branches.school_id', '=', 'schools.id')
+                    ->where('schools.company_id', (int) $user->company_id)
+                    ->whereNull('schools.deleted_at')
+                    ->whereNull('branches.deleted_at');
+            });
+        } elseif ($accessibleBranchIds !== 'all') {
             if (!empty($accessibleBranchIds)) {
                 $query->whereIn('branch_id', $accessibleBranchIds);
             } else {
@@ -1305,10 +1332,18 @@ class TeacherController extends Controller
             $query->where('employee_id', 'like', $request->employee_id . '%');
         }
 
+        if ($request->filled('email')) {
+            $email = strip_tags($request->email);
+            $query->whereHas('user', function ($userQuery) use ($email) {
+                $userQuery->where('email', 'like', "{$email}%");
+            });
+        }
+
         // Filter by active status
-        if ($request->has('is_active')) {
-            $query->whereHas('user', function($q) use ($request) {
-                $q->where('is_active', $request->is_active);
+        if ($request->has('is_active') && $request->is_active !== '') {
+            $isActive = filter_var($request->is_active, FILTER_VALIDATE_BOOLEAN);
+            $query->whereHas('user', function ($q) use ($isActive) {
+                $q->where('is_active', $isActive);
             });
         }
 

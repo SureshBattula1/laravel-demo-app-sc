@@ -549,10 +549,27 @@ class SectionController extends Controller
     {
         $query = Section::with(['branch', 'classTeacher', 'class']);
 
+        $user = $request->user();
+        $schoolId = $this->getCurrentSchoolId($request);
+        if ($schoolId) {
+            $query->where(function ($q) use ($schoolId) {
+                $q->where('school_id', $schoolId)->orWhereNull('school_id');
+            });
+        }
+
         // Apply branch filtering
         $accessibleBranchIds = $this->getAccessibleBranchIds($request);
-        if ($accessibleBranchIds !== 'all') {
-            if (!empty($accessibleBranchIds)) {
+        if ($user && $user->role === 'SuperAdmin' && ! empty($user->company_id) && ! $request->filled('branch_id')) {
+            $query->whereIn('branch_id', function ($q) use ($user) {
+                $q->select('branches.id')
+                    ->from('branches')
+                    ->join('schools', 'branches.school_id', '=', 'schools.id')
+                    ->where('schools.company_id', (int) $user->company_id)
+                    ->whereNull('schools.deleted_at')
+                    ->whereNull('branches.deleted_at');
+            });
+        } elseif ($accessibleBranchIds !== 'all') {
+            if (! empty($accessibleBranchIds)) {
                 $query->whereIn('branch_id', $accessibleBranchIds);
             } else {
                 $query->whereRaw('1 = 0');
