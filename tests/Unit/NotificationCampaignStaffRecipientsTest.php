@@ -5,6 +5,7 @@ namespace Tests\Unit;
 use App\NotificationCampaigns\NotificationCampaignModuleRegistry;
 use App\Services\InboxNotificationService;
 use App\Services\NotificationCampaignService;
+use App\Services\SmsTemplateTagContextFactory;
 use App\Services\SmsTemplateTagRenderer;
 use PHPUnit\Framework\TestCase;
 
@@ -14,6 +15,7 @@ class NotificationCampaignStaffRecipientsTest extends TestCase
     {
         return new NotificationCampaignService(
             $this->createMock(SmsTemplateTagRenderer::class),
+            new SmsTemplateTagContextFactory,
             $this->createMock(InboxNotificationService::class),
             new NotificationCampaignModuleRegistry,
         );

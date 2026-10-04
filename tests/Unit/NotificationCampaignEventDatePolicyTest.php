@@ -10,6 +10,7 @@ use App\NotificationCampaigns\Modules\HolidaysCampaignModule;
 use App\NotificationCampaigns\NotificationCampaignModuleRegistry;
 use App\Services\InboxNotificationService;
 use App\Services\NotificationCampaignService;
+use App\Services\SmsTemplateTagContextFactory;
 use App\Services\SmsTemplateTagRenderer;
 use Carbon\Carbon;
 use PHPUnit\Framework\TestCase;
@@ -27,6 +28,7 @@ class NotificationCampaignEventDatePolicyTest extends TestCase
 
         return new NotificationCampaignService(
             new SmsTemplateTagRenderer,
+            new SmsTemplateTagContextFactory,
             $this->createMock(InboxNotificationService::class),
             $registry,
         );

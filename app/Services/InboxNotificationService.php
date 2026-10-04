@@ -164,11 +164,15 @@ class InboxNotificationService
                 ? Assignment::withoutTenantScope()->find($assignmentId)
                 : null;
 
+            $campaignId = isset($meta['campaign_id']) ? (int) $meta['campaign_id'] : 0;
+
             return [
                 'description' => $assignment?->description,
                 'optional_description' => $assignment?->instructions
                     ?: ($bits === [] ? null : implode(' · ', $bits)),
-                'attachments' => $this->attachmentsForMeta($meta),
+                'attachments' => $campaignId > 0
+                    ? $this->presentAttachments('notification_campaign', $campaignId)
+                    : $this->attachmentsForMeta($meta),
             ];
         }
 

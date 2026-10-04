@@ -133,6 +133,7 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
 
         // SMS templates & bulk send (personalized #tags#)
         Route::get('sms-templates', [SmsTemplateController::class, 'indexAll']);
+        Route::get('sms-templates/tag-catalog', [SmsTemplateController::class, 'tagCatalog']);
         Route::get('{id}/sms-templates', [SmsTemplateController::class, 'index']);
         Route::post('{id}/sms-templates', [SmsTemplateController::class, 'store']);
         Route::put('{id}/sms-templates/{templateId}', [SmsTemplateController::class, 'update']);

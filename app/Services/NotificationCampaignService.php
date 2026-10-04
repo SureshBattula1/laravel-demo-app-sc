@@ -18,8 +18,14 @@ use Illuminate\Support\Str;
 
 class NotificationCampaignService
 {
+    /** @var array{branch_name:string,school_name:string}|null */
+    private ?array $branchSchoolContextCache = null;
+
+    private ?int $branchSchoolContextBranchId = null;
+
     public function __construct(
         protected SmsTemplateTagRenderer $renderer,
+        protected SmsTemplateTagContextFactory $tagContextFactory,
         protected InboxNotificationService $inbox,
         protected NotificationCampaignModuleRegistry $registry,
     ) {}
@@ -1018,19 +1024,16 @@ class NotificationCampaignService
             }
             $user = $student->user;
             $name = $user ? trim(($user->first_name ?? '').' '.($user->last_name ?? '')) : '';
-            $baseContext = [
-                'student_name' => $name,
-                'grade' => (string) $student->grade,
-                'section' => (string) ($student->section ?? ''),
-                'class_name' => trim($student->grade.' '.($student->section ?? '')),
-                'roll_number' => (string) ($student->roll_number ?? ''),
-                'father_name' => (string) ($student->father_name ?? ''),
-                'mother_name' => (string) ($student->mother_name ?? ''),
-                'mobile' => (string) ($user->phone ?? ''),
-                'date' => Carbon::parse($date)->format('d M Y'),
-                'attendance_date' => Carbon::parse($date)->format('d M Y'),
-                'status' => ucfirst($statusKey),
-            ];
+            $baseContext = array_merge(
+                $this->tagContextFactory->buildForStudent($student, $branchId),
+                [
+                    'student_name' => $name,
+                    'class_name' => trim($student->grade.' '.($student->section ?? '')),
+                    'date' => Carbon::parse($date)->format('d M Y'),
+                    'attendance_date' => Carbon::parse($date)->format('d M Y'),
+                    'status' => ucfirst($statusKey),
+                ]
+            );
             if ($examsScoped) {
                 $context = $plugin->enrichContext($baseContext, $student, $statusKey, $examScheduleDate, $branchId, $examId);
             } elseif ($feesStructureScoped) {
@@ -1164,6 +1167,113 @@ class NotificationCampaignService
      * @param  list<array{grade:string,section:string}>  $targets
      * @param  array<string, int>  $templateMap
      */
+    /**
+     * @param  list<array<string, mixed>>  $items
+     */
+    public function syncInboxAttachments(NotificationCampaign $campaign, array $items): void
+    {
+        if ($items === []) {
+            return;
+        }
+        $this->inbox->syncCampaignAttachments((int) $campaign->id, $items);
+    }
+
+    public function customCampaignScopeLabel(NotificationCampaign $campaign): string
+    {
+        return $this->campaignListScopeLabel($campaign);
+    }
+
+    public function campaignListScopeLabel(NotificationCampaign $campaign): string
+    {
+        $campaign->loadMissing('targets');
+        $sectionLabels = $this->customCampaignSectionLabels($campaign);
+        $staffIds = is_array($campaign->staff_user_ids) ? $campaign->staff_user_ids : [];
+        $staff = count($staffIds);
+        $parts = [];
+        if ($sectionLabels !== []) {
+            if (count($sectionLabels) <= 4) {
+                $parts[] = implode('; ', $sectionLabels);
+            } else {
+                $preview = implode('; ', array_slice($sectionLabels, 0, 3));
+                $parts[] = $preview.'; +'.(count($sectionLabels) - 3).' more';
+            }
+        }
+        if ($staff > 0) {
+            $parts[] = $staff === 1 ? '1 branch team member' : $staff.' branch team';
+        }
+
+        if ($parts === []) {
+            return $campaign->module === 'custom' ? 'Custom notification' : 'Notification campaign';
+        }
+
+        return implode(' · ', $parts);
+    }
+
+    public function campaignListStudentCount(NotificationCampaign $campaign): int
+    {
+        $campaign->loadMissing('targets');
+        $fromTargets = (int) $campaign->targets->sum('student_count');
+        if ($fromTargets > 0) {
+            return $fromTargets;
+        }
+
+        return (int) ($campaign->recipient_count ?? 0);
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function customCampaignSectionLabels(NotificationCampaign $campaign): array
+    {
+        $campaign->loadMissing('targets');
+        $gradeLabels = DB::table('grades')->pluck('label', 'value');
+        $labels = [];
+        foreach ($campaign->targets as $target) {
+            $className = (string) ($gradeLabels[$target->grade] ?? ('Grade '.$target->grade));
+            $labels[] = trim($className.($target->section ? ' · Section '.$target->section : ''));
+        }
+
+        return array_values(array_unique(array_filter($labels)));
+    }
+
+    public function campaignMatchesTargetFilters(
+        NotificationCampaign $campaign,
+        string $gradeFilter,
+        string $sectionFilter,
+    ): bool {
+        if ($gradeFilter === '' && $sectionFilter === '') {
+            return true;
+        }
+
+        $campaign->loadMissing('targets');
+        foreach ($campaign->targets as $target) {
+            if ($gradeFilter !== '' && (string) $target->grade !== $gradeFilter) {
+                continue;
+            }
+            if ($sectionFilter !== '' && strcasecmp((string) $target->section, $sectionFilter) !== 0) {
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    public function customCampaignListStatus(NotificationCampaign $campaign): string
+    {
+        $status = strtolower((string) $campaign->status);
+
+        return match ($status) {
+            'sent' => 'sent',
+            'failed' => 'failed',
+            'partial' => 'partial',
+            'sending' => 'sending',
+            'materializing', 'queued' => 'materializing',
+            default => 'pending',
+        };
+    }
+
     public function createCampaign(
         string $module,
         int $branchId,
@@ -1541,11 +1651,84 @@ class NotificationCampaignService
     /**
      * @return array{data:\Illuminate\Support\Collection,total:int}
      */
-    public function paginateRecipients(NotificationCampaign $campaign, int $page, int $perPage, ?string $deliveryStatus = null): array
-    {
+    /**
+     * @param  array{
+     *   delivery_status?:?string,
+     *   search?:?string,
+     *   grade?:?string,
+     *   section?:?string,
+     *   status_key?:?string,
+     *   viewed?:?string,
+     *   liked?:?string,
+     *   audience?:?string,
+     *   team_role?:?string
+     * }  $filters
+     * @return array{data:\Illuminate\Support\Collection,total:int}
+     */
+    public function paginateRecipients(
+        NotificationCampaign $campaign,
+        int $page,
+        int $perPage,
+        array $filters = [],
+    ): array {
         $query = $campaign->recipients()->orderBy('id');
-        if ($deliveryStatus !== null && $deliveryStatus !== '') {
+
+        $deliveryStatus = trim((string) ($filters['delivery_status'] ?? ''));
+        if ($deliveryStatus !== '') {
             $query->where('delivery_status', $deliveryStatus);
+        }
+
+        $search = trim((string) ($filters['search'] ?? ''));
+        if ($search !== '') {
+            $like = '%'.addcslashes($search, '%_\\').'%';
+            $query->where(function ($q) use ($like) {
+                $q->where('student_name', 'like', $like)
+                    ->orWhere('grade', 'like', $like)
+                    ->orWhere('section', 'like', $like)
+                    ->orWhere('status_key', 'like', $like)
+                    ->orWhere('delivery_status', 'like', $like);
+            });
+        }
+
+        $grade = trim((string) ($filters['grade'] ?? ''));
+        if ($grade !== '') {
+            $query->where('grade', $grade);
+        }
+
+        $section = trim((string) ($filters['section'] ?? ''));
+        if ($section !== '') {
+            $query->where('section', $section);
+        }
+
+        $statusKey = trim((string) ($filters['status_key'] ?? ''));
+        if ($statusKey !== '') {
+            $query->where('status_key', $statusKey);
+        }
+
+        $viewed = trim((string) ($filters['viewed'] ?? ''));
+        if ($viewed === '1') {
+            $query->whereNotNull('viewed_at');
+        } elseif ($viewed === '0') {
+            $query->whereNull('viewed_at');
+        }
+
+        $liked = trim((string) ($filters['liked'] ?? ''));
+        if ($liked === '1') {
+            $query->whereNotNull('liked_at');
+        } elseif ($liked === '0') {
+            $query->whereNull('liked_at');
+        }
+
+        $audience = strtolower(trim((string) ($filters['audience'] ?? '')));
+        if ($audience === 'student') {
+            $query->whereNotNull('student_id');
+        } elseif ($audience === 'team') {
+            $query->whereNull('student_id');
+        }
+
+        $teamRole = trim((string) ($filters['team_role'] ?? ''));
+        if ($teamRole !== '') {
+            $query->where('grade', 'Staff')->where('section', $teamRole);
         }
 
         $total = (clone $query)->count();
@@ -1729,15 +1912,19 @@ class NotificationCampaignService
         $storedContext = is_array($recipient->context)
             ? $recipient->context
             : (json_decode((string) $recipient->context, true) ?: []);
-        $defaults = [
-            'student_name' => (string) $recipient->student_name,
-            'grade' => (string) $recipient->grade,
-            'section' => (string) $recipient->section,
-            'class_name' => trim($recipient->grade.' '.$recipient->section),
-            'date' => $dateLabel,
-            'attendance_date' => $dateLabel,
-            'status' => ucfirst((string) $recipient->status_key),
-        ];
+        $defaults = array_merge(
+            SmsTemplateTagContextFactory::emptyTagContext(),
+            [
+                'student_name' => (string) $recipient->student_name,
+                'teacher_name' => (string) $recipient->student_name,
+                'grade' => (string) $recipient->grade,
+                'section' => (string) $recipient->section,
+                'class_name' => trim($recipient->grade.' '.$recipient->section),
+                'date' => $dateLabel,
+                'attendance_date' => $dateLabel,
+                'status' => ucfirst((string) $recipient->status_key),
+            ]
+        );
 
         return $this->renderer->render(
             (string) $template->body,
@@ -1774,7 +1961,8 @@ class NotificationCampaignService
                 ->get(['id', 'first_name', 'last_name', 'phone', 'role']);
             $teacherByUser = Teacher::query()
                 ->whereIn('user_id', $userIds)
-                ->get(['user_id', 'designation', 'employee_id'])
+                ->with(['user:id,first_name,last_name,phone,role', 'department:id,name'])
+                ->get()
                 ->keyBy('user_id');
             $statusByUser = $plugin->classifyTeacherUserIds($branchId, $date, $userIds);
             $rows = [];
@@ -1793,17 +1981,19 @@ class NotificationCampaignService
                 $subtitle = $teacher
                     ? trim((string) ($teacher->designation ?: $teacher->employee_id ?: 'Teacher'))
                     : (string) $user->role;
-                $baseContext = [
-                    'student_name' => $name,
-                    'teacher_name' => $name,
-                    'grade' => 'Staff',
-                    'section' => (string) $user->role,
-                    'class_name' => $subtitle,
-                    'mobile' => (string) ($user->phone ?? ''),
-                    'date' => Carbon::parse($date)->format('d M Y'),
-                    'attendance_date' => Carbon::parse($date)->format('d M Y'),
-                    'status' => ucfirst($statusKey),
-                ];
+                $baseContext = array_merge(
+                    $this->tagContextFactory->buildForStaffUser($user, $teacher, $branchId),
+                    [
+                        'student_name' => $name,
+                        'teacher_name' => $name,
+                        'grade' => 'Staff',
+                        'section' => (string) $user->role,
+                        'class_name' => $subtitle,
+                        'date' => Carbon::parse($date)->format('d M Y'),
+                        'attendance_date' => Carbon::parse($date)->format('d M Y'),
+                        'status' => ucfirst($statusKey),
+                    ]
+                );
                 $context = $plugin->enrichContext($baseContext, $user, $statusKey, $date, $branchId);
 
                 $rows[] = [
@@ -1845,17 +2035,19 @@ class NotificationCampaignService
             $user = $teacher->user;
             $name = $user ? trim(($user->first_name ?? '').' '.($user->last_name ?? '')) : '';
             $deptKey = (string) (int) ($teacher->department_id ?? 0);
-            $baseContext = [
-                'student_name' => $name,
-                'teacher_name' => $name,
-                'grade' => $deptKey,
-                'section' => \App\NotificationCampaigns\Modules\TeacherAttendanceCampaignModule::SECTION_KEY,
-                'class_name' => (string) ($teacher->designation ?? 'Teacher'),
-                'mobile' => (string) ($user->phone ?? ''),
-                'date' => Carbon::parse($date)->format('d M Y'),
-                'attendance_date' => Carbon::parse($date)->format('d M Y'),
-                'status' => ucfirst($statusKey),
-            ];
+            $baseContext = array_merge(
+                $this->tagContextFactory->buildForTeacher($teacher, $branchId),
+                [
+                    'student_name' => $name,
+                    'teacher_name' => $name,
+                    'grade' => $deptKey,
+                    'section' => \App\NotificationCampaigns\Modules\TeacherAttendanceCampaignModule::SECTION_KEY,
+                    'class_name' => (string) ($teacher->designation ?? 'Teacher'),
+                    'date' => Carbon::parse($date)->format('d M Y'),
+                    'attendance_date' => Carbon::parse($date)->format('d M Y'),
+                    'status' => ucfirst($statusKey),
+                ]
+            );
             $context = $plugin->enrichContext($baseContext, $teacher, $statusKey, $date, $branchId);
 
             $rows[] = [
@@ -1894,7 +2086,7 @@ class NotificationCampaignService
             ->where('branch_id', $branchId)
             ->where('teacher_status', 'Active')
             ->whereNotNull('user_id')
-            ->with(['user:id,first_name,last_name,phone']);
+            ->with(['user:id,first_name,last_name,phone,role', 'department:id,name']);
 
         $query->where(function ($q) use ($deptKeys) {
             foreach ($deptKeys as $deptId) {
@@ -2042,6 +2234,70 @@ class NotificationCampaignService
 
     public const STAFF_STATUS_KEY = 'staff';
 
+    /** @var list<string> */
+    public const BRANCH_TEAM_ROLE_KEYS = ['teachers', 'admins', 'staff', 'accounts'];
+
+    /**
+     * User IDs in a branch team role group (teachers, staff, accounts, admins).
+     *
+     * @return list<int>
+     */
+    public function staffUserIdsForTeamRole(int $branchId, string $teamRole): array
+    {
+        $teamRole = strtolower(trim($teamRole));
+        if (! in_array($teamRole, self::BRANCH_TEAM_ROLE_KEYS, true)) {
+            return [];
+        }
+
+        foreach ($this->staffRecipientOptions($branchId)['groups'] as $group) {
+            if ($group['key'] !== $teamRole) {
+                continue;
+            }
+
+            return array_values(array_unique(array_map(
+                fn (array $person) => (int) $person['user_id'],
+                $group['people']
+            )));
+        }
+
+        return [];
+    }
+
+    /**
+     * Hub list filters: branch team included / role notified on the campaign.
+     */
+    public function campaignMatchesTeamListFilters(
+        NotificationCampaign $campaign,
+        string $includesTeam,
+        string $teamRole,
+    ): bool {
+        $staffIds = is_array($campaign->staff_user_ids)
+            ? array_values(array_unique(array_map('intval', $campaign->staff_user_ids)))
+            : [];
+
+        if ($includesTeam === '1' && $staffIds === []) {
+            return false;
+        }
+        if ($includesTeam === '0' && $staffIds !== []) {
+            return false;
+        }
+
+        if ($teamRole === '') {
+            return true;
+        }
+
+        if ($staffIds === []) {
+            return false;
+        }
+
+        $roleUserIds = $this->staffUserIdsForTeamRole((int) $campaign->branch_id, $teamRole);
+        if ($roleUserIds === []) {
+            return false;
+        }
+
+        return count(array_intersect($staffIds, $roleUserIds)) > 0;
+    }
+
     /**
      * @return array{groups: list<array{key:string,label:string,people:list<array{user_id:int,name:string,subtitle:string,attendance_marked:bool,present:int,absent:int,leave:int}>}>}
      */
@@ -2049,8 +2305,9 @@ class NotificationCampaignService
     {
         $schoolId = (int) (DB::table('branches')->where('id', $branchId)->value('school_id') ?? 0);
         $resolvedDate = ($date !== null && preg_match('/^\d{4}-\d{2}-\d{2}$/', $date))
-            ? $this->resolveEventDateForModule('teacher_attendance', $date)
+            ? $date
             : now()->toDateString();
+        $teacherAttendanceDate = $this->resolveEventDateForModule('teacher_attendance', $resolvedDate);
 
         $teachers = Teacher::query()
             ->where('branch_id', $branchId)
@@ -2142,7 +2399,7 @@ class NotificationCampaignService
 
         $plugin = $this->registry->get('teacher_attendance');
         $statusByUser = ($plugin instanceof \App\NotificationCampaigns\Modules\TeacherAttendanceCampaignModule)
-            ? $plugin->classifyTeacherUserIds($branchId, $resolvedDate, $allUserIds)
+            ? $plugin->classifyTeacherUserIds($branchId, $teacherAttendanceDate, $allUserIds)
             : [];
 
         foreach ($groups as $gi => $group) {
@@ -2164,6 +2421,28 @@ class NotificationCampaignService
             'groups' => $groups,
             'event_date' => $resolvedDate,
         ];
+    }
+
+    /**
+     * @param  list<array{key:string,label:string,people:list<array<string,mixed>>}>  $groups
+     * @param  array<int, array{notification_status:string,campaign_id?:int,sent_count?:int}>  $deliveryByUser
+     * @return list<array{key:string,label:string,people:list<array<string,mixed>>}>
+     */
+    public function applyStaffDeliveryByUser(array $groups, array $deliveryByUser): array
+    {
+        foreach ($groups as $gi => $group) {
+            $people = [];
+            foreach ($group['people'] as $person) {
+                $userId = (int) ($person['user_id'] ?? 0);
+                $status = $deliveryByUser[$userId]['notification_status'] ?? 'not_sent';
+                $people[] = array_merge($person, [
+                    'notification_status' => $status,
+                ]);
+            }
+            $groups[$gi]['people'] = $people;
+        }
+
+        return $groups;
     }
 
     /**
@@ -2360,12 +2639,32 @@ class NotificationCampaignService
             ->whereNull('deleted_at')
             ->get(['id', 'first_name', 'last_name', 'phone', 'role']);
 
+        $teacherByUser = Teacher::query()
+            ->where('branch_id', $branchId)
+            ->whereIn('user_id', $staffUserIds)
+            ->with(['user:id,first_name,last_name,phone,role', 'department:id,name'])
+            ->get()
+            ->keyBy('user_id');
+
         $dateLabel = now()->format('d M Y');
         $rows = [];
         foreach ($users as $user) {
             $userId = (int) $user->id;
             $name = trim(($user->first_name ?? '').' '.($user->last_name ?? ''));
             $groupKey = $groupByUser[$userId] ?? 'staff';
+            $teacher = $teacherByUser->get($userId);
+            $context = array_merge(
+                $this->tagContextFactory->buildForStaffUser($user, $teacher, $branchId),
+                [
+                    'student_name' => $name,
+                    'teacher_name' => $name,
+                    'date' => $dateLabel,
+                    'attendance_date' => $dateLabel,
+                    'status' => 'Staff',
+                    'grade' => 'Staff',
+                    'section' => $groupKey,
+                ]
+            );
             $rows[] = [
                 'user_id' => $userId,
                 'student_id' => null,
@@ -2373,14 +2672,7 @@ class NotificationCampaignService
                 'grade' => 'Staff',
                 'section' => $groupKey,
                 'status_key' => self::STAFF_STATUS_KEY,
-                'context' => [
-                    'student_name' => $name,
-                    'mobile' => (string) ($user->phone ?? ''),
-                    'role' => (string) $user->role,
-                    'date' => $dateLabel,
-                    'attendance_date' => $dateLabel,
-                    'status' => 'Staff',
-                ],
+                'context' => $context,
             ];
         }
 
@@ -2409,5 +2701,20 @@ class NotificationCampaignService
             'staff_materialized_at' => now(),
             'recipient_count' => $campaign->recipient_count + $added,
         ]);
+    }
+
+    /**
+     * @return array{branch_name:string,school_name:string}
+     */
+    private function branchSchoolTags(int $branchId): array
+    {
+        if ($this->branchSchoolContextBranchId === $branchId && $this->branchSchoolContextCache !== null) {
+            return $this->branchSchoolContextCache;
+        }
+
+        $this->branchSchoolContextCache = $this->tagContextFactory->branchSchoolTags($branchId);
+        $this->branchSchoolContextBranchId = $branchId;
+
+        return $this->branchSchoolContextCache;
     }
 }
