@@ -65,6 +65,11 @@ class User extends Authenticatable
         return $this->hasOneThrough(School::class, Branch::class, 'id', 'id', 'branch_id', 'school_id');
     }
 
+    public function transportDriver()
+    {
+        return $this->hasOne(TransportDriver::class, 'user_id');
+    }
+
     /**
      * Get roles assigned to this user
      */
@@ -145,6 +150,11 @@ class User extends Authenticatable
     public function isParent()
     {
         return $this->role === 'Parent';
+    }
+
+    public function isDriver(): bool
+    {
+        return $this->role === 'Driver';
     }
 
     /**

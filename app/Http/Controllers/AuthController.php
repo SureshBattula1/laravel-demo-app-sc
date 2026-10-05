@@ -34,7 +34,7 @@ class AuthController extends Controller
                     'confirmed',
                     'regex:/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/',
                 ],
-                'role' => 'required|in:SuperAdmin,BranchAdmin,Teacher,Student,Parent,Staff',
+                'role' => 'required|in:SuperAdmin,BranchAdmin,Teacher,Student,Parent,Staff,Driver',
                 'branch_id' => 'required|exists:branches,id',
             ], [
                 'password.regex' => 'Password must contain uppercase, lowercase, number and special character',
@@ -57,9 +57,31 @@ class AuthController extends Controller
                 'phone' => preg_replace('/[^0-9+\-\s()]/', '', $request->phone),
                 'password' => Hash::make($request->password),
                 'role' => $request->role,
+                'user_type' => $request->role === 'Driver' ? 'Driver' : null,
                 'branch_id' => $request->branch_id,
                 'is_active' => true,
             ]);
+
+            if ($user->role === 'Driver') {
+                $driverRole = \App\Models\Role::where('slug', 'driver')->first();
+                if ($driverRole) {
+                    $user->roles()->attach($driverRole->id, [
+                        'is_primary' => true,
+                        'branch_id' => $user->branch_id,
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ]);
+                }
+                \App\Models\TransportDriver::create([
+                    'branch_id' => $user->branch_id,
+                    'school_id' => DB::table('branches')->where('id', $user->branch_id)->value('school_id'),
+                    'user_id' => $user->id,
+                    'name' => $user->first_name.' '.$user->last_name,
+                    'phone' => $user->phone,
+                    'email' => $user->email,
+                    'is_active' => true,
+                ]);
+            }
 
             $token = $user->createToken('auth_token', ['*'], now()->addDays(30))->plainTextToken;
 
@@ -172,6 +194,10 @@ class AuthController extends Controller
 
             // OPTIMIZED: Load branch only when needed
             $user->load('branch');
+
+            if ($user->role === 'Driver') {
+                $user->load(['transportDriver.vehicles.route', 'transportDriver.branch']);
+            }
 
             // Inject effective permissions for the frontend
             $user->permissions = $user->getPermissionSlugs($user->branch_id);
@@ -400,6 +426,9 @@ class AuthController extends Controller
     {
         try {
             $user = $request->user()->load('branch');
+            if ($user->role === 'Driver') {
+                $user->load(['transportDriver.vehicles.route', 'transportDriver.branch']);
+            }
             $user->permissions = $user->getPermissionSlugs($user->branch_id);
 
             return response()->json([

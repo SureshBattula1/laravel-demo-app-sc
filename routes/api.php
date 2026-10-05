@@ -13,6 +13,7 @@ use App\Http\Controllers\ClassController;
 use App\Http\Controllers\CommunicationController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DepartmentController;
+use App\Http\Controllers\DriverPortalController;
 use App\Http\Controllers\EventController;
 use App\Http\Controllers\ExamController;
 use App\Http\Controllers\ExamMarkController;
@@ -498,6 +499,15 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
     Route::delete('transport-maintenance/{id}', [TransportFinanceController::class, 'deleteMaintenanceLog'])->middleware('permission:transport.delete');
 
     Route::get('transport-fees/summary', [TransportFinanceController::class, 'getFeesSummary'])->middleware('permission:transport.view');
+
+    // Driver Portal Routes (Dedicated endpoints for Driver role)
+    Route::prefix('driver')->group(function () {
+        Route::get('dashboard', [DriverPortalController::class, 'dashboard']);
+        Route::post('clock-in', [DriverPortalController::class, 'clockIn']);
+        Route::post('clock-out', [DriverPortalController::class, 'clockOut']);
+        Route::get('attendance-history', [DriverPortalController::class, 'attendanceHistory']);
+        Route::post('trips/{id}/location', [DriverPortalController::class, 'updateLocation']);
+    });
 
     // Event Routes
     Route::apiResource('events', EventController::class);
