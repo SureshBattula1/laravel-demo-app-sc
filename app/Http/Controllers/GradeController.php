@@ -2,19 +2,21 @@
 
 namespace App\Http\Controllers;
 
-use App\Http\Traits\PaginatesAndSorts;
 use App\Exports\GradesExport;
-use App\Services\PdfExportService;
+use App\Http\Traits\OrdersGradesByValue;
+use App\Http\Traits\PaginatesAndSorts;
 use App\Services\CsvExportService;
 use App\Services\ExportService;
-use Maatwebsite\Excel\Facades\Excel;
+use App\Services\PdfExportService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Validator;
+use Maatwebsite\Excel\Facades\Excel;
 
 class GradeController extends Controller
 {
+    use OrdersGradesByValue;
     use PaginatesAndSorts;
 
     private function resolveBranchIdForValue(Request $request, string $value): ?int
@@ -26,14 +28,16 @@ class GradeController extends Controller
 
         // SuperAdmin without branch_id: try to find a unique match across accessible branches.
         $user = $request->user();
-        if (!$user || $user->role !== 'SuperAdmin') {
+        if (! $user || $user->role !== 'SuperAdmin') {
             return null;
         }
 
         $accessible = $this->getAccessibleBranchIds($request);
         if ($accessible === 'all') {
             $schoolId = $this->getCurrentSchoolId($request);
-            if (!$schoolId) return null;
+            if (! $schoolId) {
+                return null;
+            }
             $accessible = DB::table('branches')
                 ->where('school_id', $schoolId)
                 ->whereNull('deleted_at')
@@ -121,6 +125,7 @@ class GradeController extends Controller
                     return $requested;
                 }
             }
+
             return null;
         }
 
@@ -133,6 +138,7 @@ class GradeController extends Controller
         }
 
         $primary = (int) ($request->user()->branch_id ?? 0);
+
         return $primary && in_array($primary, $accessibleBranchIds, true) ? $primary : null;
     }
 
@@ -172,30 +178,42 @@ class GradeController extends Controller
             if ($request->filled('search')) {
                 $search = strip_tags((string) $request->search);
                 $query->where(function ($q) use ($search) {
-                    $q->where('grades.value', 'like', '%' . $search . '%')
-                        ->orWhere('grades.label', 'like', '%' . $search . '%')
-                        ->orWhere('grades.category', 'like', '%' . $search . '%')
-                        ->orWhere('branches.name', 'like', '%' . $search . '%');
+                    $q->where('grades.value', 'like', '%'.$search.'%')
+                        ->orWhere('grades.label', 'like', '%'.$search.'%')
+                        ->orWhere('grades.category', 'like', '%'.$search.'%')
+                        ->orWhere('branches.name', 'like', '%'.$search.'%');
                 });
             }
-            
+
             // Filter by active status if requested (common for dropdowns)
             if ($request->has('is_active')) {
                 $query->where('grades.is_active', $request->boolean('is_active'));
             }
 
-            // Default sorting: group by branch, then grade order.
+            // Default sorting: grade value descending (e.g. 12, 11, 10 ...), grouped by branch.
             // If UI explicitly requests sort_by, paginateAndSort will apply it.
-            if (!$request->has('sort_by') && !$request->has('sort_direction') && !$request->has('sort_order')) {
-                $query->orderBy('grades.branch_id', 'asc')->orderBy('grades.order', 'asc');
+            if (! $request->has('sort_by') && ! $request->has('sort_direction') && ! $request->has('sort_order')) {
+                $this->orderGradeValue($query, 'desc');
+                $query->orderBy('grades.branch_id', 'asc');
+            }
+
+            // Advanced search field filters (grade list page)
+            if ($request->filled('value')) {
+                $query->where('grades.value', (string) $request->value);
+            }
+            if ($request->filled('label')) {
+                $query->where('grades.label', 'like', '%'.strip_tags((string) $request->label).'%');
+            }
+            if ($request->filled('category')) {
+                $query->where('grades.category', (string) $request->category);
             }
 
             // Define sortable columns
             $sortableColumns = ['branch_id', 'value', 'label', 'order', 'category', 'is_active', 'created_at', 'updated_at'];
 
-            // Apply pagination and sorting (default: 25 per page, sorted by branch_id asc)
+            // Apply pagination and sorting (default: 25 per page, sorted by grade value desc)
             // Prefix avoids ambiguous column names when joins are present (e.g. is_active on schools/branches)
-            $grades = $this->paginateAndSort($query, $request, $sortableColumns, 'branch_id', 'asc', 'grades.');
+            $grades = $this->paginateAndSort($query, $request, $sortableColumns, 'value', 'desc', 'grades.');
 
             // Transform the paginated data
             $transformedData = collect($grades->items())->map(function ($grade) {
@@ -209,7 +227,7 @@ class GradeController extends Controller
                     'category' => $grade->category ?? null,
                     'is_active' => (bool) $grade->is_active,
                     'created_at' => $grade->created_at,
-                    'updated_at' => $grade->updated_at
+                    'updated_at' => $grade->updated_at,
                 ];
             });
 
@@ -225,17 +243,17 @@ class GradeController extends Controller
                     'last_page' => $grades->lastPage(),
                     'from' => $grades->firstItem(),
                     'to' => $grades->lastItem(),
-                    'has_more_pages' => $grades->hasMorePages()
-                ]
+                    'has_more_pages' => $grades->hasMorePages(),
+                ],
             ]);
 
         } catch (\Exception $e) {
             Log::error('Get grades error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch grades',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -253,17 +271,18 @@ class GradeController extends Controller
                 ->where('value', $value)
                 ->first();
 
-            if (!$grade) {
+            if (! $grade) {
                 // If SuperAdmin and multiple branches may have same value, return a clearer message.
                 if ($request->user() && $request->user()->role === 'SuperAdmin') {
                     return response()->json([
                         'success' => false,
-                        'message' => 'Grade not found. Please specify branch_id.'
+                        'message' => 'Grade not found. Please specify branch_id.',
                     ], 404);
                 }
+
                 return response()->json([
                     'success' => false,
-                    'message' => 'Grade not found'
+                    'message' => 'Grade not found',
                 ], 404);
             }
 
@@ -285,16 +304,16 @@ class GradeController extends Controller
                     'classes_count' => count($sectionsSummary),
                     'sections' => array_column($sectionsSummary, 'name'),
                     'sections_summary' => $sectionsSummary,
-                ]
+                ],
             ]);
 
         } catch (\Exception $e) {
             Log::error('Get grade error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch grade',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -306,10 +325,10 @@ class GradeController extends Controller
     {
         try {
             $branchId = $this->resolveRequestedBranchId($request);
-            if (!$branchId) {
+            if (! $branchId) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'No branch context available'
+                    'message' => 'No branch context available',
                 ], 422);
             }
 
@@ -319,13 +338,13 @@ class GradeController extends Controller
                 'description' => 'nullable|string|max:500',
                 'order' => 'nullable|integer|min:0',
                 'category' => 'nullable|string|in:Pre-Primary,Primary,Middle,Secondary,Senior-Secondary',
-                'is_active' => 'boolean'
+                'is_active' => 'boolean',
             ]);
 
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
@@ -335,7 +354,7 @@ class GradeController extends Controller
             if ($exists) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Grade value already exists for this branch'
+                    'message' => 'Grade value already exists for this branch',
                 ], 422);
             }
 
@@ -349,7 +368,7 @@ class GradeController extends Controller
                 'category' => $request->category ?? null,
                 'is_active' => $request->boolean('is_active', true),
                 'created_at' => now(),
-                'updated_at' => now()
+                'updated_at' => now(),
             ]);
 
             $grade = DB::table('grades')->where('id', $gradeId)->first();
@@ -367,18 +386,18 @@ class GradeController extends Controller
                     'description' => $grade->description,
                     'order' => $grade->order ?? 0,
                     'category' => $grade->category ?? null,
-                    'is_active' => (bool) $grade->is_active
-                ]
+                    'is_active' => (bool) $grade->is_active,
+                ],
             ], 201);
 
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Create grade error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create grade',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -392,10 +411,10 @@ class GradeController extends Controller
             $branchId = $this->resolveBranchIdForValue($request, (string) $value);
             $grade = DB::table('grades')->where('branch_id', $branchId)->where('value', $value)->first();
 
-            if (!$grade) {
+            if (! $grade) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Grade not found. Please specify branch_id.'
+                    'message' => 'Grade not found. Please specify branch_id.',
                 ], 404);
             }
 
@@ -404,13 +423,13 @@ class GradeController extends Controller
                 'description' => 'nullable|string|max:500',
                 'order' => 'nullable|integer|min:0',
                 'category' => 'nullable|string|in:Pre-Primary,Primary,Middle,Secondary,Senior-Secondary',
-                'is_active' => 'sometimes|boolean'
+                'is_active' => 'sometimes|boolean',
             ]);
 
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
@@ -457,18 +476,18 @@ class GradeController extends Controller
                     'description' => $updatedGrade->description,
                     'order' => $updatedGrade->order ?? 0,
                     'category' => $updatedGrade->category ?? null,
-                    'is_active' => (bool) $updatedGrade->is_active
-                ]
+                    'is_active' => (bool) $updatedGrade->is_active,
+                ],
             ]);
 
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Update grade error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update grade',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -485,11 +504,11 @@ class GradeController extends Controller
             $branchId = $this->resolveBranchIdForValue($request, (string) $value);
             $schoolId = $this->getCurrentSchoolId($request);
             $grade = DB::table('grades')->where('branch_id', $branchId)->where('value', $value)->first();
-            
-            if (!$grade) {
+
+            if (! $grade) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Grade not found. Please specify branch_id.'
+                    'message' => 'Grade not found. Please specify branch_id.',
                 ], 404);
             }
 
@@ -500,7 +519,7 @@ class GradeController extends Controller
             if ($studentsCount > 0 || $classesCount > 0) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Cannot delete grade with existing students or classes. Please deactivate it instead.'
+                    'message' => 'Cannot delete grade with existing students or classes. Please deactivate it instead.',
                 ], 400);
             }
 
@@ -512,17 +531,17 @@ class GradeController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Grade deleted successfully'
+                'message' => 'Grade deleted successfully',
             ]);
 
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Delete grade error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to delete grade',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -542,7 +561,7 @@ class GradeController extends Controller
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
@@ -571,10 +590,11 @@ class GradeController extends Controller
                 $query->where('grades.is_active', $request->boolean('is_active'));
             }
 
-            $grades = $query->orderBy('grades.branch_id')->orderBy('grades.order')->get();
+            $this->orderGradeValue($query, 'desc');
+            $grades = $query->orderBy('grades.branch_id', 'asc')->get();
 
             // Transform data for export
-            $exportData = collect($grades)->map(function($grade) {
+            $exportData = collect($grades)->map(function ($grade) {
                 return [
                     'value' => $grade->value,
                     'label' => $grade->label,
@@ -588,7 +608,7 @@ class GradeController extends Controller
             $format = $request->format;
             $columns = $request->columns;
 
-            return match($format) {
+            return match ($format) {
                 'excel' => $this->exportExcel($exportData, $columns),
                 'pdf' => $this->exportPdf($exportData, $columns),
                 'csv' => $this->exportCsv($exportData, $columns),
@@ -596,11 +616,11 @@ class GradeController extends Controller
 
         } catch (\Exception $e) {
             Log::error('Export grades error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to export grades',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -612,7 +632,7 @@ class GradeController extends Controller
     {
         $export = new GradesExport($data, $columns);
         $filename = (new ExportService('grades'))->generateFilename('xlsx');
-        
+
         return Excel::download($export, $filename);
     }
 
@@ -622,18 +642,18 @@ class GradeController extends Controller
     protected function exportPdf($data, ?array $columns)
     {
         $pdfService = new PdfExportService('grades');
-        
+
         if ($columns) {
             $pdfService->setColumns($columns);
         }
-        
+
         // Grades have few columns, A4 is sufficient
         $pdfService->setPaperSize('a4');
         $pdfService->setOrientation('landscape');
-        
+
         $pdf = $pdfService->generate($data, 'Grades Report');
         $filename = (new ExportService('grades'))->generateFilename('pdf');
-        
+
         return $pdf->download($filename);
     }
 
@@ -783,14 +803,13 @@ class GradeController extends Controller
     protected function exportCsv($data, ?array $columns)
     {
         $csvService = new CsvExportService('grades');
-        
+
         if ($columns) {
             $csvService->setColumns($columns);
         }
-        
+
         $filename = (new ExportService('grades'))->generateFilename('csv');
-        
+
         return $csvService->generate($data, $filename);
     }
 }
-

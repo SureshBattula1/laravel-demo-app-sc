@@ -47,8 +47,15 @@ use App\Http\Controllers\SubjectController;
 use App\Http\Controllers\TeacherController;
 use App\Http\Controllers\TimetableController;
 use App\Http\Controllers\TransactionController;
+use App\Http\Controllers\TransportAssignmentController;
+use App\Http\Controllers\TransportBoardingController;
+use App\Http\Controllers\TransportDashboardController;
 use App\Http\Controllers\TransportDriverController;
+use App\Http\Controllers\TransportFinanceController;
 use App\Http\Controllers\TransportRouteController;
+use App\Http\Controllers\TransportStopController;
+use App\Http\Controllers\TransportTrackingController;
+use App\Http\Controllers\TransportTripController;
 use App\Http\Controllers\TwilioWhatsAppStatusWebhookController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\UserPreferenceController;
@@ -437,6 +444,60 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
     Route::get('student-transport/{id}', [StudentTransportController::class, 'show'])->middleware('permission:transport.view');
     Route::put('student-transport/{id}', [StudentTransportController::class, 'update'])->middleware('permission:transport.assign');
     Route::delete('student-transport/{id}', [StudentTransportController::class, 'destroy'])->middleware('permission:transport.assign');
+
+    // Upgraded Transport Enterprise Operations
+    // 1. Dashboard
+    Route::get('transport/dashboard', [TransportDashboardController::class, 'index'])->middleware('permission:transport.view');
+
+    // 2. Stops Master
+    Route::get('transport-stops', [TransportStopController::class, 'index'])->middleware('permission:transport.view');
+    Route::post('transport-stops', [TransportStopController::class, 'store'])->middleware('permission:transport.create');
+    Route::put('transport-stops/{id}', [TransportStopController::class, 'update'])->middleware('permission:transport.edit');
+    Route::delete('transport-stops/{id}', [TransportStopController::class, 'destroy'])->middleware('permission:transport.delete');
+
+    // 3. Assignments (Single & Bulk)
+    Route::get('transport-assignments', [TransportAssignmentController::class, 'index'])->middleware('permission:transport.view');
+    Route::post('transport-assignments', [TransportAssignmentController::class, 'store'])->middleware('permission:transport.assign');
+    Route::post('transport-assignments/bulk', [TransportAssignmentController::class, 'bulkAssign'])->middleware('permission:transport.assign');
+    Route::put('transport-assignments/{id}', [TransportAssignmentController::class, 'update'])->middleware('permission:transport.assign');
+    Route::delete('transport-assignments/{id}', [TransportAssignmentController::class, 'destroy'])->middleware('permission:transport.assign');
+
+    // 4. Trips & Operations
+    Route::get('transport-trips', [TransportTripController::class, 'index'])->middleware('permission:transport.view');
+    Route::post('transport-trips', [TransportTripController::class, 'store'])->middleware('permission:transport.create');
+    Route::get('transport-trips/{id}', [TransportTripController::class, 'show'])->middleware('permission:transport.view');
+    Route::post('transport-trips/{id}/start', [TransportTripController::class, 'startTrip'])->middleware('permission:transport.edit');
+    Route::post('transport-trips/{id}/complete', [TransportTripController::class, 'completeTrip'])->middleware('permission:transport.edit');
+    Route::put('transport-trips/{id}/change-driver', [TransportTripController::class, 'changeDriver'])->middleware('permission:transport.edit');
+    Route::put('transport-trips/{id}/change-vehicle', [TransportTripController::class, 'changeVehicle'])->middleware('permission:transport.edit');
+    Route::delete('transport-trips/{id}', [TransportTripController::class, 'destroy'])->middleware('permission:transport.delete');
+
+    // 5. Live Boarding & Drop
+    Route::get('transport-trips/{id}/roster', [TransportBoardingController::class, 'getRoster'])->middleware('permission:transport.view');
+    Route::post('transport-trips/{id}/board', [TransportBoardingController::class, 'markBoarded'])->middleware('permission:transport.edit');
+    Route::post('transport-trips/{id}/unboard', [TransportBoardingController::class, 'unmarkBoarded'])->middleware('permission:transport.edit');
+    Route::post('transport-trips/{id}/drop', [TransportBoardingController::class, 'markDropped'])->middleware('permission:transport.edit');
+    Route::post('transport-trips/{id}/reach-stop', [TransportBoardingController::class, 'reachStop'])->middleware('permission:transport.edit');
+
+    // 6. Live Tracking & ETA
+    Route::post('transport-trips/{id}/gps', [TransportTrackingController::class, 'updateGps'])->middleware('permission:transport.edit');
+    Route::get('transport-trips/{id}/live-tracking', [TransportTrackingController::class, 'getLiveTracking'])->middleware('permission:transport.view');
+    Route::get('transport/student/{studentUserId}/tracking', [TransportTrackingController::class, 'getStudentTracking'])->middleware('permission:transport.view');
+
+    // 7. Finance (Expenses, Fuel, Maintenance, Fees)
+    Route::get('transport-expenses', [TransportFinanceController::class, 'getExpenses'])->middleware('permission:transport.view');
+    Route::post('transport-expenses', [TransportFinanceController::class, 'storeExpense'])->middleware('permission:transport.create');
+    Route::delete('transport-expenses/{id}', [TransportFinanceController::class, 'deleteExpense'])->middleware('permission:transport.delete');
+
+    Route::get('transport-fuel', [TransportFinanceController::class, 'getFuelEntries'])->middleware('permission:transport.view');
+    Route::post('transport-fuel', [TransportFinanceController::class, 'storeFuelEntry'])->middleware('permission:transport.create');
+    Route::delete('transport-fuel/{id}', [TransportFinanceController::class, 'deleteFuelEntry'])->middleware('permission:transport.delete');
+
+    Route::get('transport-maintenance', [TransportFinanceController::class, 'getMaintenanceLogs'])->middleware('permission:transport.view');
+    Route::post('transport-maintenance', [TransportFinanceController::class, 'storeMaintenanceLog'])->middleware('permission:transport.create');
+    Route::delete('transport-maintenance/{id}', [TransportFinanceController::class, 'deleteMaintenanceLog'])->middleware('permission:transport.delete');
+
+    Route::get('transport-fees/summary', [TransportFinanceController::class, 'getFeesSummary'])->middleware('permission:transport.view');
 
     // Event Routes
     Route::apiResource('events', EventController::class);

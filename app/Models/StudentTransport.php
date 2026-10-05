@@ -23,13 +23,32 @@ class StudentTransport extends Model
         'drop_stop_id',
         'pickup_time',
         'drop_time',
+        'annual_fee',
         'monthly_fee',
         'status',
     ];
 
     protected $casts = [
+        'annual_fee' => 'decimal:2',
         'monthly_fee' => 'decimal:2',
     ];
+
+    protected $appends = [
+        'annual_fee',
+    ];
+
+    public function getAnnualFeeAttribute($value)
+    {
+        return $value !== null ? (float) $value : (isset($this->attributes['monthly_fee']) ? (float) $this->attributes['monthly_fee'] : 0);
+    }
+
+    public function setAnnualFeeAttribute($value)
+    {
+        $this->attributes['annual_fee'] = $value;
+        if (! isset($this->attributes['monthly_fee']) || empty($this->attributes['monthly_fee'])) {
+            $this->attributes['monthly_fee'] = $value;
+        }
+    }
 
     public function route(): BelongsTo
     {
