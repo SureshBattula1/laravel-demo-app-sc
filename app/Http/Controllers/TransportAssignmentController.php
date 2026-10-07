@@ -7,6 +7,7 @@ use App\Http\Traits\PaginatesAndSorts;
 use App\Models\RouteStop;
 use App\Models\StudentTransport;
 use App\Models\TransportRoute;
+use App\Services\StudentTransportFeeSyncService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -14,6 +15,10 @@ use Illuminate\Support\Facades\Log;
 class TransportAssignmentController extends Controller
 {
     use PaginatesAndSorts;
+
+    public function __construct(
+        protected StudentTransportFeeSyncService $syncService
+    ) {}
 
     /** Paginated list of student transport assignments with filters. */
     public function index(Request $request)
@@ -132,9 +137,12 @@ class TransportAssignmentController extends Controller
                     'drop_time' => $dropTime,
                     'annual_fee' => $annualFee,
                     'monthly_fee' => $annualFee,
+                    'due_date' => $request->due_date ?: null,
                     'status' => $request->input('status', 'Active'),
                 ]
             );
+
+            $this->syncService->syncAssignment($assignment, $annualFee);
 
             return response()->json([
                 'success' => true,
@@ -197,16 +205,21 @@ class TransportAssignmentController extends Controller
                 $data['annual_fee'] = $fee;
                 $data['monthly_fee'] = $fee;
             }
+            if ($request->has('due_date')) {
+                $data['due_date'] = $request->due_date ?: null;
+            }
             if ($request->filled('status')) {
                 $data['status'] = $request->status;
             }
 
             $assignment->update($data);
+            $assignment = $assignment->fresh(['route', 'vehicle', 'student']);
+            $this->syncService->syncAssignment($assignment);
 
             return response()->json([
                 'success' => true,
                 'message' => 'Assignment updated successfully',
-                'data' => $assignment->fresh(['route', 'vehicle', 'student']),
+                'data' => $assignment,
             ]);
         } catch (\Exception $e) {
             Log::error('Update student transport assignment error', ['error' => $e->getMessage()]);
@@ -224,7 +237,9 @@ class TransportAssignmentController extends Controller
                 return $this->forbiddenResponse();
             }
 
+            $studentUserId = (int) $assignment->student_id;
             $assignment->delete();
+            $this->syncService->handleUnassignment($studentUserId);
 
             return response()->json([
                 'success' => true,
@@ -268,7 +283,7 @@ class TransportAssignmentController extends Controller
                         continue;
                     }
 
-                    StudentTransport::withoutTenantScope()->updateOrCreate(
+                    $assignment = StudentTransport::withoutTenantScope()->updateOrCreate(
                         ['student_id' => (int) $userId],
                         [
                             'route_id' => $route->id,
@@ -282,9 +297,12 @@ class TransportAssignmentController extends Controller
                             'drop_time' => $dropTime,
                             'annual_fee' => $annualFee,
                             'monthly_fee' => $annualFee,
+                            'due_date' => $request->due_date ?: null,
                             'status' => $status,
                         ]
                     );
+
+                    $this->syncService->syncAssignment($assignment, $annualFee);
 
                     $assignedCount++;
                 }

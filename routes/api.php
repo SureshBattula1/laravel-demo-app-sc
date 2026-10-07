@@ -500,12 +500,16 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
 
     Route::get('transport-fees/summary', [TransportFinanceController::class, 'getFeesSummary'])->middleware('permission:transport.view');
 
-    // Driver Portal Routes (Dedicated endpoints for Driver role)
+    // Driver Portal & Duty Shift Routes (Dedicated endpoints for Driver role)
     Route::prefix('driver')->group(function () {
         Route::get('dashboard', [DriverPortalController::class, 'dashboard']);
+        Route::get('shift/current', [DriverPortalController::class, 'currentShift']);
+        Route::post('shift/start', [DriverPortalController::class, 'startShift']);
+        Route::post('shift/stop', [DriverPortalController::class, 'stopShift']);
         Route::post('clock-in', [DriverPortalController::class, 'clockIn']);
         Route::post('clock-out', [DriverPortalController::class, 'clockOut']);
         Route::get('attendance-history', [DriverPortalController::class, 'attendanceHistory']);
+        Route::post('trips/generate', [DriverPortalController::class, 'generateTrip']);
         Route::post('trips/{id}/location', [DriverPortalController::class, 'updateLocation']);
     });
 

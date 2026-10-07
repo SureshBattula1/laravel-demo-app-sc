@@ -26,6 +26,7 @@ class StoreStudentTransportRequest extends FormRequest
             'pickup_time' => 'nullable',
             'drop_time' => 'nullable',
             'monthly_fee' => "$req|numeric|min:0",
+            'due_date' => 'nullable|date',
             'status' => 'nullable|in:Active,Inactive',
         ];
     }

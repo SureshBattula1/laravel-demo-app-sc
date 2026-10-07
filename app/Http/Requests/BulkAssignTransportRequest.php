@@ -48,6 +48,9 @@ class BulkAssignTransportRequest extends FormRequest
         if ($this->has('drop_time') && ($this->drop_time === '' || $this->drop_time === 'null')) {
             $mergeData['drop_time'] = null;
         }
+        if ($this->has('due_date') && ($this->due_date === '' || $this->due_date === 'null')) {
+            $mergeData['due_date'] = null;
+        }
 
         // 3. Fallback annual/monthly fee to route fare if missing
         $fee = $this->input('annual_fee') ?? $this->input('monthly_fee');
@@ -81,6 +84,7 @@ class BulkAssignTransportRequest extends FormRequest
             'drop_time' => 'nullable',
             'annual_fee' => 'nullable|numeric|min:0',
             'monthly_fee' => 'nullable|numeric|min:0',
+            'due_date' => 'nullable|date',
             'status' => 'nullable|in:Active,Inactive',
         ];
     }

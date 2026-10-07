@@ -25,12 +25,14 @@ class StudentTransport extends Model
         'drop_time',
         'annual_fee',
         'monthly_fee',
+        'due_date',
         'status',
     ];
 
     protected $casts = [
         'annual_fee' => 'decimal:2',
         'monthly_fee' => 'decimal:2',
+        'due_date' => 'date',
     ];
 
     protected $appends = [

@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Services\AcademicYearContext;
 use App\Services\CsvExportService;
 use App\Services\PdfExportService;
+use App\Services\StudentTransportFeeSyncService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -625,6 +626,14 @@ class StudentController extends Controller
             // Update user with student ID
             $user->update(['user_type_id' => $studentId]);
 
+            // Sync transport assignment and fees if transport requested
+            if ($request->boolean('transport_required')) {
+                $createdStudent = Student::find($studentId);
+                if ($createdStudent) {
+                    app(StudentTransportFeeSyncService::class)->syncFromStudentProfile($createdStudent);
+                }
+            }
+
             DB::commit();
 
             return response()->json([
@@ -715,6 +724,11 @@ class StudentController extends Controller
 
             // Update user fields if provided
             $this->updateUserFields($request, $student->user_id);
+
+            // Sync transport assignment and fee dues if transport details changed
+            if ($request->hasAny(['transport_required', 'transport_route', 'transport_fee', 'pickup_point', 'drop_point', 'vehicle_number', 'pickup_time', 'drop_time'])) {
+                app(StudentTransportFeeSyncService::class)->syncFromStudentProfile($studentModel->fresh());
+            }
 
             DB::commit();
 

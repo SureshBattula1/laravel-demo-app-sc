@@ -41,13 +41,43 @@ class TransportTripController extends Controller
 
             $this->scopeQuery($request, $query, 'transport_trips');
 
+            // If logged-in user is a Driver, restrict strictly to their own assigned trips and today/future records only
+            $user = $request->user();
+            if ($user && ($user->role === 'Driver' || $user->user_type === 'Driver')) {
+                $driverId = DB::table('transport_drivers')
+                    ->where('user_id', $user->id)
+                    ->orWhere('email', $user->email)
+                    ->value('id');
+
+                if ($driverId) {
+                    $query->where('transport_trips.transport_driver_id', $driverId);
+                }
+
+                // Driver role: ONLY today and future records (no past data anywhere)
+                $today = now()->toDateString();
+                $query->where(function ($q) use ($today) {
+                    $q->whereNull('transport_trips.trip_date')
+                        ->orWhere('transport_trips.trip_date', '>=', $today);
+                });
+            }
+
+            // Support active_only filter (for Active Trip Run dropdowns)
+            if ($request->boolean('active_only') || $request->input('status') === 'active_only') {
+                $query->whereNotIn('transport_trips.status', ['Completed', 'Cancelled']);
+                $today = now()->toDateString();
+                $query->where(function ($q) use ($today) {
+                    $q->whereNull('transport_trips.trip_date')
+                        ->orWhere('transport_trips.trip_date', '>=', $today);
+                });
+            }
+
             if ($request->filled('branch_id')) {
                 $query->where('transport_trips.branch_id', (int) $request->branch_id);
             }
             if ($request->filled('route_id')) {
                 $query->where('transport_trips.route_id', (int) $request->route_id);
             }
-            if ($request->filled('status')) {
+            if ($request->filled('status') && $request->input('status') !== 'active_only') {
                 $query->where('transport_trips.status', $request->status);
             }
             if ($request->filled('trip_type')) {

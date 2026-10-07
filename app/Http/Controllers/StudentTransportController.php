@@ -6,18 +6,22 @@ use App\Http\Requests\StoreStudentTransportRequest;
 use App\Models\RouteStop;
 use App\Models\StudentTransport;
 use App\Models\TransportRoute;
+use App\Services\StudentTransportFeeSyncService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class StudentTransportController extends Controller
 {
+    public function __construct(
+        protected StudentTransportFeeSyncService $syncService
+    ) {}
+
     /** Assign a student to a route (+ pickup/drop stops). */
     public function store(StoreStudentTransportRequest $request)
     {
         try {
             $route = TransportRoute::withoutTenantScope()->findOrFail($request->route_id);
-            if (!$this->canAccessBranch($request, (int) $route->branch_id)) {
+            if (! $this->canAccessBranch($request, (int) $route->branch_id)) {
                 return $this->forbiddenResponse();
             }
 
@@ -35,14 +39,18 @@ class StudentTransportController extends Controller
                 'pickup_time' => $pickupTime,
                 'drop_time' => $dropTime,
                 'monthly_fee' => $request->monthly_fee,
+                'due_date' => $request->due_date ?: null,
                 'status' => $request->status ?? 'Active',
             ]);
+
+            $this->syncService->syncAssignment($assignment);
 
             return response()->json(['success' => true, 'message' => 'Student assigned to transport', 'data' => $assignment], 201);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json(['success' => false, 'message' => 'Route not found'], 404);
         } catch (\Exception $e) {
             Log::error('Assign student transport error', ['error' => $e->getMessage()]);
+
             return $this->serverErrorResponse('Failed to assign student', $e);
         }
     }
@@ -51,9 +59,10 @@ class StudentTransportController extends Controller
     {
         try {
             $assignment = StudentTransport::withoutTenantScope()->with(['route', 'vehicle', 'student'])->findOrFail($id);
-            if (!$this->canAccessBranch($request, (int) $assignment->branch_id)) {
+            if (! $this->canAccessBranch($request, (int) $assignment->branch_id)) {
                 return $this->forbiddenResponse();
             }
+
             return response()->json(['success' => true, 'data' => $assignment]);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json(['success' => false, 'message' => 'Assignment not found'], 404);
@@ -64,16 +73,19 @@ class StudentTransportController extends Controller
     {
         try {
             $assignment = StudentTransport::withoutTenantScope()->findOrFail($id);
-            if (!$this->canAccessBranch($request, (int) $assignment->branch_id)) {
+            if (! $this->canAccessBranch($request, (int) $assignment->branch_id)) {
                 return $this->forbiddenResponse();
             }
-            $data = $request->only(['vehicle_id', 'pickup_stop_id', 'drop_stop_id', 'monthly_fee', 'status', 'stop_name', 'pickup_time', 'drop_time']);
+            $data = $request->only(['vehicle_id', 'pickup_stop_id', 'drop_stop_id', 'monthly_fee', 'due_date', 'status', 'stop_name', 'pickup_time', 'drop_time']);
             $assignment->update(array_filter($data, fn ($v) => $v !== null));
+            $this->syncService->syncAssignment($assignment->fresh());
+
             return response()->json(['success' => true, 'message' => 'Assignment updated', 'data' => $assignment->fresh(['route', 'vehicle', 'student'])]);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json(['success' => false, 'message' => 'Assignment not found'], 404);
         } catch (\Exception $e) {
             Log::error('Update student transport error', ['error' => $e->getMessage()]);
+
             return $this->serverErrorResponse('Failed to update assignment', $e);
         }
     }
@@ -82,15 +94,19 @@ class StudentTransportController extends Controller
     {
         try {
             $assignment = StudentTransport::withoutTenantScope()->findOrFail($id);
-            if (!$this->canAccessBranch($request, (int) $assignment->branch_id)) {
+            if (! $this->canAccessBranch($request, (int) $assignment->branch_id)) {
                 return $this->forbiddenResponse();
             }
+            $studentUserId = (int) $assignment->student_id;
             $assignment->delete();
+            $this->syncService->handleUnassignment($studentUserId);
+
             return response()->json(['success' => true, 'message' => 'Assignment removed']);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json(['success' => false, 'message' => 'Assignment not found'], 404);
         } catch (\Exception $e) {
             Log::error('Delete student transport error', ['error' => $e->getMessage()]);
+
             return $this->serverErrorResponse('Failed to remove assignment', $e);
         }
     }
