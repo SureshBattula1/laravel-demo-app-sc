@@ -62,7 +62,7 @@ class LibraryController extends Controller
 
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
             if ($accessibleBranchIds !== 'all') {
-                if (!empty($accessibleBranchIds)) {
+                if (! empty($accessibleBranchIds)) {
                     $query->whereIn('books.branch_id', $accessibleBranchIds);
                 } else {
                     $query->whereRaw('1 = 0');
@@ -100,6 +100,7 @@ class LibraryController extends Controller
                     'code' => $book->branch_code,
                 ];
                 unset($book->branch_name, $book->branch_code);
+
                 return $book;
             })->toArray();
 
@@ -119,6 +120,7 @@ class LibraryController extends Controller
             ]);
         } catch (\Exception $e) {
             Log::error('Error fetching books', ['error' => $e->getMessage()]);
+
             return $this->serverError('Error fetching books', $e);
         }
     }
@@ -127,7 +129,7 @@ class LibraryController extends Controller
     {
         try {
             $branchId = (int) $request->branch_id;
-            if (!$this->canAccessBranch($request, $branchId)) {
+            if (! $this->canAccessBranch($request, $branchId)) {
                 return $this->forbidden();
             }
 
@@ -137,32 +139,120 @@ class LibraryController extends Controller
             $total = (int) $request->total_copies;
             $available = $request->filled('available_copies') ? (int) $request->available_copies : $total;
 
+            $author = $request->author ? strip_tags($request->author) : null;
+            $authorId = $request->author_id ? (int) $request->author_id : null;
+            if (! $author && $authorId) {
+                $author = DB::table('library_authors')->where('id', $authorId)->value('name');
+            }
+
+            $category = $request->category ? strip_tags($request->category) : null;
+            $categoryId = $request->category_id ? (int) $request->category_id : null;
+            if (! $category && $categoryId) {
+                $category = DB::table('library_categories')->where('id', $categoryId)->value('name');
+            }
+
+            $publisher = $request->publisher ? strip_tags($request->publisher) : null;
+            $publisherId = $request->publisher_id ? (int) $request->publisher_id : null;
+            if (! $publisher && $publisherId) {
+                $publisher = DB::table('library_publishers')->where('id', $publisherId)->value('name');
+            }
+
+            $location = $request->location ? strip_tags($request->location) : null;
+            $shelfId = $request->shelf_id ? (int) $request->shelf_id : null;
+            if (! $location && $shelfId) {
+                $shelf = DB::table('library_shelves')->where('id', $shelfId)->first();
+                if ($shelf) {
+                    $location = $shelf->code ?? ($shelf->rack_number.($shelf->shelf_number ? '-'.$shelf->shelf_number : ''));
+                }
+            }
+
             $book = Book::create([
                 'branch_id' => $branchId,
                 'school_id' => $schoolId,
                 'title' => strip_tags($request->title),
-                'author' => strip_tags($request->author),
+                'author' => $author ?? 'Unknown Author',
+                'author_id' => $authorId,
                 'isbn' => $request->isbn,
-                'category' => strip_tags($request->category),
-                'publisher' => $request->publisher ? strip_tags($request->publisher) : null,
+                'category' => $category ?? 'General',
+                'category_id' => $categoryId,
+                'publisher' => $publisher,
+                'publisher_id' => $publisherId,
                 'published_year' => $request->published_year,
                 'language' => $request->language,
                 'edition' => $request->edition,
+                'ddc_code' => $request->ddc_code,
+                'call_number' => $request->call_number,
                 'pages' => $request->pages,
                 'total_copies' => $total,
                 'available_copies' => min($available, $total),
-                'location' => $request->location,
+                'location' => $location,
                 'description' => $request->description ? strip_tags($request->description) : null,
                 'is_active' => $request->boolean('is_active', true),
             ]);
 
+            if ($request->has('subject_ids') && is_array($request->subject_ids)) {
+                $book->subjects()->sync($request->subject_ids);
+            }
+
+            // Auto-generate or custom create physical copies with Barcode & Accession number
+            $bcPrefix = trim((string) $request->input('barcode_prefix', 'BC'));
+            if ($bcPrefix === '') {
+                $bcPrefix = 'BC';
+            }
+            $accPrefix = trim((string) $request->input('accession_prefix', 'ACC-'));
+            if ($accPrefix === '') {
+                $accPrefix = 'ACC-';
+            }
+
+            if ($request->has('copies') && is_array($request->copies) && count($request->copies) > 0) {
+                $copyNum = 1;
+                foreach ($request->copies as $copyData) {
+                    $barcode = ! empty($copyData['barcode']) ? trim($copyData['barcode']) : sprintf('%s%d%d%03d', $bcPrefix, $branchId, $book->id, $copyNum);
+                    $accNum = ! empty($copyData['accession_number']) ? trim($copyData['accession_number']) : sprintf('%s%d-%d-%03d', $accPrefix, $branchId, $book->id, $copyNum);
+                    $copyShelfId = ! empty($copyData['shelf_id']) ? (int) $copyData['shelf_id'] : $shelfId;
+                    $condition = ! empty($copyData['condition']) ? $copyData['condition'] : 'Good';
+                    $price = isset($copyData['purchase_price']) && is_numeric($copyData['purchase_price']) ? (float) $copyData['purchase_price'] : null;
+
+                    \App\Models\LibraryBookCopy::create([
+                        'school_id' => $schoolId,
+                        'branch_id' => $branchId,
+                        'book_id' => $book->id,
+                        'accession_number' => $accNum,
+                        'barcode' => $barcode,
+                        'copy_number' => $copyNum,
+                        'shelf_id' => $copyShelfId,
+                        'condition' => $condition,
+                        'status' => 'Available',
+                        'purchase_price' => $price,
+                        'is_active' => true,
+                    ]);
+                    $copyNum++;
+                }
+            } else {
+                for ($i = 1; $i <= $total; $i++) {
+                    \App\Models\LibraryBookCopy::create([
+                        'school_id' => $schoolId,
+                        'branch_id' => $branchId,
+                        'book_id' => $book->id,
+                        'accession_number' => sprintf('%s%d-%d-%03d', $accPrefix, $branchId, $book->id, $i),
+                        'barcode' => sprintf('%s%d%d%03d', $bcPrefix, $branchId, $book->id, $i),
+                        'copy_number' => $i,
+                        'shelf_id' => $shelfId,
+                        'condition' => 'Good',
+                        'status' => 'Available',
+                        'is_active' => true,
+                    ]);
+                }
+            }
+
             return response()->json([
                 'success' => true,
                 'message' => 'Book created successfully',
-                'data' => $book->load('branch'),
+                'data' => $book->load(['branch', 'categoryMaster:id,name,code', 'authorMaster:id,name', 'publisherMaster:id,name', 'subjects:id,name,code', 'copies']),
             ], 201);
         } catch (\Exception $e) {
             Log::error('Create book error', ['error' => $e->getMessage()]);
+
             return $this->serverError('Failed to create book', $e);
         }
     }
@@ -170,8 +260,10 @@ class LibraryController extends Controller
     public function show(Request $request, string $id)
     {
         try {
-            $book = Book::withoutTenantScope()->with('branch')->findOrFail($id);
-            if (!$this->canAccessBranch($request, (int) $book->branch_id)) {
+            $book = Book::withoutTenantScope()
+                ->with(['branch', 'categoryMaster:id,name,code', 'authorMaster:id,name', 'publisherMaster:id,name', 'subjects:id,name,code', 'copies.shelf'])
+                ->findOrFail($id);
+            if (! $this->canAccessBranch($request, (int) $book->branch_id)) {
                 return $this->forbidden();
             }
 
@@ -185,36 +277,117 @@ class LibraryController extends Controller
     {
         try {
             $book = Book::withoutTenantScope()->findOrFail($id);
-            if (!$this->canAccessBranch($request, (int) $book->branch_id)) {
+            if (! $this->canAccessBranch($request, (int) $book->branch_id)) {
                 return $this->forbidden();
             }
 
             $data = $request->only([
-                'title', 'author', 'isbn', 'category', 'publisher', 'published_year',
-                'language', 'edition', 'pages', 'total_copies', 'available_copies',
+                'title', 'author', 'author_id', 'isbn', 'category', 'category_id',
+                'publisher', 'publisher_id', 'published_year', 'language', 'edition',
+                'ddc_code', 'call_number', 'pages', 'total_copies', 'available_copies',
                 'location', 'description', 'is_active',
             ]);
+
+            if (! empty($data['author_id']) && empty($data['author'])) {
+                $data['author'] = DB::table('library_authors')->where('id', $data['author_id'])->value('name') ?? $book->author;
+            }
+            if (! empty($data['category_id']) && empty($data['category'])) {
+                $data['category'] = DB::table('library_categories')->where('id', $data['category_id'])->value('name') ?? $book->category;
+            }
+            if (! empty($data['publisher_id']) && empty($data['publisher'])) {
+                $data['publisher'] = DB::table('library_publishers')->where('id', $data['publisher_id'])->value('name') ?? $book->publisher;
+            }
+            if ($request->filled('shelf_id') && empty($data['location'])) {
+                $shelf = DB::table('library_shelves')->where('id', $request->shelf_id)->first();
+                if ($shelf) {
+                    $data['location'] = $shelf->code ?? ($shelf->rack_number.($shelf->shelf_number ? '-'.$shelf->shelf_number : ''));
+                }
+            }
 
             // Keep available_copies consistent when total changes.
             if (array_key_exists('total_copies', $data)) {
                 $issued = (int) $book->total_copies - (int) $book->available_copies;
                 $newTotal = (int) $data['total_copies'];
-                if (!array_key_exists('available_copies', $data)) {
+                if (! array_key_exists('available_copies', $data)) {
                     $data['available_copies'] = max(0, $newTotal - $issued);
+                }
+
+                // If copies increased, auto-generate additional copies or create provided extra copies
+                $existingCount = \App\Models\LibraryBookCopy::withoutTenantScope()->where('book_id', $book->id)->count();
+                if ($newTotal > $existingCount) {
+                    $bcPrefix = trim((string) $request->input('barcode_prefix', 'BC')) ?: 'BC';
+                    $accPrefix = trim((string) $request->input('accession_prefix', 'ACC-')) ?: 'ACC-';
+
+                    if ($request->has('copies') && is_array($request->copies)) {
+                        $providedExtra = array_slice($request->copies, $existingCount);
+                        $i = $existingCount + 1;
+                        foreach ($providedExtra as $extra) {
+                            $barcode = ! empty($extra['barcode']) ? trim($extra['barcode']) : sprintf('%s%d%d%03d', $bcPrefix, $book->branch_id, $book->id, $i);
+                            $accNum = ! empty($extra['accession_number']) ? trim($extra['accession_number']) : sprintf('%s%d-%d-%03d', $accPrefix, $book->branch_id, $book->id, $i);
+                            \App\Models\LibraryBookCopy::create([
+                                'school_id' => $book->school_id,
+                                'branch_id' => $book->branch_id,
+                                'book_id' => $book->id,
+                                'accession_number' => $accNum,
+                                'barcode' => $barcode,
+                                'copy_number' => $i,
+                                'shelf_id' => ! empty($extra['shelf_id']) ? (int) $extra['shelf_id'] : ($request->shelf_id ? (int) $request->shelf_id : null),
+                                'condition' => ! empty($extra['condition']) ? $extra['condition'] : 'Good',
+                                'status' => 'Available',
+                                'purchase_price' => isset($extra['purchase_price']) && is_numeric($extra['purchase_price']) ? (float) $extra['purchase_price'] : null,
+                                'is_active' => true,
+                            ]);
+                            $i++;
+                        }
+                        for (; $i <= $newTotal; $i++) {
+                            \App\Models\LibraryBookCopy::create([
+                                'school_id' => $book->school_id,
+                                'branch_id' => $book->branch_id,
+                                'book_id' => $book->id,
+                                'accession_number' => sprintf('%s%d-%d-%03d', $accPrefix, $book->branch_id, $book->id, $i),
+                                'barcode' => sprintf('%s%d%d%03d', $bcPrefix, $book->branch_id, $book->id, $i),
+                                'copy_number' => $i,
+                                'shelf_id' => $request->shelf_id ? (int) $request->shelf_id : null,
+                                'condition' => 'Good',
+                                'status' => 'Available',
+                                'is_active' => true,
+                            ]);
+                        }
+                    } else {
+                        for ($i = $existingCount + 1; $i <= $newTotal; $i++) {
+                            \App\Models\LibraryBookCopy::create([
+                                'school_id' => $book->school_id,
+                                'branch_id' => $book->branch_id,
+                                'book_id' => $book->id,
+                                'accession_number' => sprintf('%s%d-%d-%03d', $accPrefix, $book->branch_id, $book->id, $i),
+                                'barcode' => sprintf('%s%d%d%03d', $bcPrefix, $book->branch_id, $book->id, $i),
+                                'copy_number' => $i,
+                                'shelf_id' => $request->shelf_id ? (int) $request->shelf_id : null,
+                                'condition' => 'Good',
+                                'status' => 'Available',
+                                'is_active' => true,
+                            ]);
+                        }
+                    }
                 }
             }
 
             $book->update($data);
 
+            if ($request->has('subject_ids') && is_array($request->subject_ids)) {
+                $book->subjects()->sync($request->subject_ids);
+            }
+
             return response()->json([
                 'success' => true,
                 'message' => 'Book updated successfully',
-                'data' => $book->fresh('branch'),
+                'data' => $book->fresh(['branch', 'categoryMaster:id,name,code', 'authorMaster:id,name', 'publisherMaster:id,name', 'subjects:id,name,code']),
             ]);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json(['success' => false, 'message' => 'Book not found'], 404);
         } catch (\Exception $e) {
             Log::error('Update book error', ['error' => $e->getMessage()]);
+
             return $this->serverError('Failed to update book', $e);
         }
     }
@@ -223,7 +396,7 @@ class LibraryController extends Controller
     {
         try {
             $book = Book::withoutTenantScope()->findOrFail($id);
-            if (!$this->canAccessBranch($request, (int) $book->branch_id)) {
+            if (! $this->canAccessBranch($request, (int) $book->branch_id)) {
                 return $this->forbidden();
             }
 
@@ -241,6 +414,7 @@ class LibraryController extends Controller
             return response()->json(['success' => false, 'message' => 'Book not found'], 404);
         } catch (\Exception $e) {
             Log::error('Delete book error', ['error' => $e->getMessage()]);
+
             return $this->serverError('Failed to delete book', $e);
         }
     }
@@ -253,7 +427,7 @@ class LibraryController extends Controller
         try {
             return DB::transaction(function () use ($request, $id) {
                 $book = Book::withoutTenantScope()->lockForUpdate()->findOrFail($id);
-                if (!$this->canAccessBranch($request, (int) $book->branch_id)) {
+                if (! $this->canAccessBranch($request, (int) $book->branch_id)) {
                     return $this->forbidden();
                 }
 
@@ -321,6 +495,7 @@ class LibraryController extends Controller
             return response()->json(['success' => false, 'message' => 'Book not found'], 404);
         } catch (\Exception $e) {
             Log::error('Issue book error', ['error' => $e->getMessage()]);
+
             return $this->serverError('Failed to issue book', $e);
         }
     }
@@ -333,7 +508,7 @@ class LibraryController extends Controller
         try {
             return DB::transaction(function () use ($request, $id) {
                 $issue = BookIssue::withoutTenantScope()->with('book')->findOrFail($id);
-                if (!$this->canAccessBranch($request, (int) $issue->branch_id)) {
+                if (! $this->canAccessBranch($request, (int) $issue->branch_id)) {
                     return $this->forbidden();
                 }
 
@@ -378,6 +553,7 @@ class LibraryController extends Controller
             return response()->json(['success' => false, 'message' => 'Issue not found'], 404);
         } catch (\Exception $e) {
             Log::error('Return book error', ['error' => $e->getMessage()]);
+
             return $this->serverError('Failed to return book', $e);
         }
     }
@@ -400,7 +576,7 @@ class LibraryController extends Controller
     {
         try {
             $book = Book::withoutTenantScope()->findOrFail($id);
-            if (!$this->canAccessBranch($request, (int) $book->branch_id)) {
+            if (! $this->canAccessBranch($request, (int) $book->branch_id)) {
                 return $this->forbidden();
             }
 
@@ -432,6 +608,7 @@ class LibraryController extends Controller
             return response()->json(['success' => false, 'message' => 'Book not found'], 404);
         } catch (\Exception $e) {
             Log::error('Get book history error', ['error' => $e->getMessage()]);
+
             return $this->serverError('Failed to fetch book history', $e);
         }
     }
@@ -465,7 +642,7 @@ class LibraryController extends Controller
 
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
             if ($accessibleBranchIds !== 'all') {
-                if (!empty($accessibleBranchIds)) {
+                if (! empty($accessibleBranchIds)) {
                     $query->whereIn('book_issues.branch_id', $accessibleBranchIds);
                 } else {
                     $query->whereRaw('1 = 0');
@@ -498,6 +675,7 @@ class LibraryController extends Controller
             ]);
         } catch (\Exception $e) {
             Log::error('Get issues error', ['error' => $e->getMessage()]);
+
             return $this->serverError('Failed to fetch issues', $e);
         }
     }
@@ -528,6 +706,7 @@ class LibraryController extends Controller
             ]);
         } catch (\Exception $e) {
             Log::error('Get student issues error', ['error' => $e->getMessage()]);
+
             return $this->serverError('Failed to fetch member issues', $e);
         }
     }

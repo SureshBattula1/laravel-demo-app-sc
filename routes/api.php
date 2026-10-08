@@ -29,6 +29,15 @@ use App\Http\Controllers\GradeController;
 use App\Http\Controllers\HolidayController;
 use App\Http\Controllers\InvoiceController;
 use App\Http\Controllers\LeaveController;
+use App\Http\Controllers\Library\LibraryCatalogController;
+use App\Http\Controllers\Library\LibraryCirculationController;
+use App\Http\Controllers\Library\LibraryDashboardController;
+use App\Http\Controllers\Library\LibraryFineController;
+use App\Http\Controllers\Library\LibraryInventoryController;
+use App\Http\Controllers\Library\LibraryMemberController;
+use App\Http\Controllers\Library\LibraryProcurementController;
+use App\Http\Controllers\Library\LibraryReportController;
+use App\Http\Controllers\Library\LibraryReservationController;
 use App\Http\Controllers\LibraryController;
 use App\Http\Controllers\MessageController;
 use App\Http\Controllers\ModuleController;
@@ -419,6 +428,85 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
     Route::get('books/{id}', [LibraryController::class, 'show'])->middleware('permission:library.view');
     Route::put('books/{id}', [LibraryController::class, 'update'])->middleware('permission:library.edit');
     Route::delete('books/{id}', [LibraryController::class, 'destroy'])->middleware('permission:library.delete');
+
+    // Enterprise Library Modular Routes
+    Route::prefix('library')->middleware('permission:library.view')->group(function () {
+        // 1. Dashboard
+        Route::get('dashboard/summary', [LibraryDashboardController::class, 'getSummary']);
+        Route::get('dashboard/trends', [LibraryDashboardController::class, 'getCirculationTrends']);
+        Route::get('dashboard/popular-books', [LibraryDashboardController::class, 'getPopularBooks']);
+
+        // 2. Catalog Masters
+        Route::get('categories', [LibraryCatalogController::class, 'getCategories']);
+        Route::post('categories', [LibraryCatalogController::class, 'storeCategory'])->middleware('permission:library.create');
+        Route::put('categories/{id}', [LibraryCatalogController::class, 'updateCategory'])->middleware('permission:library.edit');
+        Route::delete('categories/{id}', [LibraryCatalogController::class, 'destroyCategory'])->middleware('permission:library.delete');
+
+        Route::get('authors', [LibraryCatalogController::class, 'getAuthors']);
+        Route::post('authors', [LibraryCatalogController::class, 'storeAuthor'])->middleware('permission:library.create');
+        Route::put('authors/{id}', [LibraryCatalogController::class, 'updateAuthor'])->middleware('permission:library.edit');
+        Route::delete('authors/{id}', [LibraryCatalogController::class, 'destroyAuthor'])->middleware('permission:library.delete');
+
+        Route::get('publishers', [LibraryCatalogController::class, 'getPublishers']);
+        Route::post('publishers', [LibraryCatalogController::class, 'storePublisher'])->middleware('permission:library.create');
+        Route::put('publishers/{id}', [LibraryCatalogController::class, 'updatePublisher'])->middleware('permission:library.edit');
+        Route::delete('publishers/{id}', [LibraryCatalogController::class, 'destroyPublisher'])->middleware('permission:library.delete');
+
+        Route::get('subjects', [LibraryCatalogController::class, 'getSubjects']);
+        Route::post('subjects', [LibraryCatalogController::class, 'storeSubject'])->middleware('permission:library.create');
+        Route::put('subjects/{id}', [LibraryCatalogController::class, 'updateSubject'])->middleware('permission:library.edit');
+        Route::delete('subjects/{id}', [LibraryCatalogController::class, 'destroySubject'])->middleware('permission:library.delete');
+
+        // 3. Inventory
+        Route::get('copies', [LibraryInventoryController::class, 'getCopies']);
+        Route::post('copies', [LibraryInventoryController::class, 'storeCopy'])->middleware('permission:library.create');
+        Route::post('copies/batch-generate', [LibraryInventoryController::class, 'batchGenerateCopies'])->middleware('permission:library.create');
+        Route::put('copies/{id}', [LibraryInventoryController::class, 'updateCopy'])->middleware('permission:library.edit');
+        Route::delete('copies/{id}', [LibraryInventoryController::class, 'destroyCopy'])->middleware('permission:library.delete');
+
+        Route::get('shelves', [LibraryInventoryController::class, 'getShelves']);
+        Route::post('shelves', [LibraryInventoryController::class, 'storeShelf'])->middleware('permission:library.create');
+        Route::put('shelves/{id}', [LibraryInventoryController::class, 'updateShelf'])->middleware('permission:library.edit');
+        Route::delete('shelves/{id}', [LibraryInventoryController::class, 'destroyShelf'])->middleware('permission:library.delete');
+
+        Route::get('stock-audits', [LibraryInventoryController::class, 'getStockAudits']);
+        Route::post('stock-audits/start', [LibraryInventoryController::class, 'startStockAudit'])->middleware('permission:library.create');
+        Route::post('stock-audits/{id}/scan', [LibraryInventoryController::class, 'scanAuditBarcode'])->middleware('permission:library.create');
+        Route::post('stock-audits/{id}/complete', [LibraryInventoryController::class, 'completeStockAudit'])->middleware('permission:library.create');
+
+        // 4. Members
+        Route::get('members', [LibraryMemberController::class, 'getMembers']);
+        Route::get('members/{id}', [LibraryMemberController::class, 'getMemberProfile']);
+
+        // 5. Circulation
+        Route::post('circulation/issue', [LibraryCirculationController::class, 'issueBook'])->middleware('permission:library.issue');
+        Route::post('circulation/return', [LibraryCirculationController::class, 'returnBook'])->middleware('permission:library.return');
+        Route::post('circulation/renew', [LibraryCirculationController::class, 'renewBook'])->middleware('permission:library.issue');
+        Route::get('circulation/overdue', [LibraryCirculationController::class, 'getOverdue']);
+        Route::post('circulation/send-reminder', [LibraryCirculationController::class, 'sendOverdueReminder'])->middleware('permission:library.issue');
+
+        // 6. Reservations
+        Route::get('reservations', [LibraryReservationController::class, 'index']);
+        Route::post('reservations', [LibraryReservationController::class, 'store'])->middleware('permission:library.create');
+        Route::delete('reservations/{id}', [LibraryReservationController::class, 'cancel'])->middleware('permission:library.edit');
+        Route::post('reservations/{id}/fulfill', [LibraryReservationController::class, 'fulfill'])->middleware('permission:library.edit');
+
+        // 7. Fines
+        Route::get('fines', [LibraryFineController::class, 'index']);
+        Route::post('fines/{id}/collect', [LibraryFineController::class, 'collectPayment'])->middleware('permission:library.return');
+        Route::post('fines/{id}/waive', [LibraryFineController::class, 'waiveFine'])->middleware('permission:library.edit');
+
+        // 8. Procurement
+        Route::get('procurements', [LibraryProcurementController::class, 'index']);
+        Route::post('procurements', [LibraryProcurementController::class, 'store'])->middleware('permission:library.create');
+        Route::get('procurements/{id}', [LibraryProcurementController::class, 'show']);
+        Route::post('procurements/{id}/receive', [LibraryProcurementController::class, 'receiveAndAccession'])->middleware('permission:library.edit');
+
+        // 9. Reports
+        Route::get('reports/circulation', [LibraryReportController::class, 'circulationReport']);
+        Route::get('reports/inventory', [LibraryReportController::class, 'inventoryReport']);
+        Route::get('reports/fines', [LibraryReportController::class, 'fineReport']);
+    });
 
     // Transport (Phase 1: management) — permission-gated; literal routes before {id} routes
     Route::get('transport-drivers', [TransportDriverController::class, 'index'])->middleware('permission:transport.view');
