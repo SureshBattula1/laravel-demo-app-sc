@@ -6,10 +6,55 @@ use App\Models\Assignment;
 use App\Models\Notification;
 use App\Models\UniversalAttachment;
 use App\Models\User;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Storage;
 
 class InboxNotificationService
 {
+    /** @var list<string> */
+    public const INBOX_MODULE_FILTERS = [
+        'attendance',
+        'assignments',
+        'exams',
+        'fees',
+        'holidays',
+        'custom',
+    ];
+
+    public function applyModuleFilter(Builder $query, string $module): void
+    {
+        $module = strtolower(trim($module));
+        if (! in_array($module, self::INBOX_MODULE_FILTERS, true)) {
+            return;
+        }
+
+        match ($module) {
+            'assignments' => $query->where(function (Builder $q) {
+                $q->where('metadata->source', 'assignment')
+                    ->orWhere(function (Builder $inner) {
+                        $inner->where('metadata->source', 'notification_campaign')
+                            ->where('metadata->module', 'assignments');
+                    });
+            }),
+            'attendance' => $query->where(function (Builder $q) {
+                $q->whereIn('metadata->source', ['attendance', 'attendance_notify'])
+                    ->orWhere(function (Builder $inner) {
+                        $inner->where('metadata->source', 'notification_campaign')
+                            ->whereIn('metadata->module', ['attendance', 'teacher_attendance']);
+                    });
+            }),
+            'custom' => $query->where(function (Builder $q) {
+                $q->where('metadata->source', 'custom')
+                    ->orWhere(function (Builder $inner) {
+                        $inner->where('metadata->source', 'notification_campaign')
+                            ->where('metadata->module', 'custom');
+                    });
+            }),
+            default => $query->where('metadata->source', 'notification_campaign')
+                ->where('metadata->module', $module),
+        };
+    }
+
     /**
      * @param  list<int>  $userIds
      * @param  array<string, mixed>  $metadata
@@ -164,11 +209,15 @@ class InboxNotificationService
                 ? Assignment::withoutTenantScope()->find($assignmentId)
                 : null;
 
+            $campaignId = isset($meta['campaign_id']) ? (int) $meta['campaign_id'] : 0;
+
             return [
                 'description' => $assignment?->description,
                 'optional_description' => $assignment?->instructions
                     ?: ($bits === [] ? null : implode(' · ', $bits)),
-                'attachments' => $this->attachmentsForMeta($meta),
+                'attachments' => $campaignId > 0
+                    ? $this->presentAttachments('notification_campaign', $campaignId)
+                    : $this->attachmentsForMeta($meta),
             ];
         }
 
@@ -224,6 +273,35 @@ class InboxNotificationService
     /**
      * @param  list<array<string, mixed>>  $items
      */
+    /**
+     * @param  list<array<string, mixed>>  $items
+     */
+    public function syncCampaignAttachments(int $campaignId, array $items): void
+    {
+        foreach ($items as $item) {
+            if (! is_array($item) || empty($item['file_path'])) {
+                continue;
+            }
+            $path = ltrim((string) $item['file_path'], '/');
+            UniversalAttachment::updateOrCreate(
+                [
+                    'module' => 'notification_campaign',
+                    'module_id' => $campaignId,
+                    'file_path' => $path,
+                ],
+                [
+                    'attachment_type' => $item['attachment_type'] ?? 'document',
+                    'file_name' => $item['file_name'] ?? basename($path),
+                    'original_name' => $item['original_name'] ?? ($item['file_name'] ?? basename($path)),
+                    'file_type' => $item['file_type'] ?? null,
+                    'file_size' => isset($item['file_size']) ? (int) $item['file_size'] : null,
+                    'is_active' => true,
+                    'uploaded_by' => auth()->id(),
+                ]
+            );
+        }
+    }
+
     public function syncNotificationAttachments(int $moduleId, array $items): void
     {
         foreach ($items as $item) {

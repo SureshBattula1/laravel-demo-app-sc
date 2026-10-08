@@ -2,8 +2,8 @@
 
 namespace Tests;
 
-use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 use Illuminate\Foundation\Testing\WithFaker;
 
 abstract class TestCase extends BaseTestCase
@@ -16,7 +16,7 @@ abstract class TestCase extends BaseTestCase
     protected function createAuthenticatedUser($role = 'BranchAdmin', $attributes = [])
     {
         $branch = $attributes['branch_id'] ?? null;
-        if (!$branch) {
+        if (! $branch) {
             $branch = $this->createBranch();
             $attributes['branch_id'] = $branch->id;
         }
@@ -45,6 +45,13 @@ abstract class TestCase extends BaseTestCase
             'name' => $this->faker->company(),
             'code' => strtoupper($this->faker->unique()->lexify('???')),
             'branch_type' => 'School',
+            'address' => '123 Test Street',
+            'city' => 'Test City',
+            'state' => 'Test State',
+            'country' => 'India',
+            'pincode' => '123456',
+            'phone' => '9999999999',
+            'email' => $this->faker->unique()->safeEmail(),
             'is_active' => true,
             'status' => 'Active',
         ], $attributes));
@@ -56,6 +63,7 @@ abstract class TestCase extends BaseTestCase
     protected function actingAsUser($user = null, $role = 'BranchAdmin')
     {
         $user = $user ?? $this->createAuthenticatedUser($role);
+
         return $this->actingAs($user, 'sanctum');
     }
 
@@ -77,6 +85,7 @@ abstract class TestCase extends BaseTestCase
             'success',
         ]);
         $this->assertTrue($response->json('success'), 'Response should have success: true');
+
         return $response;
     }
 
@@ -91,11 +100,11 @@ abstract class TestCase extends BaseTestCase
             'errors',
         ]);
         $this->assertFalse($response->json('success'), 'Response should have success: false');
-        
+
         if ($field) {
             $this->assertArrayHasKey($field, $response->json('errors'), "Validation errors should contain field: {$field}");
         }
-        
+
         return $response;
     }
 }

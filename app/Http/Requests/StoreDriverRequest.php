@@ -21,10 +21,18 @@ class StoreDriverRequest extends FormRequest
         $branchId = $this->input('branch_id')
             ?? ($id ? DB::table('transport_drivers')->where('id', $id)->value('branch_id') : null);
 
+        $existingUserId = $id ? DB::table('transport_drivers')->where('id', $id)->value('user_id') : null;
+
         return [
             'branch_id' => "$req|exists:branches,id",
             'name' => "$req|string|max:255",
             'phone' => 'nullable|string|max:20',
+            'email' => [
+                'nullable', 'email', 'max:255',
+                Rule::unique('users', 'email')->ignore($existingUserId),
+            ],
+            'password' => 'nullable|string|min:6',
+            'create_account' => 'nullable|boolean',
             'license_number' => [
                 'nullable', 'string', 'max:60',
                 Rule::unique('transport_drivers', 'license_number')

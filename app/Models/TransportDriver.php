@@ -16,8 +16,10 @@ class TransportDriver extends Model
     protected $fillable = [
         'branch_id',
         'school_id',
+        'user_id',
         'name',
         'phone',
+        'email',
         'license_number',
         'license_expiry',
         'address',
@@ -28,6 +30,11 @@ class TransportDriver extends Model
         'license_expiry' => 'date',
         'is_active' => 'boolean',
     ];
+
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'user_id');
+    }
 
     public function branch(): BelongsTo
     {

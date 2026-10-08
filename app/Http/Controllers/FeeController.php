@@ -3,9 +3,13 @@
 namespace App\Http\Controllers;
 
 use App\Http\Traits\PaginatesAndSorts;
+use App\Models\FeeDue;
 use App\Models\FeePayment;
 use App\Models\FeeStructure;
+use App\Models\StudentTransport;
 use App\Services\AcademicYearContext;
+use App\Services\StudentTransportFeeSyncService;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -1009,6 +1013,26 @@ class FeeController extends Controller
 
             $payment = FeePayment::create($paymentData);
 
+            // Update corresponding FeeDue record if one exists for this student and structure
+            if ($studentRecord) {
+                $matchedDue = FeeDue::where('student_id', $studentRecord->id)
+                    ->where(function ($q) use ($request) {
+                        $q->where('fee_structure_id', $request->fee_structure_id)
+                            ->orWhere('id', $request->fee_structure_id);
+                    })
+                    ->first();
+
+                if ($matchedDue) {
+                    $newPaid = (float) $matchedDue->paid_amount + (float) $request->amount_paid;
+                    $newBalance = max(0, (float) $matchedDue->original_amount - $newPaid);
+                    $matchedDue->update([
+                        'paid_amount' => $newPaid,
+                        'balance_amount' => $newBalance,
+                        'status' => $newBalance <= 0 ? 'Paid' : 'PartiallyPaid',
+                    ]);
+                }
+            }
+
             DB::commit();
 
             return response()->json([
@@ -1034,10 +1058,16 @@ class FeeController extends Controller
             // Get student details to filter fee structures by branch and grade
             // studentId here is actually the user_id
             $student = \App\Models\Student::where('user_id', $studentId)->first();
+            if (! $student) {
+                $student = \App\Models\Student::find($studentId);
+                if ($student) {
+                    $studentId = (string) $student->user_id;
+                }
+            }
 
             // If no student record exists, return empty data instead of error
             if (! $student) {
-                Log::warning('No student record found for user_id', ['user_id' => $studentId]);
+                Log::warning('No student record found for user_id or student id', ['identifier' => $studentId]);
 
                 return response()->json([
                     'success' => true,
@@ -1065,18 +1095,6 @@ class FeeController extends Controller
                 : null;
 
             // OPTIMIZED: Use SQL aggregation - Count completed AND partial payments (scoped to academic year when set)
-            $totalPaidQuery = FeePayment::where('student_id', $studentId)
-                ->whereIn('payment_status', ['Completed', 'Partial']);
-            if ($academicYearName) {
-                $totalPaidQuery->where('academic_year', $academicYearName);
-            }
-            $totalPaid = $totalPaidQuery->sum('total_amount');
-
-            // OPTIMIZED: Get FULLY paid structure IDs - Only from completed payments (not partial), scoped to academic year
-            $paidStructureIdsQuery = FeePayment::where('student_id', $studentId)
-                ->where('payment_status', 'Completed');
-            $this->feeDuesService->syncAllPaymentAllocationsForUser((int) $studentId);
-
             $totalPaidQuery = FeePayment::query()
                 ->where('student_id', $studentId)
                 ->whereIn('payment_status', ['Completed', 'Partial']);
@@ -1103,8 +1121,10 @@ class FeeController extends Controller
             ]);
 
             // OPTIMIZED: Get pending fees - Only for student's branch and grade (scoped to academic year when set)
+            // Exclude grade-wide generic transport fees so non-transport students are not charged transport
             $pendingQuery = FeeStructure::where('is_active', true)
                 ->where('branch_id', $student->branch_id)
+                ->whereNotIn('fee_type', ['Transport', 'Transport Fee'])
                 ->where(function ($q) use ($student) {
                     $q->where('grade', $student->grade)
                         ->orWhere('grade', 'Grade '.$student->grade)
@@ -1140,6 +1160,48 @@ class FeeController extends Controller
                 })
                 ->filter(fn ($fee) => ($fee->remaining_amount ?? (float) $fee->amount) > 0)
                 ->values();
+
+            // Check student-specific transport dues (from fee_dues or active transport assignment)
+            $transportDuesQuery = FeeDue::where('student_id', $student->id)
+                ->where('fee_type', 'Transport')
+                ->whereNull('deleted_at');
+            if ($academicYearName) {
+                $transportDuesQuery->where(function ($q) use ($academicYearName) {
+                    $q->where('academic_year', $academicYearName)
+                        ->orWhereNull('academic_year')
+                        ->orWhere('academic_year', '');
+                });
+            }
+            $transportDues = $transportDuesQuery->get();
+
+            // Self-heal: If student has active transport in profile/assignment but no fee_due yet, sync immediately
+            if ($transportDues->isEmpty() && ($student->transport_required || StudentTransport::where('student_id', $student->user_id)->where('status', 'Active')->exists())) {
+                app(StudentTransportFeeSyncService::class)->syncFromStudentProfile($student);
+                $transportDues = $transportDuesQuery->get();
+            }
+
+            $transportItems = $transportDues->map(function ($due) use ($student) {
+                $balance = (float) $due->balance_amount;
+                if ($balance <= 0) {
+                    return null;
+                }
+
+                return (object) [
+                    'id' => $due->fee_structure_id ?: $due->id,
+                    'fee_structure_id' => $due->fee_structure_id ?: $due->id,
+                    'grade' => $student->grade,
+                    'grade_label' => 'Grade '.$student->grade,
+                    'fee_type' => 'Transport Fee',
+                    'amount' => (float) $due->original_amount,
+                    'amount_paid' => (float) $due->paid_amount,
+                    'remaining_amount' => $balance,
+                    'due_date' => $due->due_date ? Carbon::parse($due->due_date)->format('Y-m-d') : null,
+                    'academic_year' => $due->academic_year,
+                    'is_transport' => true,
+                ];
+            })->filter()->values();
+
+            $pending = $pending->concat($transportItems)->values();
 
             // OPTIMIZED: Get payments with pagination (limit to recent 50, scoped to academic year when set)
             $paymentsQuery = FeePayment::with(['feeStructure', 'creator'])

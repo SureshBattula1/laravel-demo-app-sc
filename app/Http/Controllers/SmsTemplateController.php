@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\SmsTemplate;
 use App\Models\Student;
 use App\Models\Teacher;
+use App\Services\SmsTemplateTagCatalog;
 use App\Services\SmsTemplateTagContextFactory;
 use App\Services\SmsTemplateTagRenderer;
 use Illuminate\Database\Eloquent\Builder;
@@ -47,6 +48,20 @@ class SmsTemplateController extends Controller
             'data' => [
                 'templates' => $templates,
                 'allowed_tags' => SmsTemplateTagRenderer::allowedTags(),
+                'tag_catalog_by_module' => SmsTemplateTagCatalog::catalogByModule(),
+            ],
+        ]);
+    }
+
+    public function tagCatalog(Request $request): JsonResponse
+    {
+        $module = trim((string) $request->query('module_type', ''));
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'tag_catalog_by_module' => SmsTemplateTagCatalog::catalogByModule(),
+                'groups_for_module' => SmsTemplateTagCatalog::groupedForModule($module !== '' ? $module : null),
             ],
         ]);
     }
@@ -101,6 +116,7 @@ class SmsTemplateController extends Controller
             'data' => [
                 'templates' => $templates,
                 'allowed_tags' => SmsTemplateTagRenderer::allowedTags(),
+                'tag_catalog_by_module' => SmsTemplateTagCatalog::catalogByModule(),
             ],
         ]);
     }
@@ -115,6 +131,7 @@ class SmsTemplateController extends Controller
             'name' => 'required|string|max:255|unique:sms_templates,name,NULL,id,branch_id,'.$branchId,
             'body' => 'required|string|max:2000',
             'audience' => 'required|string|in:'.implode(',', SmsTemplate::AUDIENCES),
+            'module_type' => 'required|string|in:'.implode(',', SmsTemplate::MODULE_TYPES),
             'is_active' => 'sometimes|boolean',
         ]);
 
@@ -131,6 +148,7 @@ class SmsTemplateController extends Controller
             'name' => $request->input('name'),
             'body' => $request->input('body'),
             'audience' => $request->input('audience'),
+            'module_type' => $request->input('module_type'),
             'is_active' => $request->boolean('is_active', true),
         ]);
 
@@ -156,6 +174,7 @@ class SmsTemplateController extends Controller
             'name' => 'sometimes|string|max:255|unique:sms_templates,name,'.$templateId.',id,branch_id,'.$branchId,
             'body' => 'sometimes|string|max:2000',
             'audience' => 'sometimes|string|in:'.implode(',', SmsTemplate::AUDIENCES),
+            'module_type' => 'sometimes|string|in:'.implode(',', SmsTemplate::MODULE_TYPES),
             'is_active' => 'sometimes|boolean',
         ]);
 
@@ -167,7 +186,7 @@ class SmsTemplateController extends Controller
             ], 422);
         }
 
-        $template->fill($request->only(['name', 'body', 'audience', 'is_active']));
+        $template->fill($request->only(['name', 'body', 'audience', 'module_type', 'is_active']));
         $template->save();
 
         return response()->json([
@@ -266,7 +285,7 @@ class SmsTemplateController extends Controller
                     'errors' => ['student_id' => ['Pick a student that belongs to the selected branch.']],
                 ], 422);
             }
-            $context = $contextFactory->buildForStudent($student);
+            $context = $contextFactory->buildForStudent($student, $branchId);
         } else {
             $teacher = Teacher::query()
                 ->whereKey((int) $request->input('teacher_id'))
@@ -279,7 +298,7 @@ class SmsTemplateController extends Controller
                     'errors' => ['teacher_id' => ['Pick a teacher that belongs to the selected branch.']],
                 ], 422);
             }
-            $context = $contextFactory->buildForTeacher($teacher);
+            $context = $contextFactory->buildForTeacher($teacher, $branchId);
         }
 
         $rendered = $renderer->render((string) $body, $context);

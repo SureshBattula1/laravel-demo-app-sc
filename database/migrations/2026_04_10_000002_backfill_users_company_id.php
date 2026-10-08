@@ -10,7 +10,11 @@ return new class extends Migration
 {
     public function up(): void
     {
-        DB::statement("
+        if (DB::getDriverName() === 'sqlite') {
+            return;
+        }
+
+        DB::statement('
             UPDATE users u
             INNER JOIN branches b ON u.branch_id = b.id
             INNER JOIN schools s ON b.school_id = s.id
@@ -18,7 +22,7 @@ return new class extends Migration
             WHERE u.company_id IS NULL
               AND u.deleted_at IS NULL
               AND s.company_id IS NOT NULL
-        ");
+        ');
     }
 
     public function down(): void

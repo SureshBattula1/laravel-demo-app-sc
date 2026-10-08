@@ -17,25 +17,31 @@ class Attendance extends Model
         'school_id',
         'user_id',
         'user_type',
+        'duty_type',
         'attendance_date',
         'status',
         'check_in_time',
         'check_out_time',
         'total_hours',
         'remarks',
+        'odometer_start',
+        'odometer_end',
+        'latitude',
+        'longitude',
         'marked_by',
         'created_by',
-        'updated_by'
+        'updated_by',
     ];
 
     protected $casts = [
         'attendance_date' => 'date',
         'check_in_time' => 'datetime',
         'check_out_time' => 'datetime',
-        'total_hours' => 'decimal:2'
+        'total_hours' => 'decimal:2',
     ];
 
     protected $keyType = 'string';
+
     public $incrementing = false;
 
     protected static function boot()

@@ -12,6 +12,7 @@ class BookIssue extends Model
 
     protected $fillable = [
         'book_id',
+        'copy_id',
         'branch_id',
         'school_id',
         'academic_year_id',
@@ -22,6 +23,8 @@ class BookIssue extends Model
         'due_date',
         'return_date',
         'status',
+        'renewed_count',
+        'last_renewed_at',
         'fine_amount',
         'fine_paid',
         'fine_paid_at',
@@ -32,6 +35,8 @@ class BookIssue extends Model
         'issue_date' => 'date',
         'due_date' => 'date',
         'return_date' => 'date',
+        'renewed_count' => 'integer',
+        'last_renewed_at' => 'datetime',
         'fine_amount' => 'decimal:2',
         'fine_paid' => 'boolean',
         'fine_paid_at' => 'datetime',
@@ -40,6 +45,11 @@ class BookIssue extends Model
     public function book(): BelongsTo
     {
         return $this->belongsTo(Book::class);
+    }
+
+    public function copy(): BelongsTo
+    {
+        return $this->belongsTo(LibraryBookCopy::class, 'copy_id');
     }
 
     public function branch(): BelongsTo
@@ -55,6 +65,11 @@ class BookIssue extends Model
     public function teacher(): BelongsTo
     {
         return $this->belongsTo(User::class, 'teacher_id');
+    }
+
+    public function fines()
+    {
+        return $this->hasMany(LibraryFine::class, 'book_issue_id');
     }
 
     /** The borrowing user, whichever column is set. */

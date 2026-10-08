@@ -13,6 +13,7 @@ use App\Http\Controllers\ClassController;
 use App\Http\Controllers\CommunicationController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DepartmentController;
+use App\Http\Controllers\DriverPortalController;
 use App\Http\Controllers\EventController;
 use App\Http\Controllers\ExamController;
 use App\Http\Controllers\ExamMarkController;
@@ -28,6 +29,15 @@ use App\Http\Controllers\GradeController;
 use App\Http\Controllers\HolidayController;
 use App\Http\Controllers\InvoiceController;
 use App\Http\Controllers\LeaveController;
+use App\Http\Controllers\Library\LibraryCatalogController;
+use App\Http\Controllers\Library\LibraryCirculationController;
+use App\Http\Controllers\Library\LibraryDashboardController;
+use App\Http\Controllers\Library\LibraryFineController;
+use App\Http\Controllers\Library\LibraryInventoryController;
+use App\Http\Controllers\Library\LibraryMemberController;
+use App\Http\Controllers\Library\LibraryProcurementController;
+use App\Http\Controllers\Library\LibraryReportController;
+use App\Http\Controllers\Library\LibraryReservationController;
 use App\Http\Controllers\LibraryController;
 use App\Http\Controllers\MessageController;
 use App\Http\Controllers\ModuleController;
@@ -47,8 +57,15 @@ use App\Http\Controllers\SubjectController;
 use App\Http\Controllers\TeacherController;
 use App\Http\Controllers\TimetableController;
 use App\Http\Controllers\TransactionController;
+use App\Http\Controllers\TransportAssignmentController;
+use App\Http\Controllers\TransportBoardingController;
+use App\Http\Controllers\TransportDashboardController;
 use App\Http\Controllers\TransportDriverController;
+use App\Http\Controllers\TransportFinanceController;
 use App\Http\Controllers\TransportRouteController;
+use App\Http\Controllers\TransportStopController;
+use App\Http\Controllers\TransportTrackingController;
+use App\Http\Controllers\TransportTripController;
 use App\Http\Controllers\TwilioWhatsAppStatusWebhookController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\UserPreferenceController;
@@ -133,6 +150,7 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
 
         // SMS templates & bulk send (personalized #tags#)
         Route::get('sms-templates', [SmsTemplateController::class, 'indexAll']);
+        Route::get('sms-templates/tag-catalog', [SmsTemplateController::class, 'tagCatalog']);
         Route::get('{id}/sms-templates', [SmsTemplateController::class, 'index']);
         Route::post('{id}/sms-templates', [SmsTemplateController::class, 'store']);
         Route::put('{id}/sms-templates/{templateId}', [SmsTemplateController::class, 'update']);
@@ -280,6 +298,7 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
         Route::post('/', [AssignmentController::class, 'store']);
         Route::get('eligible-students', [AssignmentController::class, 'eligibleStudents']);
         Route::post('preview-recipients', [AssignmentController::class, 'previewRecipients']);
+        Route::post('{id}/my-submission', [AssignmentController::class, 'storeMySubmission']);
         Route::get('{id}', [AssignmentController::class, 'show']);
         Route::put('{id}', [AssignmentController::class, 'update']);
         Route::delete('{id}', [AssignmentController::class, 'destroy']);
@@ -410,6 +429,85 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
     Route::put('books/{id}', [LibraryController::class, 'update'])->middleware('permission:library.edit');
     Route::delete('books/{id}', [LibraryController::class, 'destroy'])->middleware('permission:library.delete');
 
+    // Enterprise Library Modular Routes
+    Route::prefix('library')->middleware('permission:library.view')->group(function () {
+        // 1. Dashboard
+        Route::get('dashboard/summary', [LibraryDashboardController::class, 'getSummary']);
+        Route::get('dashboard/trends', [LibraryDashboardController::class, 'getCirculationTrends']);
+        Route::get('dashboard/popular-books', [LibraryDashboardController::class, 'getPopularBooks']);
+
+        // 2. Catalog Masters
+        Route::get('categories', [LibraryCatalogController::class, 'getCategories']);
+        Route::post('categories', [LibraryCatalogController::class, 'storeCategory'])->middleware('permission:library.create');
+        Route::put('categories/{id}', [LibraryCatalogController::class, 'updateCategory'])->middleware('permission:library.edit');
+        Route::delete('categories/{id}', [LibraryCatalogController::class, 'destroyCategory'])->middleware('permission:library.delete');
+
+        Route::get('authors', [LibraryCatalogController::class, 'getAuthors']);
+        Route::post('authors', [LibraryCatalogController::class, 'storeAuthor'])->middleware('permission:library.create');
+        Route::put('authors/{id}', [LibraryCatalogController::class, 'updateAuthor'])->middleware('permission:library.edit');
+        Route::delete('authors/{id}', [LibraryCatalogController::class, 'destroyAuthor'])->middleware('permission:library.delete');
+
+        Route::get('publishers', [LibraryCatalogController::class, 'getPublishers']);
+        Route::post('publishers', [LibraryCatalogController::class, 'storePublisher'])->middleware('permission:library.create');
+        Route::put('publishers/{id}', [LibraryCatalogController::class, 'updatePublisher'])->middleware('permission:library.edit');
+        Route::delete('publishers/{id}', [LibraryCatalogController::class, 'destroyPublisher'])->middleware('permission:library.delete');
+
+        Route::get('subjects', [LibraryCatalogController::class, 'getSubjects']);
+        Route::post('subjects', [LibraryCatalogController::class, 'storeSubject'])->middleware('permission:library.create');
+        Route::put('subjects/{id}', [LibraryCatalogController::class, 'updateSubject'])->middleware('permission:library.edit');
+        Route::delete('subjects/{id}', [LibraryCatalogController::class, 'destroySubject'])->middleware('permission:library.delete');
+
+        // 3. Inventory
+        Route::get('copies', [LibraryInventoryController::class, 'getCopies']);
+        Route::post('copies', [LibraryInventoryController::class, 'storeCopy'])->middleware('permission:library.create');
+        Route::post('copies/batch-generate', [LibraryInventoryController::class, 'batchGenerateCopies'])->middleware('permission:library.create');
+        Route::put('copies/{id}', [LibraryInventoryController::class, 'updateCopy'])->middleware('permission:library.edit');
+        Route::delete('copies/{id}', [LibraryInventoryController::class, 'destroyCopy'])->middleware('permission:library.delete');
+
+        Route::get('shelves', [LibraryInventoryController::class, 'getShelves']);
+        Route::post('shelves', [LibraryInventoryController::class, 'storeShelf'])->middleware('permission:library.create');
+        Route::put('shelves/{id}', [LibraryInventoryController::class, 'updateShelf'])->middleware('permission:library.edit');
+        Route::delete('shelves/{id}', [LibraryInventoryController::class, 'destroyShelf'])->middleware('permission:library.delete');
+
+        Route::get('stock-audits', [LibraryInventoryController::class, 'getStockAudits']);
+        Route::post('stock-audits/start', [LibraryInventoryController::class, 'startStockAudit'])->middleware('permission:library.create');
+        Route::post('stock-audits/{id}/scan', [LibraryInventoryController::class, 'scanAuditBarcode'])->middleware('permission:library.create');
+        Route::post('stock-audits/{id}/complete', [LibraryInventoryController::class, 'completeStockAudit'])->middleware('permission:library.create');
+
+        // 4. Members
+        Route::get('members', [LibraryMemberController::class, 'getMembers']);
+        Route::get('members/{id}', [LibraryMemberController::class, 'getMemberProfile']);
+
+        // 5. Circulation
+        Route::post('circulation/issue', [LibraryCirculationController::class, 'issueBook'])->middleware('permission:library.issue');
+        Route::post('circulation/return', [LibraryCirculationController::class, 'returnBook'])->middleware('permission:library.return');
+        Route::post('circulation/renew', [LibraryCirculationController::class, 'renewBook'])->middleware('permission:library.issue');
+        Route::get('circulation/overdue', [LibraryCirculationController::class, 'getOverdue']);
+        Route::post('circulation/send-reminder', [LibraryCirculationController::class, 'sendOverdueReminder'])->middleware('permission:library.issue');
+
+        // 6. Reservations
+        Route::get('reservations', [LibraryReservationController::class, 'index']);
+        Route::post('reservations', [LibraryReservationController::class, 'store'])->middleware('permission:library.create');
+        Route::delete('reservations/{id}', [LibraryReservationController::class, 'cancel'])->middleware('permission:library.edit');
+        Route::post('reservations/{id}/fulfill', [LibraryReservationController::class, 'fulfill'])->middleware('permission:library.edit');
+
+        // 7. Fines
+        Route::get('fines', [LibraryFineController::class, 'index']);
+        Route::post('fines/{id}/collect', [LibraryFineController::class, 'collectPayment'])->middleware('permission:library.return');
+        Route::post('fines/{id}/waive', [LibraryFineController::class, 'waiveFine'])->middleware('permission:library.edit');
+
+        // 8. Procurement
+        Route::get('procurements', [LibraryProcurementController::class, 'index']);
+        Route::post('procurements', [LibraryProcurementController::class, 'store'])->middleware('permission:library.create');
+        Route::get('procurements/{id}', [LibraryProcurementController::class, 'show']);
+        Route::post('procurements/{id}/receive', [LibraryProcurementController::class, 'receiveAndAccession'])->middleware('permission:library.edit');
+
+        // 9. Reports
+        Route::get('reports/circulation', [LibraryReportController::class, 'circulationReport']);
+        Route::get('reports/inventory', [LibraryReportController::class, 'inventoryReport']);
+        Route::get('reports/fines', [LibraryReportController::class, 'fineReport']);
+    });
+
     // Transport (Phase 1: management) — permission-gated; literal routes before {id} routes
     Route::get('transport-drivers', [TransportDriverController::class, 'index'])->middleware('permission:transport.view');
     Route::post('transport-drivers', [TransportDriverController::class, 'store'])->middleware('permission:transport.create');
@@ -435,6 +533,73 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
     Route::get('student-transport/{id}', [StudentTransportController::class, 'show'])->middleware('permission:transport.view');
     Route::put('student-transport/{id}', [StudentTransportController::class, 'update'])->middleware('permission:transport.assign');
     Route::delete('student-transport/{id}', [StudentTransportController::class, 'destroy'])->middleware('permission:transport.assign');
+
+    // Upgraded Transport Enterprise Operations
+    // 1. Dashboard
+    Route::get('transport/dashboard', [TransportDashboardController::class, 'index'])->middleware('permission:transport.view');
+
+    // 2. Stops Master
+    Route::get('transport-stops', [TransportStopController::class, 'index'])->middleware('permission:transport.view');
+    Route::post('transport-stops', [TransportStopController::class, 'store'])->middleware('permission:transport.create');
+    Route::put('transport-stops/{id}', [TransportStopController::class, 'update'])->middleware('permission:transport.edit');
+    Route::delete('transport-stops/{id}', [TransportStopController::class, 'destroy'])->middleware('permission:transport.delete');
+
+    // 3. Assignments (Single & Bulk)
+    Route::get('transport-assignments', [TransportAssignmentController::class, 'index'])->middleware('permission:transport.view');
+    Route::post('transport-assignments', [TransportAssignmentController::class, 'store'])->middleware('permission:transport.assign');
+    Route::post('transport-assignments/bulk', [TransportAssignmentController::class, 'bulkAssign'])->middleware('permission:transport.assign');
+    Route::put('transport-assignments/{id}', [TransportAssignmentController::class, 'update'])->middleware('permission:transport.assign');
+    Route::delete('transport-assignments/{id}', [TransportAssignmentController::class, 'destroy'])->middleware('permission:transport.assign');
+
+    // 4. Trips & Operations
+    Route::get('transport-trips', [TransportTripController::class, 'index'])->middleware('permission:transport.view');
+    Route::post('transport-trips', [TransportTripController::class, 'store'])->middleware('permission:transport.create');
+    Route::get('transport-trips/{id}', [TransportTripController::class, 'show'])->middleware('permission:transport.view');
+    Route::post('transport-trips/{id}/start', [TransportTripController::class, 'startTrip'])->middleware('permission:transport.edit');
+    Route::post('transport-trips/{id}/complete', [TransportTripController::class, 'completeTrip'])->middleware('permission:transport.edit');
+    Route::put('transport-trips/{id}/change-driver', [TransportTripController::class, 'changeDriver'])->middleware('permission:transport.edit');
+    Route::put('transport-trips/{id}/change-vehicle', [TransportTripController::class, 'changeVehicle'])->middleware('permission:transport.edit');
+    Route::delete('transport-trips/{id}', [TransportTripController::class, 'destroy'])->middleware('permission:transport.delete');
+
+    // 5. Live Boarding & Drop
+    Route::get('transport-trips/{id}/roster', [TransportBoardingController::class, 'getRoster'])->middleware('permission:transport.view');
+    Route::post('transport-trips/{id}/board', [TransportBoardingController::class, 'markBoarded'])->middleware('permission:transport.edit');
+    Route::post('transport-trips/{id}/unboard', [TransportBoardingController::class, 'unmarkBoarded'])->middleware('permission:transport.edit');
+    Route::post('transport-trips/{id}/drop', [TransportBoardingController::class, 'markDropped'])->middleware('permission:transport.edit');
+    Route::post('transport-trips/{id}/reach-stop', [TransportBoardingController::class, 'reachStop'])->middleware('permission:transport.edit');
+
+    // 6. Live Tracking & ETA
+    Route::post('transport-trips/{id}/gps', [TransportTrackingController::class, 'updateGps'])->middleware('permission:transport.edit');
+    Route::get('transport-trips/{id}/live-tracking', [TransportTrackingController::class, 'getLiveTracking'])->middleware('permission:transport.view');
+    Route::get('transport/student/{studentUserId}/tracking', [TransportTrackingController::class, 'getStudentTracking'])->middleware('permission:transport.view');
+
+    // 7. Finance (Expenses, Fuel, Maintenance, Fees)
+    Route::get('transport-expenses', [TransportFinanceController::class, 'getExpenses'])->middleware('permission:transport.view');
+    Route::post('transport-expenses', [TransportFinanceController::class, 'storeExpense'])->middleware('permission:transport.create');
+    Route::delete('transport-expenses/{id}', [TransportFinanceController::class, 'deleteExpense'])->middleware('permission:transport.delete');
+
+    Route::get('transport-fuel', [TransportFinanceController::class, 'getFuelEntries'])->middleware('permission:transport.view');
+    Route::post('transport-fuel', [TransportFinanceController::class, 'storeFuelEntry'])->middleware('permission:transport.create');
+    Route::delete('transport-fuel/{id}', [TransportFinanceController::class, 'deleteFuelEntry'])->middleware('permission:transport.delete');
+
+    Route::get('transport-maintenance', [TransportFinanceController::class, 'getMaintenanceLogs'])->middleware('permission:transport.view');
+    Route::post('transport-maintenance', [TransportFinanceController::class, 'storeMaintenanceLog'])->middleware('permission:transport.create');
+    Route::delete('transport-maintenance/{id}', [TransportFinanceController::class, 'deleteMaintenanceLog'])->middleware('permission:transport.delete');
+
+    Route::get('transport-fees/summary', [TransportFinanceController::class, 'getFeesSummary'])->middleware('permission:transport.view');
+
+    // Driver Portal & Duty Shift Routes (Dedicated endpoints for Driver role)
+    Route::prefix('driver')->group(function () {
+        Route::get('dashboard', [DriverPortalController::class, 'dashboard']);
+        Route::get('shift/current', [DriverPortalController::class, 'currentShift']);
+        Route::post('shift/start', [DriverPortalController::class, 'startShift']);
+        Route::post('shift/stop', [DriverPortalController::class, 'stopShift']);
+        Route::post('clock-in', [DriverPortalController::class, 'clockIn']);
+        Route::post('clock-out', [DriverPortalController::class, 'clockOut']);
+        Route::get('attendance-history', [DriverPortalController::class, 'attendanceHistory']);
+        Route::post('trips/generate', [DriverPortalController::class, 'generateTrip']);
+        Route::post('trips/{id}/location', [DriverPortalController::class, 'updateLocation']);
+    });
 
     // Event Routes
     Route::apiResource('events', EventController::class);
@@ -510,6 +675,7 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
     Route::prefix('users')->group(function () {
         Route::get('/', [UserController::class, 'index']);
         Route::get('/all', [UserController::class, 'all']);
+        Route::get('export', [UserController::class, 'export']);
         Route::get('/{id}', [UserController::class, 'show']);
         Route::post('/', [UserController::class, 'store']);
         Route::put('/{id}', [UserController::class, 'update']);
@@ -643,6 +809,8 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
             ->middleware('permission:notifications.create');
         Route::post('/notifications/broadcast', [CommunicationController::class, 'broadcastNotification'])
             ->middleware('permission:notifications.create');
+        Route::get('/notifications/compose/staff-recipient-options', [CommunicationController::class, 'composeStaffRecipientOptions'])
+            ->middleware('permission:notifications.create');
 
         Route::get('/notification-campaigns/modules', [NotificationCampaignController::class, 'modules'])
             ->middleware('permission:notifications.view');
@@ -659,6 +827,8 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
         Route::get('/notification-campaigns/staff-recipient-options', [NotificationCampaignController::class, 'staffRecipientOptions'])
             ->middleware('permission:notifications.create');
         Route::get('/notification-campaigns/eligible-targets', [NotificationCampaignController::class, 'eligibleTargets'])
+            ->middleware('permission:notifications.view');
+        Route::get('/notification-campaigns/section-delivery-status', [NotificationCampaignController::class, 'sectionDeliveryStatus'])
             ->middleware('permission:notifications.view');
         Route::post('/notification-campaigns/preview', [NotificationCampaignController::class, 'preview'])
             ->middleware('permission:notifications.create');

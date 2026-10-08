@@ -1,6 +1,12 @@
 <?php
 
 return [
+    /** When false, assignment publish/update does not auto-create inbox rows (use Notify → Assignments campaigns). */
+    'assignment_auto_inbox_notify' => (bool) env('ASSIGNMENT_AUTO_INBOX_NOTIFY', false),
+
+    'assignment_list_max_items' => (int) env('NC_ASSIGNMENT_LIST_MAX_ITEMS', 10),
+    'assignment_list_separator' => env('NC_ASSIGNMENT_LIST_SEPARATOR', '; '),
+
     'materialize_chunk_targets' => (int) env('NC_MATERIALIZE_TARGETS_PER_JOB', 1),
     'send_chunk_size' => (int) env('NC_SEND_CHUNK_SIZE', 150),
     'inbox_insert_chunk_size' => (int) env('NC_INBOX_INSERT_CHUNK_SIZE', 200),
