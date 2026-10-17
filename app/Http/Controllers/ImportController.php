@@ -12,10 +12,9 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
-use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
-use PhpOffice\PhpSpreadsheet\Style\Fill;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
-use PhpOffice\PhpSpreadsheet\Style\Font;
+use PhpOffice\PhpSpreadsheet\Style\Fill;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 
 class ImportController extends Controller
 {
@@ -41,7 +40,7 @@ class ImportController extends Controller
             $teacherQuery = \DB::table('teachers')->whereNull('deleted_at');
 
             if ($accessibleBranchIds !== 'all') {
-                if (!empty($accessibleBranchIds)) {
+                if (! empty($accessibleBranchIds)) {
                     $studentQuery->whereIn('branch_id', $accessibleBranchIds);
                     $teacherQuery->whereIn('branch_id', $accessibleBranchIds);
                 } else {
@@ -87,6 +86,7 @@ class ImportController extends Controller
             ]);
         } catch (\Exception $e) {
             Log::error('Get import modules error', ['error' => $e->getMessage()]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch import modules',
@@ -114,7 +114,7 @@ class ImportController extends Controller
                 'section' => $request->input('section'),
                 'academic_year' => $request->input('academic_year'),
                 'content_type' => $request->header('Content-Type'),
-                'all_inputs' => $request->except(['file'])
+                'all_inputs' => $request->except(['file']),
             ]);
 
             $validator = Validator::make($request->all(), [
@@ -135,8 +135,9 @@ class ImportController extends Controller
 
             if ($validator->fails()) {
                 Log::error('Import validation failed', [
-                    'errors' => $validator->errors()->toArray()
+                    'errors' => $validator->errors()->toArray(),
                 ]);
+
                 return response()->json([
                     'success' => false,
                     'errors' => $validator->errors(),
@@ -147,14 +148,14 @@ class ImportController extends Controller
             $file = $request->file('file');
             $extension = strtolower($file->getClientOriginalExtension());
             $allowedExtensions = ['xlsx', 'xls', 'csv'];
-            
-            if (!in_array($extension, $allowedExtensions)) {
+
+            if (! in_array($extension, $allowedExtensions)) {
                 return response()->json([
                     'success' => false,
-                    'message' => "Invalid file type. Please upload Excel (.xlsx, .xls) or CSV (.csv) files only.",
+                    'message' => 'Invalid file type. Please upload Excel (.xlsx, .xls) or CSV (.csv) files only.',
                     'errors' => [
-                        'file' => ["File extension '{$extension}' is not allowed. Use: " . implode(', ', $allowedExtensions)]
-                    ]
+                        'file' => ["File extension '{$extension}' is not allowed. Use: ".implode(', ', $allowedExtensions)],
+                    ],
                 ], 422);
             }
 
@@ -177,21 +178,21 @@ class ImportController extends Controller
             );
 
             // Store file temporarily
-            $storedFileName = $importHistory->batch_id . '.' . $file->getClientOriginalExtension();
-            
+            $storedFileName = $importHistory->batch_id.'.'.$file->getClientOriginalExtension();
+
             // 🔥 Get file info BEFORE moving (after move, original is gone)
             $originalFileName = $file->getClientOriginalName();
             $originalFileSize = $file->getSize();
-            
+
             // 🔥 Ensure directory exists and is writable
-            $tempDir = storage_path('app' . DIRECTORY_SEPARATOR . 'imports' . DIRECTORY_SEPARATOR . 'temp');
-            if (!is_dir($tempDir)) {
+            $tempDir = storage_path('app'.DIRECTORY_SEPARATOR.'imports'.DIRECTORY_SEPARATOR.'temp');
+            if (! is_dir($tempDir)) {
                 mkdir($tempDir, 0775, true);
             }
-            
+
             // 🔥 Use direct file move instead of Storage facade
-            $fullPath = $tempDir . DIRECTORY_SEPARATOR . $storedFileName;
-            
+            $fullPath = $tempDir.DIRECTORY_SEPARATOR.$storedFileName;
+
             try {
                 $file->move($tempDir, $storedFileName);
             } catch (\Exception $e) {
@@ -199,21 +200,21 @@ class ImportController extends Controller
                     'error' => $e->getMessage(),
                     'temp_dir' => $tempDir,
                     'target_file' => $storedFileName,
-                    'is_writable' => is_writable($tempDir)
+                    'is_writable' => is_writable($tempDir),
                 ]);
-                throw new \Exception('Failed to store file: ' . $e->getMessage());
+                throw new \Exception('Failed to store file: '.$e->getMessage());
             }
-            
+
             Log::info('File stored successfully', [
                 'batch_id' => $importHistory->batch_id,
                 'full_path' => $fullPath,
                 'file_exists' => file_exists($fullPath),
                 'file_size' => file_exists($fullPath) ? filesize($fullPath) : 0,
                 'stored_filename' => $storedFileName,
-                'directory_writable' => is_writable($tempDir)
+                'directory_writable' => is_writable($tempDir),
             ]);
-            
-            if (!file_exists($fullPath)) {
+
+            if (! file_exists($fullPath)) {
                 throw new \Exception('File upload failed - file not found after storage');
             }
 
@@ -229,6 +230,7 @@ class ImportController extends Controller
             ], 201);
         } catch (\Exception $e) {
             Log::error('Upload error', ['entity' => $entity, 'error' => $e->getMessage()]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'Upload failed',
@@ -254,11 +256,11 @@ class ImportController extends Controller
             // Read and parse Excel file
             // 🔥 Construct path properly for Windows/Linux
             $extension = pathinfo($importHistory->file_name, PATHINFO_EXTENSION);
-            $storedFileName = $batchId . '.' . $extension;
-            $filePath = storage_path('app') . DIRECTORY_SEPARATOR . 'imports' . DIRECTORY_SEPARATOR . 'temp' . DIRECTORY_SEPARATOR . $storedFileName;
+            $storedFileName = $batchId.'.'.$extension;
+            $filePath = storage_path('app').DIRECTORY_SEPARATOR.'imports'.DIRECTORY_SEPARATOR.'temp'.DIRECTORY_SEPARATOR.$storedFileName;
 
             // 🔥 Debug logging
-            $tempDir = storage_path('app') . DIRECTORY_SEPARATOR . 'imports' . DIRECTORY_SEPARATOR . 'temp';
+            $tempDir = storage_path('app').DIRECTORY_SEPARATOR.'imports'.DIRECTORY_SEPARATOR.'temp';
             Log::info('Looking for import file', [
                 'batch_id' => $batchId,
                 'original_filename' => $importHistory->file_name,
@@ -268,10 +270,10 @@ class ImportController extends Controller
                 'file_exists' => file_exists($filePath),
                 'temp_directory' => $tempDir,
                 'temp_dir_exists' => is_dir($tempDir),
-                'files_in_temp' => is_dir($tempDir) ? scandir($tempDir) : 'Directory not found'
+                'files_in_temp' => is_dir($tempDir) ? scandir($tempDir) : 'Directory not found',
             ]);
 
-            if (!file_exists($filePath)) {
+            if (! file_exists($filePath)) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Upload file not found',
@@ -279,8 +281,8 @@ class ImportController extends Controller
                         'expected_path' => $filePath,
                         'batch_id' => $batchId,
                         'original_filename' => $importHistory->file_name,
-                        'files_in_temp' => is_dir($tempDir) ? scandir($tempDir) : []
-                    ]
+                        'files_in_temp' => is_dir($tempDir) ? scandir($tempDir) : [],
+                    ],
                 ], 404);
             }
 
@@ -293,7 +295,7 @@ class ImportController extends Controller
                 'entity' => $entity,
                 'data_count' => count($data),
                 'file_path' => $filePath,
-                'first_row_sample' => !empty($data) ? array_slice($data, 0, 1) : 'NO DATA'
+                'first_row_sample' => ! empty($data) ? array_slice($data, 0, 1) : 'NO DATA',
             ]);
 
             if (empty($data)) {
@@ -302,9 +304,9 @@ class ImportController extends Controller
                     'entity' => $entity,
                     'file_path' => $filePath,
                     'file_exists' => file_exists($filePath),
-                    'file_size' => file_exists($filePath) ? filesize($filePath) : 0
+                    'file_size' => file_exists($filePath) ? filesize($filePath) : 0,
                 ]);
-                
+
                 ImportHistory::where('batch_id', $batchId)->update([
                     'status' => 'failed',
                     'error_message' => 'No data found in the uploaded file. Please check the file format and ensure it contains data rows.',
@@ -324,24 +326,24 @@ class ImportController extends Controller
                 Log::info('Student staging data inserted', [
                     'batch_id' => $batchId,
                     'inserted_count' => $inserted,
-                    'expected_count' => count($data)
+                    'expected_count' => count($data),
                 ]);
-                
+
                 // 🔥 Verify records were actually inserted
                 $actualCount = \App\Models\StudentImport::where('batch_id', $batchId)->count();
                 Log::info('Actual records in database', [
                     'batch_id' => $batchId,
                     'actual_count' => $actualCount,
-                    'inserted_count' => $inserted
+                    'inserted_count' => $inserted,
                 ]);
-                
+
                 $validationResult = $this->importService->validateStudents($batchId);
-            } else if ($entity === 'teacher') {
+            } elseif ($entity === 'teacher') {
                 $inserted = $this->importService->insertTeachersStagingData($batchId, $data, $context);
                 Log::info('Teacher staging data inserted', [
                     'batch_id' => $batchId,
                     'inserted_count' => $inserted,
-                    'expected_count' => count($data)
+                    'expected_count' => count($data),
                 ]);
                 $validationResult = $this->importService->validateTeachers($batchId);
             }
@@ -366,7 +368,7 @@ class ImportController extends Controller
                     'status' => 'validated',
                 ],
             ]);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             Log::error('Validation error', ['entity' => $entity, 'batch_id' => $batchId, 'error' => $e->getMessage()]);
 
             ImportHistory::where('batch_id', $batchId)->update([
@@ -397,7 +399,7 @@ class ImportController extends Controller
                 'batch_id' => $batchId,
                 'status_filter' => $status,
                 'per_page' => $perPage,
-                'page' => $request->get('page', 1)
+                'page' => $request->get('page', 1),
             ]);
 
             $model = $entity === 'student' ? StudentImport::class : TeacherImport::class;
@@ -415,13 +417,13 @@ class ImportController extends Controller
             }
 
             $records = $query->orderBy('row_number')->paginate($perPage);
-            
+
             // 🔥 Debug the results - check database directly
             $totalInDb = $model::where('batch_id', $batchId)->count();
             $validInDb = $model::where('batch_id', $batchId)->valid()->count();
             $invalidInDb = $model::where('batch_id', $batchId)->invalid()->count();
             $pendingInDb = $model::where('batch_id', $batchId)->pending()->count();
-            
+
             Log::info('Preview results', [
                 'batch_id' => $batchId,
                 'status_filter_applied' => $status,
@@ -430,7 +432,7 @@ class ImportController extends Controller
                 'total_in_db' => $totalInDb,
                 'valid_in_db' => $validInDb,
                 'invalid_in_db' => $invalidInDb,
-                'pending_in_db' => $pendingInDb
+                'pending_in_db' => $pendingInDb,
             ]);
 
             // Get summary
@@ -454,6 +456,7 @@ class ImportController extends Controller
             ]);
         } catch (\Exception $e) {
             Log::error('Preview error', ['entity' => $entity, 'batch_id' => $batchId, 'error' => $e->getMessage()]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch preview',
@@ -491,7 +494,7 @@ class ImportController extends Controller
             // Import to production
             if ($entity === 'student') {
                 $result = $this->importService->importStudentsToProduction($batchId, $skipInvalid, auth()->id());
-            } else if ($entity === 'teacher') {
+            } elseif ($entity === 'teacher') {
                 $result = $this->importService->importTeachersToProduction($batchId, $skipInvalid);
             }
 
@@ -552,6 +555,7 @@ class ImportController extends Controller
             ]);
         } catch (\Exception $e) {
             Log::error('Cancel import error', ['entity' => $entity, 'batch_id' => $batchId, 'error' => $e->getMessage()]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to cancel import',
@@ -595,6 +599,7 @@ class ImportController extends Controller
             ]);
         } catch (\Exception $e) {
             Log::error('Import history error', ['error' => $e->getMessage()]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch import history',
@@ -620,6 +625,7 @@ class ImportController extends Controller
             ], 400);
         } catch (\Exception $e) {
             Log::error('Template download error', ['entity' => $entity, 'error' => $e->getMessage()]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to generate template',
@@ -635,10 +641,10 @@ class ImportController extends Controller
         try {
             // Determine file type and create appropriate reader
             $extension = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
-            
+
             // Detect actual file type using MIME type or file signature
             $actualFileType = $this->detectFileType($filePath, $extension);
-            
+
             // Use actual file type, not just extension
             if ($actualFileType === 'csv') {
                 $reader = IOFactory::createReader('Csv');
@@ -651,21 +657,26 @@ class ImportController extends Controller
             } elseif ($actualFileType === 'xls') {
                 $reader = IOFactory::createReader('Xls');
             } else {
+                if (! class_exists('\ZipArchive')) {
+                    throw new \RuntimeException(
+                        "The PHP Zip extension ('php_zip') is not enabled in PHP. Please enable 'extension=zip' in C:\\xampp\\php\\php.ini and restart your PHP / Apache server, or upload your file in CSV (.csv) format."
+                    );
+                }
                 // Default to Xlsx (handles .xlsx files)
                 $reader = IOFactory::createReader('Xlsx');
             }
-            
+
             // Update extension variable to match actual file type
             $extension = $actualFileType;
 
             // Load the spreadsheet
             $spreadsheet = $reader->load($filePath);
             $worksheet = $spreadsheet->getActiveSheet();
-            
+
             // Get the highest row and column
             $highestRow = $worksheet->getHighestRow();
             $highestColumn = $worksheet->getHighestColumn();
-            
+
             // 🔥 For CSV files, getHighestRow() and getHighestColumn() might not detect correctly
             // So we need to manually count rows and columns
             if ($extension === 'csv') {
@@ -686,7 +697,7 @@ class ImportController extends Controller
                     $actualHighestRow = max(1, $worksheet->getHighestDataRow());
                 }
                 $highestRow = $actualHighestRow;
-                
+
                 // For columns, use getHighestDataColumn() or read header row more thoroughly
                 $actualHighestColumn = $worksheet->getHighestDataColumn();
                 if (empty($actualHighestColumn) || $actualHighestColumn === 'A') {
@@ -697,14 +708,14 @@ class ImportController extends Controller
                 } else {
                     $highestColumn = $actualHighestColumn;
                 }
-                
+
             }
 
             // Read header row (first row)
             $headers = []; // Will store: ['col_index' => 'normalized_header_name']
             $headerRow = 1;
             $originalHeaders = [];
-            
+
             // 🔥 For CSV, use native PHP CSV reading to preserve empty columns exactly
             if ($extension === 'csv') {
                 // 🔥 Validate that this is actually a CSV file, not an Excel file
@@ -712,69 +723,69 @@ class ImportController extends Controller
                 if ($fileHandle === false) {
                     throw new \Exception('Failed to open CSV file');
                 }
-                
+
                 $firstBytes = fread($fileHandle, 8);
                 fclose($fileHandle);
-                
+
                 // If file starts with PK (ZIP signature), it's actually an Excel file
                 if ($firstBytes && substr($firstBytes, 0, 2) === 'PK') {
                     throw new \Exception('The uploaded file appears to be an Excel file (.xlsx) but was detected as CSV. Please save your file as .xlsx format or ensure the file extension matches the file type.');
                 }
-                
+
                 // Read CSV file directly using PHP's native functions to preserve empty columns
                 $csvFile = fopen($filePath, 'r');
                 if ($csvFile === false) {
                     throw new \Exception('Failed to open CSV file');
                 }
-                
+
                 // Read header row using fgetcsv (preserves empty columns)
                 $headerRowData = fgetcsv($csvFile, 0, ',', '"');
                 fclose($csvFile);
-                
+
                 if ($headerRowData === false || empty($headerRowData)) {
                     throw new \Exception('Failed to read CSV header row');
                 }
-                
+
                 // Validate header row doesn't contain binary data
                 foreach ($headerRowData as $idx => $header) {
-                    if (is_string($header) && (preg_match('/[\x00-\x08\x0B-\x0C\x0E-\x1F]/', $header) || 
-                        stripos($header, 'PK') === 0 || 
+                    if (is_string($header) && (preg_match('/[\x00-\x08\x0B-\x0C\x0E-\x1F]/', $header) ||
+                        stripos($header, 'PK') === 0 ||
                         stripos($header, '<?xml') !== false ||
                         stripos($header, 'workbook.xml') !== false ||
                         stripos($header, '[Content_Types]') !== false)) {
                         throw new \Exception('The file appears to be an Excel file (.xlsx) but is being read as CSV. Please save your file as .xlsx format or ensure the file extension matches the file type.');
                     }
                 }
-                
+
                 // Process each header by index - preserve ALL positions including empty ones
                 foreach ($headerRowData as $colIndex => $headerValue) {
                     $headerValue = trim($headerValue ?? '');
-                    
+
                     // Store header even if empty (to preserve column position)
-                    if (!empty($headerValue)) {
+                    if (! empty($headerValue)) {
                         $originalHeaders[$colIndex] = $headerValue;
                         $normalized = $this->normalizeHeader($headerValue);
                         $headers[$colIndex] = $normalized; // Store by index
-                        
+
                     } else {
                         // Store null for empty headers to preserve column position
                         $headers[$colIndex] = null;
                     }
                 }
-                
+
             } else {
                 // For Excel files, read all columns (including empty ones) to preserve positions
                 $maxColIndex = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::columnIndexFromString($highestColumn);
-                
+
                 // 🔥 Read header row as array for Excel too, to handle empty columns correctly
-                $headerArray = $worksheet->rangeToArray('A' . $headerRow . ':' . $highestColumn . $headerRow, null, false, false, false);
-                $headerArray = !empty($headerArray) ? $headerArray[0] : [];
-                
+                $headerArray = $worksheet->rangeToArray('A'.$headerRow.':'.$highestColumn.$headerRow, null, false, false, false);
+                $headerArray = ! empty($headerArray) ? $headerArray[0] : [];
+
                 foreach ($headerArray as $colIndex => $headerValue) {
                     $headerValue = trim($headerValue ?? '');
                     $col = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($colIndex + 1);
-                    
-                    if (!empty($headerValue)) {
+
+                    if (! empty($headerValue)) {
                         $originalHeaders[$col] = $headerValue;
                         $normalized = $this->normalizeHeader($headerValue);
                         $headers[$colIndex] = $normalized; // Store by index for consistency
@@ -784,7 +795,7 @@ class ImportController extends Controller
                     }
                 }
             }
-            
+
             // Build header mapping only for non-null headers
             $headerMapping = [];
             foreach ($headers as $colIndex => $normalizedHeader) {
@@ -799,7 +810,7 @@ class ImportController extends Controller
 
             // Map headers to database field names
             $fieldMapping = $this->getFieldMapping($entity);
-            
+
             // 🔥 For CSV files, read all data rows once using native PHP CSV functions
             // This preserves empty columns correctly
             $allCsvRows = [];
@@ -808,18 +819,18 @@ class ImportController extends Controller
                 if ($csvHandle === false) {
                     throw new \Exception('Failed to open CSV file for data reading');
                 }
-                
+
                 // Skip header row (already read)
                 fgetcsv($csvHandle, 0, ',', '"');
-                
+
                 // Read all data rows
                 while (($csvRow = fgetcsv($csvHandle, 0, ',', '"')) !== false) {
                     $allCsvRows[] = $csvRow;
                 }
                 fclose($csvHandle);
-                
+
             }
-            
+
             // Read data rows
             $data = [];
             $rowNumber = 0;
@@ -833,12 +844,11 @@ class ImportController extends Controller
                 if ($extension === 'csv') {
                     // Get the row data for current row (row 2 = index 0, row 3 = index 1, etc.)
                     $rowArrayIndex = $row - 2;
-                    if (!isset($allCsvRows[$rowArrayIndex])) {
+                    if (! isset($allCsvRows[$rowArrayIndex])) {
                         continue; // Skip if row doesn't exist
                     }
                     $rowArray = $allCsvRows[$rowArrayIndex];
-                    
-                    
+
                     // 🔥 CRITICAL: Process ALL headers by index, including empty ones
                     // This ensures column positions match between headers and data
                     foreach ($headers as $colIndex => $headerName) {
@@ -846,28 +856,27 @@ class ImportController extends Controller
                         if ($headerName === null) {
                             continue;
                         }
-                        
+
                         // Get value from array by index (0-based)
                         $cellValue = isset($rowArray[$colIndex]) ? $rowArray[$colIndex] : null;
-                        
+
                         // Trim whitespace
                         $cellValue = is_null($cellValue) ? null : trim($cellValue);
-                        
+
                         // Convert empty strings to null
                         if ($cellValue === '') {
                             $cellValue = null;
                         }
-                        
+
                         // Check if row has any data
-                        if (!empty($cellValue)) {
+                        if (! empty($cellValue)) {
                             $isEmptyRow = false;
                             $hasAnyData = true;
                         }
 
                         // Map header to database field
                         $dbField = $this->mapHeaderToField($headerName, $fieldMapping);
-                        
-                        
+
                         if ($dbField) {
                             // Handle date fields
                             if (in_array($dbField, ['admission_date', 'date_of_birth', 'joining_date', 'leaving_date'])) {
@@ -883,33 +892,33 @@ class ImportController extends Controller
                     // But limit to the actual number of headers we found
                     $maxHeaderIndex = max(array_keys($headers));
                     $lastColumn = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($maxHeaderIndex + 1);
-                    $rowArray = $worksheet->rangeToArray('A' . $row . ':' . $lastColumn . $row, null, false, false, false);
-                    $rowArray = !empty($rowArray) ? $rowArray[0] : [];
-                    
+                    $rowArray = $worksheet->rangeToArray('A'.$row.':'.$lastColumn.$row, null, false, false, false);
+                    $rowArray = ! empty($rowArray) ? $rowArray[0] : [];
+
                     // Validate column count matches headers
                     if (count($rowArray) > count($headers)) {
                         // Truncate to match header count
                         $rowArray = array_slice($rowArray, 0, count($headers));
                     }
-                    
+
                     // Process each header by index
                     foreach ($headers as $colIndex => $headerName) {
                         // Skip if header is null (empty header column)
                         if ($headerName === null) {
                             continue;
                         }
-                        
+
                         // Get value from array by index (ensure we don't go beyond array bounds)
                         $cellValue = isset($rowArray[$colIndex]) ? $rowArray[$colIndex] : null;
-                        
+
                         // 🔥 Validate cell value - skip if it looks like binary/corrupted data
                         // Only check if the value is suspiciously long or contains Excel internal structure
-                        if (!is_null($cellValue) && is_string($cellValue)) {
+                        if (! is_null($cellValue) && is_string($cellValue)) {
                             $trimmedValue = trim($cellValue);
                             // Only flag as binary if it's very long AND contains Excel internal markers
                             // Short strings with PK might be valid (like "PK-123" employee ID)
                             if (strlen($trimmedValue) > 100 && (
-                                preg_match('/[\x00-\x08\x0B-\x0C\x0E-\x1F]/', $trimmedValue) || 
+                                preg_match('/[\x00-\x08\x0B-\x0C\x0E-\x1F]/', $trimmedValue) ||
                                 (stripos($trimmedValue, 'PK') === 0 && stripos($trimmedValue, 'workbook.xml') !== false) ||
                                 stripos($trimmedValue, '<?xml') !== false ||
                                 stripos($trimmedValue, 'workbook.xml') !== false ||
@@ -918,34 +927,34 @@ class ImportController extends Controller
                                 $cellValue = null;
                             }
                         }
-                        
+
                         // Handle formula cells if it's a formula object
                         if ($cellValue instanceof \PhpOffice\PhpSpreadsheet\Cell\Cell && $cellValue->getDataType() === 'f') {
                             $col = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($colIndex + 1);
                             try {
-                                $cellValue = $worksheet->getCell($col . $row)->getCalculatedValue();
+                                $cellValue = $worksheet->getCell($col.$row)->getCalculatedValue();
                             } catch (\Exception $e) {
                                 $cellValue = null;
                             }
                         }
-                        
+
                         // Trim whitespace
                         $cellValue = is_null($cellValue) ? null : (is_string($cellValue) ? trim($cellValue) : $cellValue);
-                        
+
                         // Convert empty strings to null
                         if ($cellValue === '') {
                             $cellValue = null;
                         }
-                        
+
                         // Check if row has any data
-                        if (!empty($cellValue)) {
+                        if (! empty($cellValue)) {
                             $isEmptyRow = false;
                             $hasAnyData = true;
                         }
 
                         // Map header to database field
                         $dbField = $this->mapHeaderToField($headerName, $fieldMapping);
-                        
+
                         if ($dbField) {
                             // Handle date fields
                             if (in_array($dbField, ['admission_date', 'date_of_birth', 'joining_date', 'leaving_date'])) {
@@ -961,10 +970,11 @@ class ImportController extends Controller
                 // For CSV, only skip if truly empty (no data in any mapped field)
                 // For Excel, use the original logic
                 if ($extension === 'csv') {
-                    if (!$hasAnyData || empty($rowData)) {
+                    if (! $hasAnyData || empty($rowData)) {
                         if ($row <= 5) {
                             Log::debug('Skipping empty CSV row', ['row' => $row, 'has_any_data' => $hasAnyData, 'row_data_count' => count($rowData)]);
                         }
+
                         continue;
                     }
                 } else {
@@ -977,18 +987,17 @@ class ImportController extends Controller
                 $rowNumber++;
             }
 
-
             if (empty($data) && $extension === 'csv') {
             }
 
             return $data;
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             Log::error('Excel parsing failed', [
                 'file_path' => $filePath,
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
             ]);
-            throw new \Exception('Failed to parse Excel file: ' . $e->getMessage());
+            throw new \Exception('Failed to parse Excel file: '.$e->getMessage());
         }
     }
 
@@ -1004,6 +1013,7 @@ class ImportController extends Controller
         // Trim stray underscores so a "Required *" marker in the template header
         // (e.g. "First Name *" -> "first_name_") still maps exactly to "first_name".
         $normalized = trim($normalized, '_');
+
         return $normalized;
     }
 
@@ -1019,7 +1029,7 @@ class ImportController extends Controller
                 'last_name' => ['last_name', 'lastname', 'lname', 'surname'],
                 'email' => ['email', 'email_address'],
                 'phone' => ['phone', 'phone_number', 'mobile', 'mobile_number'],
-                
+
                 // Student details
                 'admission_number' => ['admission_number', 'admission_no', 'adm_no', 'admission_number'],
                 'admission_date' => ['admission_date', 'adm_date', 'admissiondate'],
@@ -1029,7 +1039,7 @@ class ImportController extends Controller
                 'section' => ['section', 'sec'],
                 'academic_year' => ['academic_year', 'academic_year', 'acadyear', 'year'],
                 'stream' => ['stream'],
-                
+
                 // Personal info
                 'date_of_birth' => ['date_of_birth', 'dob', 'birthdate', 'birth_date'],
                 'gender' => ['gender', 'sex'],
@@ -1038,7 +1048,7 @@ class ImportController extends Controller
                 'category' => ['category', 'caste'],
                 'nationality' => ['nationality'],
                 'mother_tongue' => ['mother_tongue', 'mothertongue', 'mother_tongue'],
-                
+
                 // Address
                 'current_address' => ['current_address', 'address', 'currentaddress'],
                 'permanent_address' => ['permanent_address', 'permanentaddress', 'permanent_addr'],
@@ -1046,7 +1056,7 @@ class ImportController extends Controller
                 'state' => ['state'],
                 'country' => ['country'],
                 'pincode' => ['pincode', 'pin_code', 'pin', 'zip', 'postal_code'],
-                
+
                 // Father details
                 'father_name' => ['father_name', 'fathername', 'father'],
                 'father_phone' => ['father_phone', 'father_phone_number', 'father_mobile'],
@@ -1072,25 +1082,25 @@ class ImportController extends Controller
                 'guardian_relation' => ['guardian_relation', 'guardian_relationship'],
                 'guardian_phone' => ['guardian_phone', 'guardian_phone_number', 'guardian_mobile'],
                 'guardian_qualification' => ['guardian_qualification', 'guardian_qual', 'guardian_education'],
-                
+
                 // Emergency contact
                 'emergency_contact_name' => ['emergency_contact_name', 'emergency_contact', 'emergency_name'],
                 'emergency_contact_phone' => ['emergency_contact_phone', 'emergency_phone', 'emergency_mobile'],
                 'emergency_contact_relation' => ['emergency_contact_relation', 'emergency_relation'],
-                
+
                 // Previous school
                 'previous_school' => ['previous_school', 'prev_school', 'old_school'],
                 'previous_grade' => ['previous_grade', 'prev_grade', 'old_grade'],
                 'previous_percentage' => ['previous_percentage', 'prev_percentage', 'old_percentage'],
                 'transfer_certificate_number' => ['transfer_certificate_number', 'tc_number', 'tc_no'],
-                
+
                 // Medical info
                 'medical_history' => ['medical_history', 'medicalhistory', 'medical_info'],
                 'allergies' => ['allergies', 'allergy'],
                 'medications' => ['medications', 'medication'],
                 'height_cm' => ['height_cm', 'height', 'height_in_cm', 'heightcm'],
                 'weight_kg' => ['weight_kg', 'weight', 'weight_in_kg', 'weightkg'],
-                
+
                 // Other
                 'password' => ['password', 'pass'],
                 'remarks' => ['remarks', 'remark', 'notes', 'note'],
@@ -1103,14 +1113,14 @@ class ImportController extends Controller
                 'last_name' => ['last_name', 'lastname', 'lname', 'surname'],
                 'email' => ['email', 'email_address'],
                 'phone' => ['phone', 'phone_number', 'mobile', 'mobile_number'],
-                
+
                 // Employment details
                 'employee_id' => ['employee_id', 'emp_id', 'employee_number', 'emp_no'],
                 'joining_date' => ['joining_date', 'join_date', 'joined_date'],
                 'leaving_date' => ['leaving_date', 'leave_date', 'left_date'],
                 'designation' => ['designation', 'position', 'job_title'],
                 'employee_type' => ['employee_type', 'emp_type', 'type', 'employment_type'],
-                
+
                 // Professional details
                 'qualification' => ['qualification', 'qualifications', 'education'],
                 'experience_years' => ['experience_years', 'experience', 'exp_years', 'years_of_experience'],
@@ -1118,44 +1128,44 @@ class ImportController extends Controller
                 'registration_number' => ['registration_number', 'reg_no', 'reg_number', 'registration'],
                 'subjects' => ['subjects', 'subject', 'teaching_subjects'],
                 'classes_assigned' => ['classes_assigned', 'classes', 'assigned_classes'],
-                
+
                 // Class teacher info
                 'is_class_teacher' => ['is_class_teacher', 'class_teacher', 'is_ct'],
                 'class_teacher_of_grade' => ['class_teacher_of_grade', 'ct_grade', 'grade_assigned'],
                 'class_teacher_of_section' => ['class_teacher_of_section', 'ct_section', 'section_assigned'],
-                
+
                 // Personal info
                 'date_of_birth' => ['date_of_birth', 'dob', 'birthdate', 'birth_date'],
                 'gender' => ['gender', 'sex'],
                 'blood_group' => ['blood_group', 'bloodgroup', 'blood', 'bg'],
                 'religion' => ['religion'],
                 'nationality' => ['nationality'],
-                
+
                 // Address
                 'current_address' => ['current_address', 'address', 'currentaddress'],
                 'permanent_address' => ['permanent_address', 'permanentaddress', 'permanent_addr'],
                 'city' => ['city'],
                 'state' => ['state'],
                 'pincode' => ['pincode', 'pin_code', 'pin', 'zip', 'postal_code'],
-                
+
                 // Emergency contact
                 'emergency_contact_name' => ['emergency_contact_name', 'emergency_contact', 'emergency_name'],
                 'emergency_contact_phone' => ['emergency_contact_phone', 'emergency_phone', 'emergency_mobile'],
                 'emergency_contact_relation' => ['emergency_contact_relation', 'emergency_relation'],
-                
+
                 // Salary details
                 'salary_grade' => ['salary_grade', 'grade', 'pay_grade'],
                 'basic_salary' => ['basic_salary', 'salary', 'basic_pay', 'gross_salary'],
-                
+
                 // Bank details
                 'bank_name' => ['bank_name', 'bank'],
                 'bank_account_number' => ['bank_account_number', 'account_number', 'bank_account', 'acc_no'],
                 'bank_ifsc_code' => ['bank_ifsc_code', 'ifsc_code', 'ifsc', 'bank_ifsc'],
-                
+
                 // Document details
                 'pan_number' => ['pan_number', 'pan', 'pan_no', 'pan_card'],
                 'aadhar_number' => ['aadhar_number', 'aadhar', 'aadhaar_number', 'aadhaar', 'aadhar_no'],
-                
+
                 // Other
                 'password' => ['password', 'pass'],
                 'remarks' => ['remarks', 'remark', 'notes', 'note'],
@@ -1174,7 +1184,7 @@ class ImportController extends Controller
                 return $dbField;
             }
         }
-        
+
         // If exact match not found, try partial match
         foreach ($fieldMapping as $dbField => $possibleHeaders) {
             foreach ($possibleHeaders as $possibleHeader) {
@@ -1183,7 +1193,7 @@ class ImportController extends Controller
                 }
             }
         }
-        
+
         // Return null if no match found (unknown column)
         return null;
     }
@@ -1200,7 +1210,7 @@ class ImportController extends Controller
         // 🔥 Check if it's a numeric value (Excel date serial number) FIRST
         // Excel dates are often stored as numbers or numeric strings
         // Check both numeric and string representations
-        $numericValue = is_numeric($dateValue) ? (float)$dateValue : null;
+        $numericValue = is_numeric($dateValue) ? (float) $dateValue : null;
         if ($numericValue !== null && $numericValue > 0 && $numericValue < 1000000) {
             // Likely an Excel date serial number (dates are typically < 1000000)
             try {
@@ -1211,14 +1221,15 @@ class ImportController extends Controller
                         return date('Y-m-d', $timestamp);
                     }
                 }
-                
+
                 // Fallback: Manual Excel date calculation
                 // Excel date serial: days since 1900-01-01 (Excel incorrectly treats 1900 as leap year)
                 // Use 1899-12-30 as base to match Excel's behavior
                 $excelEpoch = new \DateTime('1899-12-30');
-                $days = (int)$numericValue;
+                $days = (int) $numericValue;
                 $date = clone $excelEpoch;
                 $date->modify("+{$days} days");
+
                 return $date->format('Y-m-d');
             } catch (\Exception $e) {
                 // Fall through to try as date string
@@ -1228,11 +1239,11 @@ class ImportController extends Controller
         // If it's a string, try to parse as date
         if (is_string($dateValue)) {
             $trimmed = trim($dateValue);
-            
+
             // Skip if it looks like a serial number (pure digits)
             if (preg_match('/^\d+$/', $trimmed) && strlen($trimmed) > 3) {
                 // Might be a serial number as string, try Excel conversion
-                $numericValue = (float)$trimmed;
+                $numericValue = (float) $trimmed;
                 if ($numericValue > 0 && $numericValue < 1000000) {
                     try {
                         if (class_exists('\PhpOffice\PhpSpreadsheet\Shared\Date')) {
@@ -1246,7 +1257,7 @@ class ImportController extends Controller
                     }
                 }
             }
-            
+
             // Try to parse common date formats
             $formats = ['Y-m-d', 'd/m/Y', 'm/d/Y', 'd-m-Y', 'Y/m/d', 'Ymd', 'Y-m-d H:i:s'];
             foreach ($formats as $format) {
@@ -1255,7 +1266,7 @@ class ImportController extends Controller
                     return $parsed->format('Y-m-d');
                 }
             }
-            
+
             // Try Carbon for flexible parsing (last resort)
             try {
                 return \Carbon\Carbon::parse($trimmed)->format('Y-m-d');
@@ -1273,22 +1284,22 @@ class ImportController extends Controller
     protected function detectFileType(string $filePath, string $extension): string
     {
         // Check file signature (magic bytes)
-        if (!file_exists($filePath) || !is_readable($filePath)) {
+        if (! file_exists($filePath) || ! is_readable($filePath)) {
             return $extension; // Fallback to extension
         }
-        
+
         $handle = fopen($filePath, 'rb');
-        if (!$handle) {
+        if (! $handle) {
             return $extension;
         }
-        
+
         $firstBytes = fread($handle, 8);
         fclose($handle);
-        
+
         if ($firstBytes === false) {
             return $extension;
         }
-        
+
         // Check for Excel file signatures
         // XLSX files start with PK (ZIP signature) - Excel files are ZIP archives
         if (substr($firstBytes, 0, 2) === 'PK') {
@@ -1307,12 +1318,12 @@ class ImportController extends Controller
                 return 'xls';
             }
         }
-        
+
         // If extension says CSV but file looks like Excel, return xlsx
         if ($extension === 'csv' && substr($firstBytes, 0, 2) === 'PK') {
             return 'xlsx';
         }
-        
+
         // Default to extension
         return $extension;
     }
@@ -1323,15 +1334,15 @@ class ImportController extends Controller
     protected function generateStudentTemplate()
     {
         try {
-            $spreadsheet = new Spreadsheet();
+            $spreadsheet = new Spreadsheet;
             $sheet = $spreadsheet->getActiveSheet();
             $sheet->setTitle('Student Import Template');
 
             // Define all student import fields with display names
             $headers = [
-                'First Name', 'Last Name', 'Email', 'Phone', 
+                'First Name', 'Last Name', 'Email', 'Phone',
                 'Admission Number', 'Admission Date', 'Roll Number', 'Registration Number',
-                'Date of Birth', 'Gender', 'Blood Group', 'Religion', 'Category', 
+                'Date of Birth', 'Gender', 'Blood Group', 'Religion', 'Category',
                 'Nationality', 'Mother Tongue',
                 'Current Address', 'Permanent Address', 'City', 'State', 'Country', 'Pincode',
                 'Father Name', 'Father Phone', 'Father Email', 'Father Occupation', 'Father Annual Income',
@@ -1342,7 +1353,7 @@ class ImportController extends Controller
                 'Emergency Contact Name', 'Emergency Contact Phone', 'Emergency Contact Relation',
                 'Previous School', 'Previous Grade', 'Previous Percentage', 'Transfer Certificate Number',
                 'Medical History', 'Allergies', 'Medications', 'Height (cm)', 'Weight (kg)',
-                'Password', 'Remarks'
+                'Password', 'Remarks',
             ];
 
             // Required columns (mirror the API validation). Required headers get a " *"
@@ -1358,12 +1369,12 @@ class ImportController extends Controller
             $column = 'A';
             foreach ($headers as $header) {
                 $isRequired = in_array($header, $requiredHeaders, true);
-                $sheet->setCellValue($column . '1', $isRequired ? $header . ' *' : $header);
+                $sheet->setCellValue($column.'1', $isRequired ? $header.' *' : $header);
                 $column++;
             }
 
             // Style header row
-            $headerRange = 'A1:' . $column . '1';
+            $headerRange = 'A1:'.$column.'1';
             $sheet->getStyle($headerRange)->applyFromArray([
                 'font' => [
                     'bold' => true,
@@ -1386,7 +1397,7 @@ class ImportController extends Controller
             foreach ($headers as $header) {
                 if (in_array($header, $requiredHeaders, true)) {
                     $reqCol = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($reqColIdx);
-                    $sheet->getStyle($reqCol . '1')->getFill()
+                    $sheet->getStyle($reqCol.'1')->getFill()
                         ->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('C00000');
                 }
                 $reqColIdx++;
@@ -1406,12 +1417,12 @@ class ImportController extends Controller
                 'Rajesh Doe', '9876543210', 'Father',
                 'ABC School', '4', '85.5', 'TC-001',
                 'No major issues', 'None', 'None', '150', '45',
-                'Welcome@123', 'Good student'
+                'Welcome@123', 'Good student',
             ];
 
             $column = 'A';
             foreach ($sampleData as $value) {
-                $sheet->setCellValue($column . '2', $value);
+                $sheet->setCellValue($column.'2', $value);
                 $column++;
             }
 
@@ -1434,15 +1445,15 @@ class ImportController extends Controller
             $writer->save($tempFile);
 
             // Return file download
-            $fileName = 'student_import_template_' . date('Y-m-d') . '.xlsx';
-            
+            $fileName = 'student_import_template_'.date('Y-m-d').'.xlsx';
+
             return response()->download($tempFile, $fileName, [
                 'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             ])->deleteFileAfterSend(true);
 
         } catch (\Exception $e) {
             Log::error('Template generation failed', ['error' => $e->getMessage()]);
-            
+
             // Fallback to CSV if Excel generation fails
             $headers = [
                 'first_name', 'last_name', 'email', 'phone', 'admission_number', 'admission_date',
@@ -1457,7 +1468,7 @@ class ImportController extends Controller
                 'emergency_contact_name', 'emergency_contact_phone', 'emergency_contact_relation',
                 'previous_school', 'previous_grade', 'previous_percentage', 'transfer_certificate_number',
                 'medical_history', 'allergies', 'medications', 'height_cm', 'weight_kg',
-                'password', 'remarks'
+                'password', 'remarks',
             ];
 
             // Mark required columns with " *" (kept consistent with the Excel template).
@@ -1467,14 +1478,14 @@ class ImportController extends Controller
                 'father_name', 'father_phone', 'mother_name',
                 'emergency_contact_name', 'emergency_contact_phone',
             ];
-            $headers = array_map(fn ($h) => in_array($h, $requiredCsv, true) ? $h . ' *' : $h, $headers);
+            $headers = array_map(fn ($h) => in_array($h, $requiredCsv, true) ? $h.' *' : $h, $headers);
 
             $csvContent = implode(',', $headers);
-            $fileName = 'student_import_template_' . date('Y-m-d') . '.csv';
-            
+            $fileName = 'student_import_template_'.date('Y-m-d').'.csv';
+
             return response($csvContent)
                 ->header('Content-Type', 'text/csv')
-                ->header('Content-Disposition', 'attachment; filename="' . $fileName . '"');
+                ->header('Content-Disposition', 'attachment; filename="'.$fileName.'"');
         }
     }
 
@@ -1484,7 +1495,7 @@ class ImportController extends Controller
     protected function generateTeacherTemplate()
     {
         try {
-            $spreadsheet = new Spreadsheet();
+            $spreadsheet = new Spreadsheet;
             $sheet = $spreadsheet->getActiveSheet();
             $sheet->setTitle('Teacher Import Template');
 
@@ -1501,7 +1512,7 @@ class ImportController extends Controller
                 'Salary Grade', 'Basic Salary',
                 'Bank Name', 'Bank Account Number', 'Bank IFSC Code',
                 'PAN Number', 'Aadhar Number',
-                'Password', 'Remarks'
+                'Password', 'Remarks',
             ];
 
             // Required columns (mirror the API validation). Required headers get a " *"
@@ -1516,12 +1527,12 @@ class ImportController extends Controller
             $column = 'A';
             foreach ($headers as $header) {
                 $isRequired = in_array($header, $requiredHeaders, true);
-                $sheet->setCellValue($column . '1', $isRequired ? $header . ' *' : $header);
+                $sheet->setCellValue($column.'1', $isRequired ? $header.' *' : $header);
                 $column++;
             }
 
             // Style header row
-            $headerRange = 'A1:' . $column . '1';
+            $headerRange = 'A1:'.$column.'1';
             $sheet->getStyle($headerRange)->applyFromArray([
                 'font' => [
                     'bold' => true,
@@ -1544,7 +1555,7 @@ class ImportController extends Controller
             foreach ($headers as $header) {
                 if (in_array($header, $requiredHeaders, true)) {
                     $reqCol = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($reqColIdx);
-                    $sheet->getStyle($reqCol . '1')->getFill()
+                    $sheet->getStyle($reqCol.'1')->getFill()
                         ->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('C00000');
                 }
                 $reqColIdx++;
@@ -1563,12 +1574,12 @@ class ImportController extends Controller
                 'Grade A', '50000',
                 'State Bank of India', '1234567890123456', 'SBIN0001234',
                 'ABCDE1234F', '1234 5678 9012',
-                'Welcome@123', 'Excellent teacher'
+                'Welcome@123', 'Excellent teacher',
             ];
 
             $column = 'A';
             foreach ($sampleData as $value) {
-                $sheet->setCellValue($column . '2', $value);
+                $sheet->setCellValue($column.'2', $value);
                 $column++;
             }
 
@@ -1591,15 +1602,15 @@ class ImportController extends Controller
             $writer->save($tempFile);
 
             // Return file download
-            $fileName = 'teacher_import_template_' . date('Y-m-d') . '.xlsx';
-            
+            $fileName = 'teacher_import_template_'.date('Y-m-d').'.xlsx';
+
             return response()->download($tempFile, $fileName, [
                 'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             ])->deleteFileAfterSend(true);
 
         } catch (\Exception $e) {
             Log::error('Teacher template generation failed', ['error' => $e->getMessage()]);
-            
+
             // Fallback to CSV
             $headers = [
                 'first_name', 'last_name', 'email', 'phone',
@@ -1613,7 +1624,7 @@ class ImportController extends Controller
                 'salary_grade', 'basic_salary',
                 'bank_name', 'bank_account_number', 'bank_ifsc_code',
                 'pan_number', 'aadhar_number',
-                'password', 'remarks'
+                'password', 'remarks',
             ];
 
             // Mark required columns with " *" (kept consistent with the Excel template).
@@ -1622,14 +1633,14 @@ class ImportController extends Controller
                 'designation', 'employee_type', 'date_of_birth', 'gender',
                 'current_address', 'basic_salary',
             ];
-            $headers = array_map(fn ($h) => in_array($h, $requiredCsv, true) ? $h . ' *' : $h, $headers);
+            $headers = array_map(fn ($h) => in_array($h, $requiredCsv, true) ? $h.' *' : $h, $headers);
 
             $csvContent = implode(',', $headers);
-            $fileName = 'teacher_import_template_' . date('Y-m-d') . '.csv';
-            
+            $fileName = 'teacher_import_template_'.date('Y-m-d').'.csv';
+
             return response($csvContent)
                 ->header('Content-Type', 'text/csv')
-                ->header('Content-Disposition', 'attachment; filename="' . $fileName . '"');
+                ->header('Content-Disposition', 'attachment; filename="'.$fileName.'"');
         }
     }
 
@@ -1639,11 +1650,10 @@ class ImportController extends Controller
     protected function cleanupTempFile(string $batchId, string $fileName): void
     {
         $extension = pathinfo($fileName, PATHINFO_EXTENSION);
-        $path = 'imports/temp/' . $batchId . '.' . $extension;
+        $path = 'imports/temp/'.$batchId.'.'.$extension;
 
         if (Storage::exists($path)) {
             Storage::delete($path);
         }
     }
 }
-

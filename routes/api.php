@@ -371,6 +371,8 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
     Route::get('fee-dues/student/{studentId}', [FeeDuesController::class, 'getStudentDues']);
     Route::post('fee-dues/{id}/apply-payment', [FeeDuesController::class, 'applyPayment']);
     Route::post('fee-dues/{id}/waive', [FeeDuesController::class, 'waiveDue']);
+    Route::post('fee-dues/{id}/revert', [FeeDuesController::class, 'revertDue']);
+    Route::put('fee-dues/{id}/inline-update', [FeeDuesController::class, 'updateDue']);
     Route::get('fee-dues/aging-analysis', [FeeDuesController::class, 'getAgingAnalysis']);
     Route::get('fee-dues/overdue', [FeeDuesController::class, 'getOverdueFees']);
     Route::get('fee-dues/by-type/{studentId}', [FeeDuesController::class, 'getDuesByFeeType']);
@@ -479,6 +481,7 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
         Route::get('members/{id}', [LibraryMemberController::class, 'getMemberProfile']);
 
         // 5. Circulation
+        Route::get('circulation/copy-lookup', [LibraryCirculationController::class, 'lookupCopies']);
         Route::post('circulation/issue', [LibraryCirculationController::class, 'issueBook'])->middleware('permission:library.issue');
         Route::post('circulation/return', [LibraryCirculationController::class, 'returnBook'])->middleware('permission:library.return');
         Route::post('circulation/renew', [LibraryCirculationController::class, 'renewBook'])->middleware('permission:library.issue');
@@ -546,6 +549,8 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
 
     // 3. Assignments (Single & Bulk)
     Route::get('transport-assignments', [TransportAssignmentController::class, 'index'])->middleware('permission:transport.view');
+    // Own/child-scoped inside the controller (students & parents have no transport.view)
+    Route::get('transport/student/{studentUserId}/assignment', [TransportAssignmentController::class, 'forStudent']);
     Route::post('transport-assignments', [TransportAssignmentController::class, 'store'])->middleware('permission:transport.assign');
     Route::post('transport-assignments/bulk', [TransportAssignmentController::class, 'bulkAssign'])->middleware('permission:transport.assign');
     Route::put('transport-assignments/{id}', [TransportAssignmentController::class, 'update'])->middleware('permission:transport.assign');

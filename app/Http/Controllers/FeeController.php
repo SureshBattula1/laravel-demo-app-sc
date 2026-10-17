@@ -1124,7 +1124,7 @@ class FeeController extends Controller
             // Exclude grade-wide generic transport fees so non-transport students are not charged transport
             $pendingQuery = FeeStructure::where('is_active', true)
                 ->where('branch_id', $student->branch_id)
-                ->whereNotIn('fee_type', ['Transport', 'Transport Fee'])
+                ->whereNotIn('fee_type', ['Transport', 'Transport Fee', 'Hostel', 'Hostel Fee'])
                 ->where(function ($q) use ($student) {
                     $q->where('grade', $student->grade)
                         ->orWhere('grade', 'Grade '.$student->grade)
@@ -1189,6 +1189,7 @@ class FeeController extends Controller
                 return (object) [
                     'id' => $due->fee_structure_id ?: $due->id,
                     'fee_structure_id' => $due->fee_structure_id ?: $due->id,
+                    'fee_due_id' => $due->id,
                     'grade' => $student->grade,
                     'grade_label' => 'Grade '.$student->grade,
                     'fee_type' => 'Transport Fee',
@@ -1202,6 +1203,49 @@ class FeeController extends Controller
             })->filter()->values();
 
             $pending = $pending->concat($transportItems)->values();
+
+            // Check student-specific hostel dues (from fee_dues)
+            $hostelDuesQuery = FeeDue::where('student_id', $student->id)
+                ->where('fee_type', 'Hostel')
+                ->whereNull('deleted_at');
+            if ($academicYearName) {
+                $hostelDuesQuery->where(function ($q) use ($academicYearName) {
+                    $q->where('academic_year', $academicYearName)
+                        ->orWhereNull('academic_year')
+                        ->orWhere('academic_year', '');
+                });
+            }
+            $hostelDues = $hostelDuesQuery->get();
+
+            // Self-heal: If student has active hostel in profile but no fee_due yet, sync immediately
+            if ($hostelDues->isEmpty() && ($student->hostel_required && (float) $student->hostel_fee > 0)) {
+                app(\App\Services\StudentFeeAutoAssignService::class)->syncHostelFee($student);
+                $hostelDues = $hostelDuesQuery->get();
+            }
+
+            $hostelItems = $hostelDues->map(function ($due) use ($student) {
+                $balance = (float) $due->balance_amount;
+                if ($balance <= 0) {
+                    return null;
+                }
+
+                return (object) [
+                    'id' => $due->fee_structure_id ?: $due->id,
+                    'fee_structure_id' => $due->fee_structure_id ?: $due->id,
+                    'fee_due_id' => $due->id,
+                    'grade' => $student->grade,
+                    'grade_label' => 'Grade '.$student->grade,
+                    'fee_type' => 'Hostel Fee',
+                    'amount' => (float) $due->original_amount,
+                    'amount_paid' => (float) $due->paid_amount,
+                    'remaining_amount' => $balance,
+                    'due_date' => $due->due_date ? Carbon::parse($due->due_date)->format('Y-m-d') : null,
+                    'academic_year' => $due->academic_year,
+                    'is_hostel' => true,
+                ];
+            })->filter()->values();
+
+            $pending = $pending->concat($hostelItems)->values();
 
             // OPTIMIZED: Get payments with pagination (limit to recent 50, scoped to academic year when set)
             $paymentsQuery = FeePayment::with(['feeStructure', 'creator'])

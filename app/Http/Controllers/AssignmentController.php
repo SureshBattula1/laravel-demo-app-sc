@@ -438,6 +438,9 @@ class AssignmentController extends Controller
                 'is_published' => 'nullable|boolean',
                 'attachments' => 'nullable|array',
                 'notify' => 'nullable|boolean',
+                'audience_mode' => 'nullable|in:all,custom',
+                'student_ids' => 'nullable|array',
+                'student_ids.*' => 'integer|exists:students,id',
             ]);
             if ($validator->fails()) {
                 return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
@@ -451,6 +454,9 @@ class AssignmentController extends Controller
                     $data['published_at'] = now();
                 }
             }
+            if ($request->has('audience_mode')) {
+                $data['audience_mode'] = $request->audience_mode;
+            }
             $data['updated_by'] = $request->user()->id;
             if (isset($data['title'])) {
                 $data['title'] = strip_tags($data['title']);
@@ -463,6 +469,24 @@ class AssignmentController extends Controller
             }
 
             $assignment->update($data);
+            if ($request->has('audience_mode')) {
+                $academicYearId = $this->academicYearContext->id(false);
+                $section = $this->normalizedSection($assignment->section);
+                $studentIds = $this->recipientResolver->resolveStudentIds(
+                    $assignment->branch_id,
+                    $assignment->grade,
+                    $section,
+                    $academicYearId,
+                    $request->audience_mode,
+                    $request->student_ids ?? []
+                );
+                if ($studentIds !== []) {
+                    $assignment->recipients()->delete();
+                    $assignment->recipients()->createMany(
+                        collect($studentIds)->map(fn ($id) => ['student_id' => $id])->all()
+                    );
+                }
+            }
             if ($request->has('attachments')) {
                 $this->syncUniversalAttachments($assignment, $request->attachments, true);
             }

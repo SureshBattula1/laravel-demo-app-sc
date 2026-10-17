@@ -131,6 +131,12 @@ class LibraryCirculationService
 
     /**
      * Return an issued book copy, calculate fine, and handle reservation holding.
+     *
+     * $fineAction decides what happens to a late fine:
+     *  - collect: paid at the desk now
+     *  - assign:  recorded as a pending due on the borrower's account
+     *  - waive:   written off (kept in the ledger as Waived for audit)
+     * When null it falls back to $collectFine (collect vs assign).
      */
     public function return(
         int $issueId,
@@ -139,10 +145,14 @@ class LibraryCirculationService
         ?string $copyCondition = null,
         ?string $remarks = null,
         ?int $collectedBy = null,
-        ?string $paymentMethod = 'Cash'
+        ?string $paymentMethod = 'Cash',
+        ?string $fineAction = null,
+        ?string $waiveReason = null
     ): array {
+        $fineAction ??= $collectFine ? 'collect' : 'assign';
+
         return DB::transaction(function () use (
-            $issueId, $returnDate, $collectFine, $copyCondition, $remarks, $collectedBy, $paymentMethod
+            $issueId, $returnDate, $fineAction, $copyCondition, $remarks, $collectedBy, $paymentMethod, $waiveReason
         ) {
             $issue = BookIssue::withoutTenantScope()->with(['book', 'copy'])->lockForUpdate()->findOrFail($issueId);
 
@@ -162,13 +172,15 @@ class LibraryCirculationService
                 $fineAmount = $daysLate * $rules['fine_per_day'];
             }
 
-            $isFineCollected = $fineAmount > 0 && $collectFine;
+            $isFineCollected = $fineAmount > 0 && $fineAction === 'collect';
+            $isFineWaived = $fineAmount > 0 && $fineAction === 'waive';
 
             $issue->update([
                 'return_date' => $returnDateCarbon->toDateString(),
                 'status' => 'Returned',
                 'fine_amount' => $fineAmount,
-                'fine_paid' => $isFineCollected,
+                // A waived fine is settled, so it must not show as outstanding on the loan.
+                'fine_paid' => $isFineCollected || $isFineWaived,
                 'fine_paid_at' => $isFineCollected ? now() : null,
                 'remarks' => $remarks ?? $issue->remarks,
             ]);
@@ -185,10 +197,11 @@ class LibraryCirculationService
                     'type' => 'Late Return',
                     'amount' => $fineAmount,
                     'paid_amount' => $isFineCollected ? $fineAmount : 0,
-                    'waived_amount' => 0,
-                    'status' => $isFineCollected ? 'Paid' : 'Pending',
+                    'waived_amount' => $isFineWaived ? $fineAmount : 0,
+                    'status' => $isFineCollected ? 'Paid' : ($isFineWaived ? 'Waived' : 'Pending'),
                     'payment_method' => $isFineCollected ? $paymentMethod : null,
-                    'collected_by' => $isFineCollected ? $collectedBy : null,
+                    'waived_reason' => $isFineWaived ? ($waiveReason ?: 'Waived at return desk') : null,
+                    'collected_by' => ($isFineCollected || $isFineWaived) ? $collectedBy : null,
                     'paid_at' => $isFineCollected ? now() : null,
                 ]);
             }
@@ -226,6 +239,7 @@ class LibraryCirculationService
                 'issue' => $issue->fresh(['book', 'copy', 'branch']),
                 'fine_amount' => $fineAmount,
                 'fine_paid' => $isFineCollected,
+                'fine_action' => $fineAmount > 0 ? $fineAction : null,
                 'reservation_held' => $nextReservation !== null,
             ];
         });

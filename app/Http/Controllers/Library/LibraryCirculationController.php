@@ -80,6 +80,105 @@ class LibraryCirculationController extends Controller
     }
 
     /**
+     * Desk autosuggest: top matching copies by barcode / accession / title with live status.
+     * mode=issue lists every status (Available first); mode=return lists only issued copies
+     * and also matches the borrower's name.
+     */
+    public function lookupCopies(Request $request)
+    {
+        $validated = $request->validate([
+            'q' => 'required|string|min:1|max:100',
+            'mode' => 'nullable|in:issue,return',
+            'branch_id' => 'nullable',
+            'limit' => 'nullable|integer|min:1|max:20',
+        ]);
+
+        $term = trim($validated['q']);
+        $mode = $validated['mode'] ?? 'issue';
+        $limit = (int) ($validated['limit'] ?? 5);
+
+        $query = LibraryBookCopy::with([
+            'book:id,title,author,isbn',
+            'shelf:id,code,rack_number,shelf_number',
+            'activeIssue',
+            'activeIssue.student:id,first_name,last_name',
+            'activeIssue.teacher:id,first_name,last_name',
+        ])->select('id', 'book_id', 'branch_id', 'shelf_id', 'accession_number', 'barcode', 'copy_number', 'condition', 'status');
+
+        $query->where(function ($q) use ($term, $mode) {
+            $q->where('barcode', 'like', "%{$term}%")
+                ->orWhere('accession_number', 'like', "%{$term}%")
+                ->orWhereHas('book', fn ($bq) => $bq->where('title', 'like', "%{$term}%")->orWhere('isbn', 'like', "%{$term}%"));
+
+            if ($mode === 'return') {
+                $q->orWhereHas('issues', function ($iq) use ($term) {
+                    $nameMatch = fn ($uq) => $uq->where('first_name', 'like', "%{$term}%")
+                        ->orWhere('last_name', 'like', "%{$term}%")
+                        ->orWhereRaw("CONCAT(first_name, ' ', last_name) like ?", ["%{$term}%"]);
+                    $iq->where('status', 'Issued')
+                        ->where(fn ($bq) => $bq->whereHas('student', $nameMatch)->orWhereHas('teacher', $nameMatch));
+                });
+            }
+        });
+
+        if ($mode === 'return') {
+            $query->where('status', 'Issued');
+        }
+
+        if (! empty($validated['branch_id'])) {
+            $query->where('branch_id', (int) $validated['branch_id']);
+        }
+        $this->applyBranchFilter($query, $request);
+
+        $query->orderByRaw(
+            'CASE WHEN barcode = ? OR accession_number = ? THEN 0 WHEN barcode LIKE ? OR accession_number LIKE ? THEN 1 ELSE 2 END',
+            [$term, $term, "{$term}%", "{$term}%"]
+        );
+        if ($mode === 'issue') {
+            $query->orderByRaw("CASE WHEN status = 'Available' THEN 0 ELSE 1 END");
+        }
+        $query->orderBy('accession_number');
+
+        $today = Carbon::today();
+        $rules = LibraryCirculationService::DEFAULT_RULES;
+
+        $items = $query->limit($limit)->get()->map(function (LibraryBookCopy $copy) use ($today, $rules) {
+            $issue = $copy->activeIssue;
+            $borrower = $issue ? ($issue->borrower_type === 'Teacher' ? $issue->teacher : $issue->student) : null;
+            $daysOverdue = 0;
+            if ($issue && $issue->due_date && Carbon::parse($issue->due_date)->lt($today)) {
+                $daysOverdue = (int) Carbon::parse($issue->due_date)->diffInDays($today);
+            }
+            $rate = ($rules[$issue->borrower_type ?? 'Student'] ?? $rules['Student'])['fine_per_day'];
+
+            return [
+                'id' => $copy->id,
+                'book_id' => $copy->book_id,
+                'barcode' => $copy->barcode,
+                'accession_number' => $copy->accession_number,
+                'copy_number' => $copy->copy_number,
+                'status' => $copy->status,
+                'condition' => $copy->condition,
+                'title' => $copy->book?->title,
+                'author' => $copy->book?->author,
+                'shelf_code' => $copy->shelf?->code,
+                'active_issue' => $issue ? [
+                    'id' => $issue->id,
+                    'borrower_type' => $issue->borrower_type,
+                    'borrower_name' => $borrower ? trim("{$borrower->first_name} {$borrower->last_name}") : 'Unknown',
+                    'issue_date' => $issue->issue_date ? Carbon::parse($issue->issue_date)->toDateString() : null,
+                    'due_date' => $issue->due_date ? Carbon::parse($issue->due_date)->toDateString() : null,
+                    'days_overdue' => $daysOverdue,
+                    'fine_per_day' => $rate,
+                    'estimated_fine' => $daysOverdue * $rate,
+                ] : null,
+            ];
+        });
+
+        return response()->json(['success' => true, 'data' => $items]);
+    }
+
+    /**
      * Fast Return Desk (by issue ID or copy barcode).
      */
     public function returnBook(Request $request)
@@ -89,8 +188,10 @@ class LibraryCirculationController extends Controller
             'barcode' => 'required_without:issue_id|nullable|string',
             'return_date' => 'nullable|date',
             'collect_fine' => 'boolean',
+            'fine_action' => 'nullable|in:collect,assign,waive',
+            'waive_reason' => 'nullable|string|max:500',
             'copy_condition' => 'nullable|in:New,Good,Fair,Damaged,Lost,Weeded',
-            'payment_method' => 'nullable|string',
+            'payment_method' => 'nullable|in:Cash,Online,Fee Account,Other',
             'remarks' => 'nullable|string',
         ]);
 
@@ -125,7 +226,9 @@ class LibraryCirculationController extends Controller
             $validated['copy_condition'] ?? null,
             $validated['remarks'] ?? null,
             $request->user()->id,
-            $validated['payment_method'] ?? 'Cash'
+            $validated['payment_method'] ?? 'Cash',
+            $validated['fine_action'] ?? null,
+            $validated['waive_reason'] ?? null
         );
 
         return response()->json([
@@ -134,6 +237,7 @@ class LibraryCirculationController extends Controller
             'data' => $result['issue'],
             'fine_amount' => $result['fine_amount'],
             'fine_paid' => $result['fine_paid'],
+            'fine_action' => $result['fine_action'],
             'reservation_held' => $result['reservation_held'],
         ]);
     }

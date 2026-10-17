@@ -10,7 +10,8 @@ use App\Models\User;
 use App\Services\AcademicYearContext;
 use App\Services\CsvExportService;
 use App\Services\PdfExportService;
-use App\Services\StudentTransportFeeSyncService;
+use App\Services\StudentFeeAutoAssignService;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -626,12 +627,10 @@ class StudentController extends Controller
             // Update user with student ID
             $user->update(['user_type_id' => $studentId]);
 
-            // Sync transport assignment and fees if transport requested
-            if ($request->boolean('transport_required')) {
-                $createdStudent = Student::find($studentId);
-                if ($createdStudent) {
-                    app(StudentTransportFeeSyncService::class)->syncFromStudentProfile($createdStudent);
-                }
+            // Sync student fees (Transport, Hostel, Concession/Scholarship)
+            $createdStudent = Student::find($studentId);
+            if ($createdStudent) {
+                app(StudentFeeAutoAssignService::class)->syncAllFees($createdStudent);
             }
 
             DB::commit();
@@ -725,9 +724,14 @@ class StudentController extends Controller
             // Update user fields if provided
             $this->updateUserFields($request, $student->user_id);
 
-            // Sync transport assignment and fee dues if transport details changed
-            if ($request->hasAny(['transport_required', 'transport_route', 'transport_fee', 'pickup_point', 'drop_point', 'vehicle_number', 'pickup_time', 'drop_time'])) {
-                app(StudentTransportFeeSyncService::class)->syncFromStudentProfile($studentModel->fresh());
+            // Sync transport, hostel, and fee dues if relevant details changed
+            if ($request->hasAny([
+                'transport_required', 'transport_route', 'transport_fee', 'transport_due_date',
+                'pickup_point', 'drop_point', 'vehicle_number', 'pickup_time', 'drop_time',
+                'hostel_required', 'hostel_name', 'hostel_room_number', 'hostel_fee', 'hostel_due_date',
+                'fee_concession_applicable', 'concession_type', 'concession_percentage', 'scholarship_name',
+            ])) {
+                app(StudentFeeAutoAssignService::class)->syncAllFees($studentModel->fresh());
             }
 
             DB::commit();
@@ -1785,12 +1789,14 @@ class StudentController extends Controller
         $data['pickup_time'] = $request->pickup_time ?? null;
         $data['drop_time'] = $request->drop_time ?? null;
         $data['transport_fee'] = $request->transport_fee ?? 0;
+        $data['transport_due_date'] = $request->transport_due_date ? Carbon::parse($request->transport_due_date)->toDateString() : null;
 
         // Hostel Details
         $data['hostel_required'] = $request->hostel_required ?? false;
         $data['hostel_name'] = $request->hostel_name ?? null;
         $data['hostel_room_number'] = $request->hostel_room_number ?? null;
         $data['hostel_fee'] = $request->hostel_fee ?? 0;
+        $data['hostel_due_date'] = $request->hostel_due_date ? Carbon::parse($request->hostel_due_date)->toDateString() : null;
 
         // Library Information
         $data['library_card_number'] = $request->library_card_number ?? null;
@@ -2121,6 +2127,9 @@ class StudentController extends Controller
         if ($request->has('transport_fee')) {
             $data['transport_fee'] = $request->transport_fee ?? 0;
         }
+        if ($request->has('transport_due_date')) {
+            $data['transport_due_date'] = $request->transport_due_date ? Carbon::parse($request->transport_due_date)->toDateString() : null;
+        }
 
         // Hostel Details
         if ($request->has('hostel_required')) {
@@ -2134,6 +2143,9 @@ class StudentController extends Controller
         }
         if ($request->has('hostel_fee')) {
             $data['hostel_fee'] = $request->hostel_fee ?? 0;
+        }
+        if ($request->has('hostel_due_date')) {
+            $data['hostel_due_date'] = $request->hostel_due_date ? Carbon::parse($request->hostel_due_date)->toDateString() : null;
         }
 
         // Library Information

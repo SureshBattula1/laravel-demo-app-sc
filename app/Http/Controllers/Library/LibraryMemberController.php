@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Http\Traits\PaginatesAndSorts;
 use App\Models\BookIssue;
 use App\Models\LibraryFine;
+use App\Models\Student;
+use App\Models\Teacher;
 use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -30,13 +32,39 @@ class LibraryMemberController extends Controller
             $query->whereIn('role', ['Student', 'Teacher', 'Staff', 'Admin']);
         }
 
+        $searchesStudents = $role !== 'Teacher' && $role !== 'Staff';
+        $searchesStaff = $role !== 'Student';
+
+        // Class / section narrowing only applies to student borrowers.
+        if ($role === 'Student' && ($request->filled('grade') || $request->filled('section'))) {
+            $query->whereIn('id', Student::query()
+                ->select('user_id')
+                ->whereNotNull('user_id')
+                ->when($request->filled('grade'), fn ($q) => $q->where('grade', $request->grade))
+                ->when($request->filled('section'), fn ($q) => $q->where('section', $request->section)));
+        }
+
         if ($request->filled('search')) {
-            $s = $request->search;
-            $query->where(function ($q) use ($s) {
+            $s = trim((string) $request->search);
+            $query->where(function ($q) use ($s, $searchesStudents, $searchesStaff) {
                 $q->where('first_name', 'like', "%{$s}%")
                     ->orWhere('last_name', 'like', "%{$s}%")
+                    ->orWhereRaw("CONCAT(first_name, ' ', last_name) like ?", ["%{$s}%"])
                     ->orWhere('email', 'like', "%{$s}%")
                     ->orWhere('phone', 'like', "%{$s}%");
+                if ($searchesStudents) {
+                    $q->orWhereIn('id', Student::query()
+                        ->select('user_id')
+                        ->whereNotNull('user_id')
+                        ->where(fn ($sq) => $sq->where('admission_number', 'like', "%{$s}%")
+                            ->orWhere('roll_number', 'like', "%{$s}%")));
+                }
+                if ($searchesStaff) {
+                    $q->orWhereIn('id', Teacher::query()
+                        ->select('user_id')
+                        ->whereNotNull('user_id')
+                        ->where('employee_id', 'like', "%{$s}%"));
+                }
             });
         }
 
@@ -71,12 +99,33 @@ class LibraryMemberController extends Controller
             ->selectRaw('member_id, sum(amount) as pending_total')
             ->pluck('pending_total', 'member_id');
 
-        $items = collect($members->items())->map(function ($m) use ($activeLoans, $pendingFines) {
+        // Identity details shown at the desk (admission # / class for students, employee ID for staff).
+        $studentProfiles = Student::query()
+            ->whereIn('user_id', $memberIds)
+            ->toBase()
+            ->get(['user_id', 'admission_number', 'roll_number', 'grade', 'section'])
+            ->keyBy('user_id');
+        $staffProfiles = Teacher::query()
+            ->whereIn('user_id', $memberIds)
+            ->toBase()
+            ->get(['user_id', 'employee_id', 'designation'])
+            ->keyBy('user_id');
+
+        $items = collect($members->items())->map(function ($m) use ($activeLoans, $pendingFines, $studentProfiles, $staffProfiles) {
             $mArray = $m->toArray();
             $loanInfo = $activeLoans->get($m->id);
             $mArray['active_loans_count'] = $loanInfo?->count ?? 0;
             $mArray['overdue_loans_count'] = $loanInfo?->overdue_count ?? 0;
             $mArray['pending_fines'] = (float) ($pendingFines->get($m->id) ?? 0);
+
+            $student = $studentProfiles->get($m->id);
+            $staff = $staffProfiles->get($m->id);
+            $mArray['admission_number'] = $student?->admission_number;
+            $mArray['roll_number'] = $student?->roll_number;
+            $mArray['grade'] = $student?->grade;
+            $mArray['section'] = $student?->section;
+            $mArray['employee_id'] = $staff?->employee_id;
+            $mArray['designation'] = $staff?->designation;
 
             return $mArray;
         })->toArray();

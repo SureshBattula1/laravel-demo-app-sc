@@ -36,7 +36,7 @@ class Student extends Model
         'category',
         'caste',
         'sub_caste',
-        
+
         // Identity Documents
         'aadhaar_number',
         'pen_number',
@@ -49,7 +49,7 @@ class Student extends Model
         'domicile_certificate_number',
         'income_certificate_number',
         'caste_certificate_number',
-        
+
         // Address
         'current_address',
         'current_district',
@@ -62,13 +62,13 @@ class Student extends Model
         'state',
         'country',
         'pincode',
-        
+
         // Sibling Information
         'number_of_siblings',
         'sibling_details',
         'sibling_discount_applicable',
         'sibling_discount_percentage',
-        
+
         // Parent/Guardian Information
         'parent_id',
         'father_name',
@@ -80,7 +80,7 @@ class Student extends Model
         'father_designation',
         'father_annual_income',
         'father_aadhaar',
-        
+
         'mother_name',
         'mother_phone',
         'mother_email',
@@ -90,7 +90,7 @@ class Student extends Model
         'mother_designation',
         'mother_annual_income',
         'mother_aadhaar',
-        
+
         'guardian_name',
         'guardian_relation',
         'guardian_phone',
@@ -99,12 +99,12 @@ class Student extends Model
         'guardian_email',
         'guardian_address',
         'guardian_annual_income',
-        
+
         // Emergency Contact
         'emergency_contact_name',
         'emergency_contact_phone',
         'emergency_contact_relation',
-        
+
         // Transport Details
         'transport_required',
         'transport_route',
@@ -114,18 +114,20 @@ class Student extends Model
         'pickup_time',
         'drop_time',
         'transport_fee',
-        
+        'transport_due_date',
+
         // Hostel
         'hostel_required',
         'hostel_name',
         'hostel_room_number',
         'hostel_fee',
-        
+        'hostel_due_date',
+
         // Library
         'library_card_number',
         'library_card_issue_date',
         'library_card_expiry_date',
-        
+
         // Previous Education
         'previous_school',
         'previous_grade',
@@ -139,7 +141,7 @@ class Student extends Model
         'previous_student_id',
         'medium_of_instruction',
         'language_preferences',
-        
+
         // Medical Information
         'medical_history',
         'allergies',
@@ -160,7 +162,7 @@ class Student extends Model
         'vaccination_records',
         'special_needs',
         'special_needs_details',
-        
+
         // Fee & Scholarship
         'fee_concession_applicable',
         'concession_type',
@@ -169,7 +171,7 @@ class Student extends Model
         'scholarship_details',
         'economic_status',
         'family_annual_income',
-        
+
         // Additional Information
         'hobbies_interests',
         'extra_curricular_activities',
@@ -179,7 +181,7 @@ class Student extends Model
         'behavior_records',
         'counselor_notes',
         'special_instructions',
-        
+
         // Status & Documents
         'student_status',
         'admission_status',
@@ -202,7 +204,7 @@ class Student extends Model
         'leaving_date' => 'date',
         'pickup_time' => 'datetime:H:i',
         'drop_time' => 'datetime:H:i',
-        
+
         // JSON fields
         'elective_subjects' => 'array',
         'sibling_details' => 'array',
@@ -214,7 +216,7 @@ class Student extends Model
         'sports_participation' => 'array',
         'cultural_activities' => 'array',
         'documents' => 'array',
-        
+
         // Boolean fields
         'sibling_discount_applicable' => 'boolean',
         'transport_required' => 'boolean',
@@ -222,7 +224,7 @@ class Student extends Model
         'medical_insurance' => 'boolean',
         'special_needs' => 'boolean',
         'fee_concession_applicable' => 'boolean',
-        
+
         // Decimal fields
         'father_annual_income' => 'decimal:2',
         'mother_annual_income' => 'decimal:2',
@@ -234,28 +236,30 @@ class Student extends Model
         'height_cm' => 'decimal:2',
         'weight_kg' => 'decimal:2',
         'transport_fee' => 'decimal:2',
+        'transport_due_date' => 'date',
         'hostel_fee' => 'decimal:2',
+        'hostel_due_date' => 'date',
     ];
-    
+
     /**
      * Get the profile picture URL
      */
     public function getProfilePictureAttribute($value)
     {
         // If no profile picture in student table, check user's avatar
-        if (!$value && $this->user) {
+        if (! $value && $this->user) {
             $value = $this->user->avatar;
         }
-        
-        if (!$value) {
+
+        if (! $value) {
             return null;
         }
-        
+
         // If already a full URL, return as is
         if (str_starts_with($value, 'http')) {
             return $value;
         }
-        
+
         // Use Laravel's Storage facade to generate the URL
         try {
             if (\Storage::disk('public')->exists($value)) {
@@ -264,13 +268,13 @@ class Student extends Model
         } catch (\Exception $e) {
             // Fallback to direct url construction
         }
-        
+
         // Fallback: construct URL manually
         if (str_starts_with($value, 'storage/')) {
             return url($value);
         }
-        
-        return url('storage/' . $value);
+
+        return url('storage/'.$value);
     }
 
     /**

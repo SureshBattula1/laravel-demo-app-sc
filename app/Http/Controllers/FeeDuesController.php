@@ -6,6 +6,7 @@ use App\Http\Traits\PaginatesAndSorts;
 use App\Models\FeeDue;
 use App\Models\Student;
 use App\Services\FeeDuesService;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
@@ -32,8 +33,8 @@ class FeeDuesController extends Controller
             // Branch filtering
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
             if ($accessibleBranchIds !== 'all') {
-                if (!empty($accessibleBranchIds)) {
-                    $query->whereHas('student', function($q) use ($accessibleBranchIds) {
+                if (! empty($accessibleBranchIds)) {
+                    $query->whereHas('student', function ($q) use ($accessibleBranchIds) {
                         $q->whereIn('branch_id', $accessibleBranchIds);
                     });
                 } else {
@@ -69,10 +70,10 @@ class FeeDuesController extends Controller
 
             // Group by fee_type for summary
             $allDues = FeeDue::whereIn('id', $dues->pluck('id'))->get();
-            $grouped = $allDues->groupBy('fee_type')->map(function($group) {
+            $grouped = $allDues->groupBy('fee_type')->map(function ($group) {
                 return [
                     'count' => $group->count(),
-                    'total_balance' => $group->sum('balance_amount')
+                    'total_balance' => $group->sum('balance_amount'),
                 ];
             });
 
@@ -84,16 +85,17 @@ class FeeDuesController extends Controller
                     'current_page' => $dues->currentPage(),
                     'per_page' => $dues->perPage(),
                     'total' => $dues->total(),
-                    'last_page' => $dues->lastPage()
-                ]
+                    'last_page' => $dues->lastPage(),
+                ],
             ]);
 
         } catch (\Exception $e) {
             Log::error('Error fetching dues', ['error' => $e->getMessage()]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error fetching dues',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -105,11 +107,11 @@ class FeeDuesController extends Controller
     {
         try {
             $student = Student::where('user_id', $studentId)->orWhere('id', $studentId)->first();
-            
-            if (!$student) {
+
+            if (! $student) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Student not found'
+                    'message' => 'Student not found',
                 ], 404);
             }
 
@@ -117,15 +119,16 @@ class FeeDuesController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data' => $result
+                'data' => $result,
             ]);
 
         } catch (\Exception $e) {
             Log::error('Error fetching student dues', ['error' => $e->getMessage()]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error fetching student dues',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -137,27 +140,28 @@ class FeeDuesController extends Controller
     {
         try {
             $student = Student::where('user_id', $studentId)->orWhere('id', $studentId)->first();
-            
-            if (!$student) {
+
+            if (! $student) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Student not found'
+                    'message' => 'Student not found',
                 ], 404);
             }
 
             $result = $this->duesService->getStudentDues($student->user_id);
-            
+
             return response()->json([
                 'success' => true,
-                'data' => $result['dues_by_type']
+                'data' => $result['dues_by_type'],
             ]);
 
         } catch (\Exception $e) {
             Log::error('Error fetching dues by fee type', ['error' => $e->getMessage()]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error fetching dues by fee type',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -171,13 +175,13 @@ class FeeDuesController extends Controller
             $validator = Validator::make($request->all(), [
                 'payment_id' => 'required|exists:fee_payments,id',
                 'due_ids' => 'required|array',
-                'amounts' => 'required|array|size:' . count($request->due_ids ?? [])
+                'amounts' => 'required|array|size:'.count($request->due_ids ?? []),
             ]);
 
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
@@ -189,15 +193,16 @@ class FeeDuesController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Payment applied to dues successfully'
+                'message' => 'Payment applied to dues successfully',
             ]);
 
         } catch (\Exception $e) {
             Log::error('Error applying payment to dues', ['error' => $e->getMessage()]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error applying payment to dues',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -209,32 +214,32 @@ class FeeDuesController extends Controller
     {
         try {
             $validator = Validator::make($request->all(), [
-                'reason' => 'required|string|max:500'
+                'reason' => 'required|string|max:500',
             ]);
 
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
             $due = FeeDue::findOrFail($id);
             $amountBefore = $due->balance_amount;
-            
+
             $due->update([
                 'status' => 'Waived',
                 'balance_amount' => 0,
                 'metadata' => array_merge($due->metadata ?? [], [
                     'waived_reason' => $request->reason,
                     'waived_by' => $request->user()->id,
-                    'waived_at' => now()->toDateTimeString()
-                ])
+                    'waived_at' => now()->toDateTimeString(),
+                ]),
             ]);
 
             // Log audit trail
             try {
-                $auditService = new \App\Services\AuditService();
+                $auditService = new \App\Services\AuditService;
                 $auditService->log('Waiver', $due->student_id, [
                     'fee_due_id' => $due->id,
                     'amount_before' => $amountBefore,
@@ -243,9 +248,9 @@ class FeeDuesController extends Controller
                     'reason' => $request->reason,
                     'metadata' => [
                         'fee_type' => $due->fee_type,
-                        'waived_by' => $request->user()->id
+                        'waived_by' => $request->user()->id,
                     ],
-                    'user_id' => $request->user()->id
+                    'user_id' => $request->user()->id,
                 ], $request);
             } catch (\Exception $e) {
                 \Illuminate\Support\Facades\Log::warning('Failed to log audit for waiver', ['error' => $e->getMessage()]);
@@ -254,15 +259,138 @@ class FeeDuesController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Due waived successfully',
-                'data' => $due
+                'data' => $due,
             ]);
 
         } catch (\Exception $e) {
             Log::error('Error waiving due', ['error' => $e->getMessage()]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error waiving due',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+            ], 500);
+        }
+    }
+
+    /**
+     * Revert / cancel a due (syncing back to student record for Transport/Hostel/Concession)
+     */
+    public function revertDue(Request $request, $id)
+    {
+        try {
+            $due = FeeDue::with('student')->findOrFail($id);
+            $student = $due->student;
+            $feeType = $due->fee_type;
+            $reason = $request->input('reason', 'Reverted from fee dues module');
+
+            if ($student) {
+                $autoAssignService = app(\App\Services\StudentFeeAutoAssignService::class);
+                if (strcasecmp($feeType, 'Transport') === 0 || strcasecmp($feeType, 'Transport Fee') === 0) {
+                    $autoAssignService->revertTransportFee($student, $reason);
+                } elseif (strcasecmp($feeType, 'Hostel') === 0 || strcasecmp($feeType, 'Hostel Fee') === 0) {
+                    $autoAssignService->revertHostelFee($student, $reason);
+                } elseif (strcasecmp($feeType, 'Concession') === 0 || strcasecmp($feeType, 'Scholarship') === 0) {
+                    $autoAssignService->revertConcession($student, $reason);
+                } else {
+                    if ((float) $due->paid_amount <= 0) {
+                        $due->delete();
+                    } else {
+                        $due->update([
+                            'status' => 'Waived',
+                            'balance_amount' => 0,
+                            'metadata' => array_merge($due->metadata ?? [], [
+                                'reverted_at' => now()->toIso8601String(),
+                                'reverted_reason' => $reason,
+                            ]),
+                        ]);
+                    }
+                }
+            } else {
+                if ((float) $due->paid_amount <= 0) {
+                    $due->delete();
+                } else {
+                    $due->update([
+                        'status' => 'Waived',
+                        'balance_amount' => 0,
+                    ]);
+                }
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => "{$feeType} fee due reverted successfully",
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error reverting due: '.$e->getMessage());
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Error reverting fee due',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+            ], 500);
+        }
+    }
+
+    /**
+     * Update due amount and due date (syncing back to student profile)
+     */
+    public function updateDue(Request $request, $id)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'amount' => 'required|numeric|min:0',
+                'due_date' => 'nullable|date',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'errors' => $validator->errors(),
+                ], 422);
+            }
+
+            $due = FeeDue::with('student')->findOrFail($id);
+            $amount = (float) $request->amount;
+            $dueDate = $request->due_date ? Carbon::parse($request->due_date)->toDateString() : $due->due_date;
+            $paid = (float) $due->paid_amount;
+            $balance = max(0, $amount - $paid);
+            $status = $balance <= 0 ? 'Paid' : ($paid > 0 ? 'PartiallyPaid' : 'Pending');
+
+            $due->update([
+                'original_amount' => $amount,
+                'balance_amount' => $balance,
+                'due_date' => $dueDate,
+                'status' => $status,
+            ]);
+
+            // Sync back to student profile
+            if ($due->student) {
+                if (strcasecmp($due->fee_type, 'Transport') === 0 || strcasecmp($due->fee_type, 'Transport Fee') === 0) {
+                    $due->student->update([
+                        'transport_fee' => $amount,
+                        'transport_due_date' => $dueDate,
+                    ]);
+                } elseif (strcasecmp($due->fee_type, 'Hostel') === 0 || strcasecmp($due->fee_type, 'Hostel Fee') === 0) {
+                    $due->student->update([
+                        'hostel_fee' => $amount,
+                        'hostel_due_date' => $dueDate,
+                    ]);
+                }
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Fee due updated successfully',
+                'data' => $due->fresh(),
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error updating due: '.$e->getMessage());
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Error updating fee due',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -274,20 +402,21 @@ class FeeDuesController extends Controller
     {
         try {
             $report = $this->duesService->generateDuesReport($request->all());
-            
+
             // TODO: Implement export to Excel/PDF/CSV
             return response()->json([
                 'success' => true,
                 'message' => 'Export functionality will be implemented',
-                'data' => $report
+                'data' => $report,
             ]);
 
         } catch (\Exception $e) {
             Log::error('Error exporting dues report', ['error' => $e->getMessage()]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error exporting dues report',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -299,18 +428,19 @@ class FeeDuesController extends Controller
     {
         try {
             $result = $this->duesService->getOverdueFees($request->all());
-            
+
             return response()->json([
                 'success' => true,
-                'data' => $result
+                'data' => $result,
             ]);
 
         } catch (\Exception $e) {
             Log::error('Error getting aging analysis', ['error' => $e->getMessage()]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error getting aging analysis',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -322,18 +452,19 @@ class FeeDuesController extends Controller
     {
         try {
             $result = $this->duesService->getOverdueFees($request->all());
-            
+
             return response()->json([
                 'success' => true,
-                'data' => $result
+                'data' => $result,
             ]);
 
         } catch (\Exception $e) {
             Log::error('Error getting overdue fees', ['error' => $e->getMessage()]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error getting overdue fees',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }

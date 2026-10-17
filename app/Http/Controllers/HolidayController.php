@@ -2,18 +2,18 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Holiday;
 use App\Exports\HolidaysExport;
-use App\Services\PdfExportService;
+use App\Models\Holiday;
+use App\Services\AcademicYearContext;
 use App\Services\CsvExportService;
 use App\Services\ExportService;
-use App\Services\AcademicYearContext;
-use Maatwebsite\Excel\Facades\Excel;
+use App\Services\PdfExportService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Validator;
+use Maatwebsite\Excel\Facades\Excel;
 
 class HolidayController extends Controller
 {
@@ -61,22 +61,22 @@ class HolidayController extends Controller
             if ($request->has('month')) {
                 $month = $request->month;
                 $query->whereRaw('MONTH(start_date) = ?', [$month])
-                      ->orWhereRaw('MONTH(end_date) = ?', [$month]);
+                    ->orWhereRaw('MONTH(end_date) = ?', [$month]);
             }
 
             // OPTIMIZED Search filter - prefix search for better index usage
-            if ($request->has('search') && !empty($request->search)) {
+            if ($request->has('search') && ! empty($request->search)) {
                 $search = strip_tags($request->search);
-                $query->where(function($q) use ($search) {
+                $query->where(function ($q) use ($search) {
                     $q->where('title', 'like', "{$search}%")
-                      ->orWhere('description', 'like', "{$search}%");
+                        ->orWhere('description', 'like', "{$search}%");
                 });
             }
 
             // OPTIMIZED: Add pagination and calculate duration in SQL
             $perPage = $request->get('per_page', 25);
             $page = $request->get('page', 1);
-            
+
             $holidays = $query->orderBy('start_date', 'asc')->paginate($perPage, ['*'], 'page', $page);
 
             // Duration is computed via model accessor; branch_name appended from model
@@ -91,17 +91,17 @@ class HolidayController extends Controller
                     'last_page' => $holidays->lastPage(),
                     'from' => $holidays->firstItem(),
                     'to' => $holidays->lastItem(),
-                    'has_more_pages' => $holidays->hasMorePages()
-                ]
+                    'has_more_pages' => $holidays->hasMorePages(),
+                ],
             ]);
 
         } catch (\Exception $e) {
             Log::error('Get holidays error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch holidays',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -123,10 +123,10 @@ class HolidayController extends Controller
             $academicYearName = $academicYearModel?->name;
 
             // Check role permissions
-            if (!in_array($user->role, ['SuperAdmin', 'BranchAdmin'])) {
+            if (! in_array($user->role, ['SuperAdmin', 'BranchAdmin'])) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Access denied. Only administrators can create holidays.'
+                    'message' => 'Access denied. Only administrators can create holidays.',
                 ], 403);
             }
 
@@ -145,7 +145,7 @@ class HolidayController extends Controller
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
@@ -159,7 +159,7 @@ class HolidayController extends Controller
 
             $title = strip_tags($request->title);
             $startDate = $request->start_date;
-            
+
             $branch = $branchId ? \App\Models\Branch::find($branchId) : null;
             $holiday = Holiday::create([
                 'branch_id' => $branchId ?: 1, // Default to branch 1 if null (for old schema)
@@ -176,7 +176,7 @@ class HolidayController extends Controller
                 'academic_year_id' => $academicYearId ? (int) $academicYearId : null,
                 'academic_year' => $academicYearName,
                 'is_active' => $request->boolean('is_active', true),
-                'created_by' => $user->id
+                'created_by' => $user->id,
             ]);
 
             DB::commit();
@@ -186,17 +186,17 @@ class HolidayController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Holiday created successfully',
-                'data' => $holiday->load(['branch', 'createdBy'])
+                'data' => $holiday->load(['branch', 'createdBy']),
             ], 201);
 
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Create holiday error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create holiday',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -212,13 +212,13 @@ class HolidayController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data' => $holiday
+                'data' => $holiday,
             ]);
 
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Holiday not found'
+                'message' => 'Holiday not found',
             ], 404);
         }
     }
@@ -236,14 +236,14 @@ class HolidayController extends Controller
             if ($user->role === 'BranchAdmin' && $holiday->branch_id !== $user->branch_id) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'You can only edit holidays for your branch'
+                    'message' => 'You can only edit holidays for your branch',
                 ], 403);
             }
 
-            if (!in_array($user->role, ['SuperAdmin', 'BranchAdmin'])) {
+            if (! in_array($user->role, ['SuperAdmin', 'BranchAdmin'])) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Access denied'
+                    'message' => 'Access denied',
                 ], 403);
             }
 
@@ -253,13 +253,13 @@ class HolidayController extends Controller
                 'end_date' => 'sometimes|date|after_or_equal:start_date',
                 'type' => 'sometimes|in:National,State,School,Optional,Restricted',
                 'academic_year_id' => 'nullable|exists:academic_years,id',
-                'is_active' => 'sometimes|boolean'
+                'is_active' => 'sometimes|boolean',
             ]);
 
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
@@ -267,7 +267,7 @@ class HolidayController extends Controller
 
             $updateData = $request->only([
                 'title', 'description', 'start_date', 'end_date',
-                'type', 'color', 'is_recurring', 'is_active', 'academic_year_id'
+                'type', 'color', 'is_recurring', 'is_active', 'academic_year_id',
             ]);
 
             if ($request->has('academic_year_id')) {
@@ -283,7 +283,7 @@ class HolidayController extends Controller
                     $updateData[$field] = strip_tags($updateData[$field]);
                 }
             }
-            
+
             // Also update old schema columns for compatibility
             if (isset($updateData['title'])) {
                 $updateData['name'] = $updateData['title'];
@@ -299,14 +299,15 @@ class HolidayController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Holiday updated successfully',
-                'data' => $holiday->fresh(['branch', 'createdBy'])
+                'data' => $holiday->fresh(['branch', 'createdBy']),
             ]);
 
         } catch (\Exception $e) {
             DB::rollBack();
+
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to update holiday'
+                'message' => 'Failed to update holiday',
             ], 500);
         }
     }
@@ -322,7 +323,7 @@ class HolidayController extends Controller
             if ($user->role !== 'SuperAdmin') {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Only Super Admin can delete holidays'
+                    'message' => 'Only Super Admin can delete holidays',
                 ], 403);
             }
 
@@ -331,13 +332,13 @@ class HolidayController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Holiday deleted successfully'
+                'message' => 'Holiday deleted successfully',
             ]);
 
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to delete holiday'
+                'message' => 'Failed to delete holiday',
             ], 500);
         }
     }
@@ -348,8 +349,6 @@ class HolidayController extends Controller
     public function getCalendarData($year, $month)
     {
         try {
-            $user = Auth::user();
-            
             $startDate = date('Y-m-01', strtotime("$year-$month-01"));
             $endDate = date('Y-m-t', strtotime("$year-$month-01"));
 
@@ -357,28 +356,19 @@ class HolidayController extends Controller
                 ->with(['branch'])
                 ->inDateRange($startDate, $endDate);
 
-            // Company holidays only: restrict to user's accessible branches
-            $request = request();
-            $accessibleBranchIds = $this->getAccessibleBranchIds($request);
-            if ($accessibleBranchIds !== 'all') {
-                if (empty($accessibleBranchIds)) {
-                    $query->whereRaw('1 = 0');
-                } else {
-                    $query->whereIn('branch_id', $accessibleBranchIds);
-                }
-            }
+            $this->applyHolidayBranchScope($query, request());
 
-            $holidays = $query->get();
+            $holidays = $query->orderBy('start_date')->get();
 
             return response()->json([
                 'success' => true,
-                'data' => $holidays
+                'data' => $holidays->map(fn (Holiday $h) => $this->calendarItem($h))->values(),
             ]);
 
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to load calendar data'
+                'message' => 'Failed to load calendar data',
             ], 500);
         }
     }
@@ -394,31 +384,65 @@ class HolidayController extends Controller
 
             $query = Holiday::active()->upcoming();
 
-            // Company holidays only: restrict to user's accessible branches
-            $accessibleBranchIds = $this->getAccessibleBranchIds($request);
-            if ($accessibleBranchIds !== 'all') {
-                if (empty($accessibleBranchIds)) {
-                    $query->whereRaw('1 = 0');
-                } else {
-                    $query->whereIn('branch_id', $accessibleBranchIds);
-                }
-            }
+            $this->applyHolidayBranchScope($query, $request);
 
             $holidays = $query->orderBy('start_date', 'asc')
-                             ->limit($limit)
-                             ->get();
+                ->limit($limit)
+                ->get();
 
             return response()->json([
                 'success' => true,
-                'data' => $holidays
+                'data' => $holidays,
             ]);
 
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to load upcoming holidays'
+                'message' => 'Failed to load upcoming holidays',
             ], 500);
         }
+    }
+
+    /**
+     * Company holidays only: restrict to the user's accessible branches.
+     * Parents usually have no branch of their own, so they see their children's branches.
+     */
+    private function applyHolidayBranchScope($query, Request $request): void
+    {
+        $branchIds = $this->getAccessibleBranchIds($request);
+        if ($branchIds === 'all') {
+            return;
+        }
+
+        $user = $request->user();
+        if (empty($branchIds) && $user && $user->role === 'Parent') {
+            $branchIds = DB::table('users')
+                ->where('parent_id', $user->id)
+                ->whereNotNull('branch_id')
+                ->distinct()
+                ->pluck('branch_id')
+                ->map(fn ($id) => (int) $id)
+                ->all();
+        }
+
+        empty($branchIds) ? $query->whereRaw('1 = 0') : $query->whereIn('branch_id', $branchIds);
+    }
+
+    /** Calendar payload with plain Y-m-d dates (avoids timezone shifts in clients). */
+    private function calendarItem(Holiday $holiday): array
+    {
+        return [
+            'id' => $holiday->id,
+            'title' => $holiday->title ?: $holiday->name,
+            'description' => $holiday->description ?: null,
+            'start_date' => $holiday->start_date?->format('Y-m-d'),
+            'end_date' => ($holiday->end_date ?? $holiday->start_date)?->format('Y-m-d'),
+            'type' => $holiday->type,
+            'color' => $holiday->color ?: $this->getDefaultColor($holiday->type),
+            'duration' => $holiday->duration,
+            'is_recurring' => (bool) $holiday->is_recurring,
+            'branch_name' => $holiday->branch_name,
+        ];
     }
 
     /**
@@ -426,7 +450,7 @@ class HolidayController extends Controller
      */
     private function getDefaultColor($type): string
     {
-        return match($type) {
+        return match ($type) {
             'National' => '#FF5733',
             'State' => '#FFA500',
             'School' => '#3498DB',
@@ -453,7 +477,7 @@ class HolidayController extends Controller
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
@@ -464,10 +488,10 @@ class HolidayController extends Controller
             $holidays = $query->get();
 
             // Transform data for export
-            $exportData = collect($holidays)->map(function($holiday) {
+            $exportData = collect($holidays)->map(function ($holiday) {
                 $createdByName = '';
                 if ($holiday->createdBy) {
-                    $createdByName = $holiday->createdBy->first_name . ' ' . $holiday->createdBy->last_name;
+                    $createdByName = $holiday->createdBy->first_name.' '.$holiday->createdBy->last_name;
                 }
 
                 // Calculate duration
@@ -494,7 +518,7 @@ class HolidayController extends Controller
             $format = $request->format;
             $columns = $request->columns;
 
-            return match($format) {
+            return match ($format) {
                 'excel' => $this->exportExcel($exportData, $columns),
                 'pdf' => $this->exportPdf($exportData, $columns),
                 'csv' => $this->exportCsv($exportData, $columns),
@@ -502,11 +526,11 @@ class HolidayController extends Controller
 
         } catch (\Exception $e) {
             Log::error('Export holidays error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to export holidays',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -552,15 +576,15 @@ class HolidayController extends Controller
         if ($request->has('month') && $request->month !== '') {
             $month = $request->month;
             $query->whereRaw('MONTH(start_date) = ?', [$month])
-                  ->orWhereRaw('MONTH(end_date) = ?', [$month]);
+                ->orWhereRaw('MONTH(end_date) = ?', [$month]);
         }
 
         // OPTIMIZED Global search - prefix search for better index usage
         if ($request->has('search') && $request->search !== '') {
             $searchTerm = strip_tags($request->search);
-            $query->where(function($q) use ($searchTerm) {
+            $query->where(function ($q) use ($searchTerm) {
                 $q->where('title', 'like', "{$searchTerm}%")
-                  ->orWhere('description', 'like', "{$searchTerm}%");
+                    ->orWhere('description', 'like', "{$searchTerm}%");
             });
         }
 
@@ -574,7 +598,7 @@ class HolidayController extends Controller
     {
         $export = new HolidaysExport($data, $columns);
         $filename = (new ExportService('holidays'))->generateFilename('xlsx');
-        
+
         return Excel::download($export, $filename);
     }
 
@@ -584,18 +608,18 @@ class HolidayController extends Controller
     protected function exportPdf($data, ?array $columns)
     {
         $pdfService = new PdfExportService('holidays');
-        
+
         if ($columns) {
             $pdfService->setColumns($columns);
         }
-        
+
         // Use A3 paper for holidays to accommodate more columns
         $pdfService->setPaperSize('a3');
         $pdfService->setOrientation('landscape');
-        
+
         $pdf = $pdfService->generate($data, 'Holidays Report');
         $filename = (new ExportService('holidays'))->generateFilename('pdf');
-        
+
         return $pdf->download($filename);
     }
 
@@ -605,14 +629,13 @@ class HolidayController extends Controller
     protected function exportCsv($data, ?array $columns)
     {
         $csvService = new CsvExportService('holidays');
-        
+
         if ($columns) {
             $csvService->setColumns($columns);
         }
-        
+
         $filename = (new ExportService('holidays'))->generateFilename('csv');
-        
+
         return $csvService->generate($data, $filename);
     }
 }
-
