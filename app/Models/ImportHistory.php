@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class ImportHistory extends Model
 {
     use BelongsToTenant;
+
     protected $fillable = [
         'batch_id',
         'entity_type',
@@ -23,11 +24,13 @@ class ImportHistory extends Model
         'invalid_rows',
         'imported_rows',
         'status',
+        'reverted_by',
         'uploaded_at',
         'validation_started_at',
         'validation_completed_at',
         'import_started_at',
         'import_completed_at',
+        'reverted_at',
         'error_message',
         'error_report_path',
     ];
@@ -39,6 +42,7 @@ class ImportHistory extends Model
         'validation_completed_at' => 'datetime',
         'import_started_at' => 'datetime',
         'import_completed_at' => 'datetime',
+        'reverted_at' => 'datetime',
     ];
 
     /**
@@ -47,6 +51,14 @@ class ImportHistory extends Model
     public function uploader(): BelongsTo
     {
         return $this->belongsTo(User::class, 'uploaded_by');
+    }
+
+    /**
+     * Get the user who reverted this import
+     */
+    public function reverter(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'reverted_by');
     }
 
     /**
@@ -97,4 +109,3 @@ class ImportHistory extends Model
         return $query->where('created_at', '>=', now()->subDays($days));
     }
 }
-

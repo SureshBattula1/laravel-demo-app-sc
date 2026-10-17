@@ -49,6 +49,11 @@ class ImportController extends Controller
                 }
             }
 
+            $studentLastImportQuery = ImportHistory::where('entity_type', 'student')->where('status', 'completed');
+            $teacherLastImportQuery = ImportHistory::where('entity_type', 'teacher')->where('status', 'completed');
+            $this->applyBranchFilter($studentLastImportQuery, $request, 'branch_id');
+            $this->applyBranchFilter($teacherLastImportQuery, $request, 'branch_id');
+
             $modules = [
                 [
                     'id' => 'student',
@@ -57,10 +62,7 @@ class ImportController extends Controller
                     'description' => 'Import student records with admission details',
                     'requiresContext' => true,
                     'contextFields' => ['branch', 'grade', 'section', 'academic_year'],
-                    'lastImport' => ImportHistory::where('entity_type', 'student')
-                        ->where('status', 'completed')
-                        ->latest()
-                        ->value('created_at'),
+                    'lastImport' => $studentLastImportQuery->latest()->value('created_at'),
                     'totalRecords' => $studentQuery->count(),
                 ],
                 [
@@ -70,10 +72,7 @@ class ImportController extends Controller
                     'description' => 'Import teacher records with employment details',
                     'requiresContext' => true,
                     'contextFields' => ['branch'],
-                    'lastImport' => ImportHistory::where('entity_type', 'teacher')
-                        ->where('status', 'completed')
-                        ->latest()
-                        ->value('created_at'),
+                    'lastImport' => $teacherLastImportQuery->latest()->value('created_at'),
                     // Count the teachers table (not users.role) so the figure is consistent with
                     // the students count and includes every teacher/staff record for the branch.
                     'totalRecords' => $teacherQuery->count(),
@@ -142,6 +141,13 @@ class ImportController extends Controller
                     'success' => false,
                     'errors' => $validator->errors(),
                 ], 422);
+            }
+
+            if (! $this->canAccessBranch($request, (int) $request->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You do not have permission to import records for this branch.',
+                ], 403);
             }
 
             // 🔥 Additional file extension check (more flexible than MIME type)
@@ -465,6 +471,170 @@ class ImportController extends Controller
     }
 
     /**
+     * Update an individual staging record and return re-validated record & updated summary
+     */
+    public function updateRecord(Request $request, string $entity, int $id)
+    {
+        try {
+            if ($entity === 'student') {
+                $record = $this->importService->updateStudentRecord($id, $request->except(['id', 'batch_id', 'row_number']));
+            } elseif ($entity === 'teacher') {
+                $record = $this->importService->updateTeacherRecord($id, $request->except(['id', 'batch_id', 'row_number']));
+            } else {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Invalid entity type',
+                ], 400);
+            }
+
+            $model = $entity === 'student' ? StudentImport::class : TeacherImport::class;
+            $batchId = $record->batch_id;
+            $summary = [
+                'total' => $model::where('batch_id', $batchId)->count(),
+                'valid' => $model::where('batch_id', $batchId)->valid()->count(),
+                'invalid' => $model::where('batch_id', $batchId)->invalid()->count(),
+                'imported' => $model::where('batch_id', $batchId)->where('imported_to_production', true)->count(),
+            ];
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Record updated and re-validated successfully',
+                'data' => $record,
+                'summary' => $summary,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Update staging record error', ['entity' => $entity, 'id' => $id, 'error' => $e->getMessage()]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update record: '.$e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Export failed rows as Excel spreadsheet with validation errors
+     */
+    public function exportFailedRows(Request $request, string $entity, string $batchId)
+    {
+        try {
+            $model = $entity === 'student' ? StudentImport::class : TeacherImport::class;
+            $records = $model::where('batch_id', $batchId)->invalid()->orderBy('row_number')->get();
+
+            if ($records->isEmpty()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No failed records found for this batch.',
+                ], 404);
+            }
+
+            $spreadsheet = new Spreadsheet;
+            $sheet = $spreadsheet->getActiveSheet();
+            $sheet->setTitle('Failed Records');
+
+            if ($entity === 'student') {
+                $columns = [
+                    'row_number' => 'Row #',
+                    'first_name' => 'First Name',
+                    'last_name' => 'Last Name',
+                    'email' => 'Email',
+                    'phone' => 'Phone',
+                    'admission_number' => 'Admission Number',
+                    'admission_date' => 'Admission Date',
+                    'grade' => 'Grade',
+                    'section' => 'Section',
+                    'date_of_birth' => 'Date of Birth',
+                    'gender' => 'Gender',
+                    'current_address' => 'Address',
+                    'city' => 'City',
+                    'state' => 'State',
+                    'pincode' => 'Pincode',
+                    'father_name' => 'Father Name',
+                    'father_phone' => 'Father Phone',
+                    'mother_name' => 'Mother Name',
+                    'emergency_contact_name' => 'Emergency Name',
+                    'emergency_contact_phone' => 'Emergency Phone',
+                    '_errors' => 'Failure Reasons',
+                ];
+            } else {
+                $columns = [
+                    'row_number' => 'Row #',
+                    'first_name' => 'First Name',
+                    'last_name' => 'Last Name',
+                    'email' => 'Email',
+                    'phone' => 'Phone',
+                    'employee_id' => 'Employee ID',
+                    'joining_date' => 'Joining Date',
+                    'designation' => 'Designation',
+                    'employee_type' => 'Employee Type',
+                    'date_of_birth' => 'Date of Birth',
+                    'gender' => 'Gender',
+                    'current_address' => 'Address',
+                    'basic_salary' => 'Basic Salary',
+                    '_errors' => 'Failure Reasons',
+                ];
+            }
+
+            // Write Header Row
+            $colIdx = 1;
+            foreach ($columns as $header) {
+                $colLetter = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($colIdx);
+                $sheet->setCellValue($colLetter.'1', $header);
+                $colIdx++;
+            }
+
+            // Style Header Row
+            $lastColLetter = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex(count($columns));
+            $sheet->getStyle('A1:'.$lastColLetter.'1')->applyFromArray([
+                'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
+                'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'C00000']],
+                'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
+            ]);
+
+            // Populate Rows
+            $rowNum = 2;
+            foreach ($records as $record) {
+                $colIdx = 1;
+                foreach (array_keys($columns) as $key) {
+                    $colLetter = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($colIdx);
+                    if ($key === '_errors') {
+                        $errorList = is_array($record->validation_errors) ? implode('; ', $record->validation_errors) : ($record->validation_errors ?? '');
+                        $sheet->setCellValue($colLetter.$rowNum, $errorList);
+                        $sheet->getStyle($colLetter.$rowNum)->getFont()->getColor()->setRGB('C00000');
+                    } else {
+                        $sheet->setCellValue($colLetter.$rowNum, $record->{$key} ?? '');
+                    }
+                    $colIdx++;
+                }
+                $rowNum++;
+            }
+
+            // Auto-size columns
+            for ($i = 1; $i <= count($columns); $i++) {
+                $colLetter = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($i);
+                $sheet->getColumnDimension($colLetter)->setAutoSize(true);
+            }
+
+            $writer = new Xlsx($spreadsheet);
+            $tempFile = tempnam(sys_get_temp_dir(), 'failed_rows_');
+            $writer->save($tempFile);
+
+            $downloadName = "{$entity}_import_failed_rows_{$batchId}.xlsx";
+
+            return response()->download($tempFile, $downloadName, [
+                'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            ])->deleteFileAfterSend(true);
+        } catch (\Exception $e) {
+            Log::error('Export failed rows error', ['entity' => $entity, 'batch_id' => $batchId, 'error' => $e->getMessage()]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to export failed rows: '.$e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
      * Commit import to production
      */
     public function commit(Request $request, string $entity, string $batchId)
@@ -564,27 +734,150 @@ class ImportController extends Controller
     }
 
     /**
-     * Get import history
+     * Revert an import batch from production back to staging
+     */
+    public function revert(Request $request, string $entity, string $batchId)
+    {
+        try {
+            $batch = ImportHistory::where('batch_id', $batchId)->first();
+            if (! $batch) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Import batch not found',
+                ], 404);
+            }
+
+            if ($batch->branch_id && ! $this->canAccessBranch($request, (int) $batch->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You do not have permission to revert this import batch.',
+                ], 403);
+            }
+
+            $result = $this->importService->revertImport($entity, $batchId, auth()->id());
+
+            return response()->json([
+                'success' => true,
+                'message' => $result['message'] ?? 'Import batch successfully reverted back to staging.',
+                'data' => $result,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Import revert error', [
+                'batch_id' => $batchId,
+                'entity' => $entity,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage() ?: 'Failed to revert import batch',
+            ], 400);
+        }
+    }
+
+    /**
+     * Get single batch details
+     */
+    public function getBatchDetails(Request $request, string $batchId)
+    {
+        try {
+            $batch = ImportHistory::with([
+                'uploader:id,first_name,last_name,email',
+                'reverter:id,first_name,last_name,email',
+                'branch:id,name,code,city',
+            ])->where('batch_id', $batchId)->first();
+
+            if (! $batch) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Import batch not found',
+                ], 404);
+            }
+
+            if ($batch->branch_id && ! $this->canAccessBranch($request, (int) $batch->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You do not have access to this import batch.',
+                ], 403);
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => $batch,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Get batch details error', ['batch_id' => $batchId, 'error' => $e->getMessage()]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch batch details',
+            ], 500);
+        }
+    }
+
+    /**
+     * Get import history with branch scoping and advanced filters
      */
     public function history(Request $request)
     {
         try {
-            $query = ImportHistory::with(['uploader:id,first_name,last_name,email', 'branch:id,name,code'])
-                ->orderBy('created_at', 'desc');
+            $query = ImportHistory::with([
+                'uploader:id,first_name,last_name,email',
+                'reverter:id,first_name,last_name,email',
+                'branch:id,name,code',
+            ])->orderBy('created_at', 'desc');
 
-            if ($request->has('entity_type')) {
+            // 1. Enforce branch scoping (BranchAdmin only sees own branch/descendants)
+            $this->applyBranchFilter($query, $request, 'branch_id');
+
+            // 2. Explicit branch_id filter (if user has multi-branch access)
+            if ($request->filled('branch_id')) {
+                $requestedBranchId = (int) $request->branch_id;
+                if ($this->canAccessBranch($request, $requestedBranchId)) {
+                    $query->where('branch_id', $requestedBranchId);
+                } else {
+                    $query->whereRaw('1 = 0');
+                }
+            }
+
+            // 3. Entity type filter
+            if ($request->filled('entity_type') && $request->entity_type !== 'all') {
                 $query->where('entity_type', $request->entity_type);
             }
 
-            if ($request->has('status')) {
+            // 4. Status filter
+            if ($request->filled('status') && $request->status !== 'all') {
                 $query->where('status', $request->status);
             }
 
-            if ($request->has('days')) {
-                $query->recent($request->days);
+            // 5. Keyword search across batch_id, file_name, and uploader
+            if ($request->filled('search')) {
+                $search = trim($request->search);
+                $query->where(function ($q) use ($search) {
+                    $q->where('batch_id', 'like', "%{$search}%")
+                        ->orWhere('file_name', 'like', "%{$search}%")
+                        ->orWhereHas('uploader', function ($userQ) use ($search) {
+                            $userQ->where('first_name', 'like', "%{$search}%")
+                                ->orWhere('last_name', 'like', "%{$search}%")
+                                ->orWhere('email', 'like', "%{$search}%");
+                        });
+                });
             }
 
-            $perPage = $request->get('per_page', 25);
+            // 6. Date range filters
+            if ($request->filled('date_from')) {
+                $query->whereDate('created_at', '>=', $request->date_from);
+            }
+            if ($request->filled('date_to')) {
+                $query->whereDate('created_at', '<=', $request->date_to);
+            }
+
+            // 7. Days shortcut filter
+            if ($request->filled('days')) {
+                $query->recent((int) $request->days);
+            }
+
+            $perPage = (int) $request->get('per_page', 25);
             $history = $query->paginate($perPage);
 
             return response()->json([

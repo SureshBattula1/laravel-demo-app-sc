@@ -3,10 +3,10 @@
 namespace App\Services;
 
 use App\Models\ImportHistory;
+use App\Models\Role;
 use App\Models\StudentImport;
 use App\Models\TeacherImport;
 use App\Models\User;
-use App\Models\Role;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
@@ -39,7 +39,7 @@ class ImportService
      */
     protected function generateBatchId(): string
     {
-        return 'IMPORT_' . strtoupper(Str::random(12)) . '_' . time();
+        return 'IMPORT_'.strtoupper(Str::random(12)).'_'.time();
     }
 
     /**
@@ -66,22 +66,22 @@ class ImportService
             $importData['academic_year'] = $context['academic_year'] ?? null;
 
             // If Excel has override fields, use them to override context values
-            if (isset($row['grade_override']) && !empty($row['grade_override'])) {
+            if (isset($row['grade_override']) && ! empty($row['grade_override'])) {
                 $importData['grade_override'] = $row['grade_override'];
                 $importData['grade'] = $row['grade_override'];
             }
-            if (isset($row['section_override']) && !empty($row['section_override'])) {
+            if (isset($row['section_override']) && ! empty($row['section_override'])) {
                 $importData['section_override'] = $row['section_override'];
                 $importData['section'] = $row['section_override'];
             }
-            if (isset($row['academic_year_override']) && !empty($row['academic_year_override'])) {
+            if (isset($row['academic_year_override']) && ! empty($row['academic_year_override'])) {
                 $importData['academic_year_override'] = $row['academic_year_override'];
                 $importData['academic_year'] = $row['academic_year_override'];
             }
 
             // Remove override fields from row data to avoid duplication
             unset($row['grade_override'], $row['section_override'], $row['academic_year_override']);
-            
+
             // Also remove grade/section/academic_year from Excel row if present
             // (we use context values, not Excel values for these)
             unset($row['grade'], $row['section'], $row['academic_year']);
@@ -103,7 +103,7 @@ class ImportService
                     'batch_id' => $batchId,
                     'row_number' => $rowNumber - 1,
                     'error' => $e->getMessage(),
-                    'data' => $importData
+                    'data' => $importData,
                 ]);
                 // Continue with next row instead of failing completely
             }
@@ -112,7 +112,7 @@ class ImportService
         Log::info('Student staging data inserted', [
             'batch_id' => $batchId,
             'inserted_count' => $inserted,
-            'total_rows' => count($data)
+            'total_rows' => count($data),
         ]);
 
         return $inserted;
@@ -152,7 +152,7 @@ class ImportService
                     'batch_id' => $batchId,
                     'row_number' => $rowNumber - 1,
                     'error' => $e->getMessage(),
-                    'data' => $importData
+                    'data' => $importData,
                 ]);
                 // Continue with next row instead of failing completely
             }
@@ -161,7 +161,7 @@ class ImportService
         Log::info('Teacher staging data inserted', [
             'batch_id' => $batchId,
             'inserted_count' => $inserted,
-            'total_rows' => count($data)
+            'total_rows' => count($data),
         ]);
 
         return $inserted;
@@ -175,12 +175,13 @@ class ImportService
         if (is_bool($value)) {
             return $value;
         }
-        
+
         if (is_numeric($value)) {
-            return (bool)$value;
+            return (bool) $value;
         }
-        
-        $stringValue = strtolower(trim((string)$value));
+
+        $stringValue = strtolower(trim((string) $value));
+
         return in_array($stringValue, ['yes', 'true', '1', 'y', 'on']);
     }
 
@@ -194,126 +195,8 @@ class ImportService
         $invalidCount = 0;
 
         foreach ($records as $record) {
-            $errors = [];
-            $warnings = [];
-
-            // Basic field validation
-            $validator = Validator::make($record->toArray(), [
-                'branch_id' => 'required|exists:branches,id', // 🔥 Added branch_id validation
-                'first_name' => 'required|string|max:255',
-                'last_name' => 'required|string|max:255',
-                'email' => 'required|email|max:255',
-                'admission_number' => 'required|string|max:255',
-                'admission_date' => 'required|date',
-                'grade' => 'required|string',
-                'section' => 'nullable|string', // 🔥 Section is optional (not required)
-                'academic_year' => 'required|string',
-                'date_of_birth' => 'required|date|before:today',
-                'gender' => 'required|in:Male,Female,Other',
-                'current_address' => 'required|string',
-                'city' => 'required|string',
-                'state' => 'required|string',
-                'pincode' => 'required|string',
-                'father_name' => 'required|string',
-                'father_phone' => 'required|string',
-                'mother_name' => 'required|string',
-                'emergency_contact_name' => 'required|string',
-                'emergency_contact_phone' => 'required|string',
-            ]);
-
-            if ($validator->fails()) {
-                foreach ($validator->errors()->messages() as $field => $messages) {
-                    foreach ($messages as $message) {
-                        // 🔥 Make error messages more descriptive
-                        if (strpos($message, 'required') !== false) {
-                            $errors[] = "Missing required field: {$field}";
-                        } else {
-                            $errors[] = "{$field}: {$message}";
-                        }
-                    }
-                }
-            }
-
-            // Business logic validation
-            if (empty($errors)) {
-                // Check email uniqueness
-                if (User::where('email', $record->email)->exists()) {
-                    $errors[] = "Email '{$record->email}' already exists in the system";
-                }
-
-                // 🔥 Check phone uniqueness
-                if ($record->phone && User::where('phone', $record->phone)->exists()) {
-                    $errors[] = "Phone number '{$record->phone}' already exists in the system";
-                }
-
-                // Check admission number uniqueness
-                if (DB::table('students')->where('admission_number', $record->admission_number)->exists()) {
-                    $errors[] = "Admission number '{$record->admission_number}' already exists";
-                }
-
-                // Check email uniqueness within this batch
-                $duplicateInBatch = StudentImport::where('batch_id', $batchId)
-                    ->where('email', $record->email)
-                    ->where('id', '!=', $record->id)
-                    ->exists();
-
-                if ($duplicateInBatch) {
-                    $errors[] = "Duplicate email '{$record->email}' found in this import";
-                }
-                
-                // 🔥 Check phone uniqueness within this batch
-                if ($record->phone) {
-                    $duplicatePhoneInBatch = StudentImport::where('batch_id', $batchId)
-                        ->where('phone', $record->phone)
-                        ->where('id', '!=', $record->id)
-                        ->exists();
-
-                    if ($duplicatePhoneInBatch) {
-                        $errors[] = "Duplicate phone '{$record->phone}' found in this import";
-                    }
-                }
-
-                // Validate age for grade
-                $age = \Carbon\Carbon::parse($record->date_of_birth)->age;
-                if ($record->grade && !$this->validateAgeForGrade($age, $record->grade)) {
-                    $warnings[] = "Age $age may not be appropriate for grade {$record->grade}";
-                }
-
-                // Validate branch exists and is active
-                $branch = DB::table('branches')->where('id', $record->branch_id)->first();
-                if (!$branch) {
-                    $errors[] = "Invalid branch ID";
-                } elseif (!$branch->is_active) {
-                    $errors[] = "Branch is not active";
-                }
-
-                // Validate grade exists
-                if ($record->grade && !DB::table('grades')->where('school_id', $branch?->school_id)->where('value', $record->grade)->exists()) {
-                    $errors[] = "Invalid grade '{$record->grade}'";
-                }
-
-                // Validate section exists (if provided)
-                if ($record->section) {
-                    $sectionExists = DB::table('sections')
-                        ->where('branch_id', $record->branch_id)
-                        ->where('name', $record->section)
-                        ->where('grade_level', $record->grade) // 🔥 Also check grade matches
-                        ->exists();
-                    if (!$sectionExists) {
-                        $warnings[] = "Section '{$record->section}' not found for Branch ID {$record->branch_id}, Grade {$record->grade}";
-                    }
-                }
-            }
-
-            // Update record with validation results
-            $validationStatus = empty($errors) ? 'valid' : 'invalid';
-            $record->update([
-                'validation_status' => $validationStatus,
-                'validation_errors' => empty($errors) ? null : $errors,
-                'validation_warnings' => empty($warnings) ? null : $warnings,
-            ]);
-
-            if ($validationStatus === 'valid') {
+            $record = $this->validateSingleStudentRecord($record);
+            if ($record->validation_status === 'valid') {
                 $validCount++;
             } else {
                 $invalidCount++;
@@ -328,6 +211,147 @@ class ImportService
     }
 
     /**
+     * Validate a single student import record and update its status
+     */
+    public function validateSingleStudentRecord(StudentImport $record): StudentImport
+    {
+        $errors = [];
+        $warnings = [];
+
+        // Basic field validation
+        $validator = Validator::make($record->toArray(), [
+            'branch_id' => 'required|exists:branches,id',
+            'first_name' => 'required|string|max:255',
+            'last_name' => 'required|string|max:255',
+            'email' => 'required|email|max:255',
+            'admission_number' => 'required|string|max:255',
+            'admission_date' => 'required|date',
+            'grade' => 'required|string',
+            'section' => 'nullable|string',
+            'academic_year' => 'required|string',
+            'date_of_birth' => 'required|date|before:today',
+            'gender' => 'required|in:Male,Female,Other',
+            'current_address' => 'required|string',
+            'city' => 'required|string',
+            'state' => 'required|string',
+            'pincode' => 'required|string',
+            'father_name' => 'required|string',
+            'father_phone' => 'required|string',
+            'mother_name' => 'required|string',
+            'emergency_contact_name' => 'required|string',
+            'emergency_contact_phone' => 'required|string',
+        ]);
+
+        if ($validator->fails()) {
+            foreach ($validator->errors()->messages() as $field => $messages) {
+                foreach ($messages as $message) {
+                    if (strpos($message, 'required') !== false) {
+                        $errors[] = "Missing required field: {$field}";
+                    } else {
+                        $errors[] = "{$field}: {$message}";
+                    }
+                }
+            }
+        }
+
+        // Business logic validation
+        if (empty($errors)) {
+            // Check email uniqueness
+            if (User::where('email', $record->email)->exists()) {
+                $errors[] = "Email '{$record->email}' already exists in the system";
+            }
+
+            // Check phone uniqueness
+            if ($record->phone && User::where('phone', $record->phone)->exists()) {
+                $errors[] = "Phone number '{$record->phone}' already exists in the system";
+            }
+
+            // Check admission number uniqueness
+            if (DB::table('students')->where('admission_number', $record->admission_number)->exists()) {
+                $errors[] = "Admission number '{$record->admission_number}' already exists";
+            }
+
+            // Check email uniqueness within this batch
+            $duplicateInBatch = StudentImport::where('batch_id', $record->batch_id)
+                ->where('email', $record->email)
+                ->where('id', '!=', $record->id)
+                ->exists();
+
+            if ($duplicateInBatch) {
+                $errors[] = "Duplicate email '{$record->email}' found in this import";
+            }
+
+            // Check phone uniqueness within this batch
+            if ($record->phone) {
+                $duplicatePhoneInBatch = StudentImport::where('batch_id', $record->batch_id)
+                    ->where('phone', $record->phone)
+                    ->where('id', '!=', $record->id)
+                    ->exists();
+
+                if ($duplicatePhoneInBatch) {
+                    $errors[] = "Duplicate phone '{$record->phone}' found in this import";
+                }
+            }
+
+            // Validate age for grade
+            $age = \Carbon\Carbon::parse($record->date_of_birth)->age;
+            if ($record->grade && ! $this->validateAgeForGrade($age, $record->grade)) {
+                $warnings[] = "Age $age may not be appropriate for grade {$record->grade}";
+            }
+
+            // Validate branch exists and is active
+            $branch = DB::table('branches')->where('id', $record->branch_id)->first();
+            if (! $branch) {
+                $errors[] = 'Invalid branch ID';
+            } elseif (! $branch->is_active) {
+                $errors[] = 'Branch is not active';
+            }
+
+            // Validate grade exists
+            if ($record->grade && ! DB::table('grades')->where('school_id', $branch?->school_id)->where('value', $record->grade)->exists()) {
+                $errors[] = "Invalid grade '{$record->grade}'";
+            }
+
+            // Validate section exists (if provided)
+            if ($record->section) {
+                $sectionExists = DB::table('sections')
+                    ->where('branch_id', $record->branch_id)
+                    ->where('name', $record->section)
+                    ->where('grade_level', $record->grade)
+                    ->exists();
+                if (! $sectionExists) {
+                    $warnings[] = "Section '{$record->section}' not found for Branch ID {$record->branch_id}, Grade {$record->grade}";
+                }
+            }
+        }
+
+        // Update record with validation results
+        $validationStatus = empty($errors) ? 'valid' : 'invalid';
+        $record->update([
+            'validation_status' => $validationStatus,
+            'validation_errors' => empty($errors) ? null : $errors,
+            'validation_warnings' => empty($warnings) ? null : $warnings,
+        ]);
+
+        return $record;
+    }
+
+    /**
+     * Update and re-validate a student staging record
+     */
+    public function updateStudentRecord(int $recordId, array $data): StudentImport
+    {
+        $record = StudentImport::findOrFail($recordId);
+        $record->fill($data);
+        $record->save();
+
+        $this->validateSingleStudentRecord($record);
+        $this->refreshBatchStatistics($record->batch_id, 'student');
+
+        return $record->fresh();
+    }
+
+    /**
      * Validate teacher import data
      */
     public function validateTeachers(string $batchId): array
@@ -337,70 +361,8 @@ class ImportService
         $invalidCount = 0;
 
         foreach ($records as $record) {
-            $errors = [];
-            $warnings = [];
-
-            // Basic field validation
-            $validator = Validator::make($record->toArray(), [
-                'first_name' => 'required|string|max:255',
-                'last_name' => 'required|string|max:255',
-                'email' => 'required|email|max:255',
-                'employee_id' => 'required|string|max:255',
-                'joining_date' => 'required|date',
-                'designation' => 'required|string',
-                'employee_type' => 'required|in:Permanent,Contract,Visiting,Temporary',
-                'date_of_birth' => 'required|date|before:today',
-                'gender' => 'required|in:Male,Female,Other',
-                'current_address' => 'required|string',
-                'basic_salary' => 'required|numeric|min:0',
-            ]);
-
-            if ($validator->fails()) {
-                foreach ($validator->errors()->messages() as $field => $messages) {
-                    $errors = array_merge($errors, $messages);
-                }
-            }
-
-            // Business logic validation
-            if (empty($errors)) {
-                // Check email uniqueness
-                if (User::where('email', $record->email)->exists()) {
-                    $errors[] = "Email '{$record->email}' already exists in the system";
-                }
-
-                // Check employee ID uniqueness
-                if (DB::table('teachers')->where('employee_id', $record->employee_id)->exists()) {
-                    $errors[] = "Employee ID '{$record->employee_id}' already exists";
-                }
-
-                // Check email uniqueness within this batch
-                $duplicateInBatch = TeacherImport::where('batch_id', $batchId)
-                    ->where('email', $record->email)
-                    ->where('id', '!=', $record->id)
-                    ->exists();
-
-                if ($duplicateInBatch) {
-                    $errors[] = "Duplicate email '{$record->email}' found in row " . $record->row_number;
-                }
-
-                // Validate branch
-                $branch = DB::table('branches')->where('id', $record->branch_id)->first();
-                if (!$branch) {
-                    $errors[] = "Invalid branch ID";
-                } elseif (!$branch->is_active) {
-                    $errors[] = "Branch is not active";
-                }
-            }
-
-            // Update record with validation results
-            $validationStatus = empty($errors) ? 'valid' : 'invalid';
-            $record->update([
-                'validation_status' => $validationStatus,
-                'validation_errors' => empty($errors) ? null : $errors,
-                'validation_warnings' => empty($warnings) ? null : $warnings,
-            ]);
-
-            if ($validationStatus === 'valid') {
+            $record = $this->validateSingleTeacherRecord($record);
+            if ($record->validation_status === 'valid') {
                 $validCount++;
             } else {
                 $invalidCount++;
@@ -412,6 +374,112 @@ class ImportService
             'invalid_count' => $invalidCount,
             'total_count' => $records->count(),
         ];
+    }
+
+    /**
+     * Validate a single teacher import record and update its status
+     */
+    public function validateSingleTeacherRecord(TeacherImport $record): TeacherImport
+    {
+        $errors = [];
+        $warnings = [];
+
+        // Basic field validation
+        $validator = Validator::make($record->toArray(), [
+            'first_name' => 'required|string|max:255',
+            'last_name' => 'required|string|max:255',
+            'email' => 'required|email|max:255',
+            'employee_id' => 'required|string|max:255',
+            'joining_date' => 'required|date',
+            'designation' => 'required|string',
+            'employee_type' => 'required|in:Permanent,Contract,Visiting,Temporary',
+            'date_of_birth' => 'required|date|before:today',
+            'gender' => 'required|in:Male,Female,Other',
+            'current_address' => 'required|string',
+            'basic_salary' => 'required|numeric|min:0',
+        ]);
+
+        if ($validator->fails()) {
+            foreach ($validator->errors()->messages() as $field => $messages) {
+                $errors = array_merge($errors, $messages);
+            }
+        }
+
+        // Business logic validation
+        if (empty($errors)) {
+            // Check email uniqueness
+            if (User::where('email', $record->email)->exists()) {
+                $errors[] = "Email '{$record->email}' already exists in the system";
+            }
+
+            // Check employee ID uniqueness
+            if (DB::table('teachers')->where('employee_id', $record->employee_id)->exists()) {
+                $errors[] = "Employee ID '{$record->employee_id}' already exists";
+            }
+
+            // Check email uniqueness within this batch
+            $duplicateInBatch = TeacherImport::where('batch_id', $record->batch_id)
+                ->where('email', $record->email)
+                ->where('id', '!=', $record->id)
+                ->exists();
+
+            if ($duplicateInBatch) {
+                $errors[] = "Duplicate email '{$record->email}' found in row ".$record->row_number;
+            }
+
+            // Validate branch
+            $branch = DB::table('branches')->where('id', $record->branch_id)->first();
+            if (! $branch) {
+                $errors[] = 'Invalid branch ID';
+            } elseif (! $branch->is_active) {
+                $errors[] = 'Branch is not active';
+            }
+        }
+
+        // Update record with validation results
+        $validationStatus = empty($errors) ? 'valid' : 'invalid';
+        $record->update([
+            'validation_status' => $validationStatus,
+            'validation_errors' => empty($errors) ? null : $errors,
+            'validation_warnings' => empty($warnings) ? null : $warnings,
+        ]);
+
+        return $record;
+    }
+
+    /**
+     * Update and re-validate a teacher staging record
+     */
+    public function updateTeacherRecord(int $recordId, array $data): TeacherImport
+    {
+        $record = TeacherImport::findOrFail($recordId);
+        if (isset($data['is_class_teacher'])) {
+            $data['is_class_teacher'] = $this->convertToBoolean($data['is_class_teacher']);
+        }
+        $record->fill($data);
+        $record->save();
+
+        $this->validateSingleTeacherRecord($record);
+        $this->refreshBatchStatistics($record->batch_id, 'teacher');
+
+        return $record->fresh();
+    }
+
+    /**
+     * Refresh batch statistics in ImportHistory
+     */
+    public function refreshBatchStatistics(string $batchId, string $entity): void
+    {
+        $model = $entity === 'student' ? StudentImport::class : TeacherImport::class;
+        $validCount = $model::where('batch_id', $batchId)->valid()->count();
+        $invalidCount = $model::where('batch_id', $batchId)->invalid()->count();
+        $totalCount = $model::where('batch_id', $batchId)->count();
+
+        ImportHistory::where('batch_id', $batchId)->update([
+            'valid_rows' => $validCount,
+            'invalid_rows' => $invalidCount,
+            'total_rows' => $totalCount,
+        ]);
     }
 
     /**
@@ -440,14 +508,15 @@ class ImportService
             '10' => [15, 16],
             // Senior Secondary
             '11' => [16, 17],
-            '12' => [17, 18]
+            '12' => [17, 18],
         ];
 
-        if (!isset($gradeAgeMap[$grade])) {
+        if (! isset($gradeAgeMap[$grade])) {
             return true; // Unknown grade, skip validation
         }
 
         [$minAge, $maxAge] = $gradeAgeMap[$grade];
+
         return $age >= $minAge && $age <= $maxAge;
     }
 
@@ -456,6 +525,10 @@ class ImportService
      */
     public function importStudentsToProduction(string $batchId, bool $skipInvalid = true, ?int $createdBy = null): array
     {
+        if (function_exists('set_time_limit')) {
+            @set_time_limit(300);
+        }
+
         $query = StudentImport::where('batch_id', $batchId)->notImported();
 
         if ($skipInvalid) {
@@ -465,6 +538,9 @@ class ImportService
         $records = $query->get();
         $importedCount = 0;
         $failedCount = 0;
+
+        // Memoize default password hash so Bcrypt is only computed once for default passwords
+        $defaultPasswordHash = Hash::make('Welcome@123');
 
         // Memoize branch->school_id and academic-year-name->id lookups so the loop
         // stays O(1) per row (no N+1) even for large batches.
@@ -477,19 +553,23 @@ class ImportService
         try {
             foreach ($records as $record) {
                 try {
+                    // Optimized password hashing: reuse precomputed hash for standard default password
+                    $password = $record->password ?? 'Welcome@123';
+                    $passwordHash = ($password === 'Welcome@123') ? $defaultPasswordHash : Hash::make($password);
+
                     // Create user account
                     $user = User::create([
                         'first_name' => $record->first_name,
                         'last_name' => $record->last_name,
                         'email' => $record->email,
                         'phone' => $record->phone,
-                        'password' => Hash::make($record->password ?? 'Welcome@123'),
+                        'password' => $passwordHash,
                         'role' => 'Student',
                         'user_type' => 'Student',
                         'branch_id' => $record->branch_id,
                         'is_active' => true,
                     ]);
-                    
+
                     // Assign Student role via roles relationship
                     $studentRole = Role::where('slug', 'student')->first();
                     if ($studentRole) {
@@ -497,7 +577,7 @@ class ImportService
                             'is_primary' => true,
                             'branch_id' => $record->branch_id,
                             'created_at' => now(),
-                            'updated_at' => now()
+                            'updated_at' => now(),
                         ]);
                     }
 
@@ -505,13 +585,13 @@ class ImportService
                     // way StudentController::store does, so imported students are properly
                     // school-scoped and tied to an academic year. Memoized to avoid N+1.
                     $branchId = $record->branch_id;
-                    if (!array_key_exists($branchId, $schoolIdByBranch)) {
+                    if (! array_key_exists($branchId, $schoolIdByBranch)) {
                         $schoolIdByBranch[$branchId] = DB::table('branches')->where('id', $branchId)->value('school_id');
                     }
                     $schoolId = $schoolIdByBranch[$branchId];
 
                     $ayName = $record->academic_year;
-                    if ($ayName !== null && !array_key_exists($ayName, $academicYearIdByName)) {
+                    if ($ayName !== null && ! array_key_exists($ayName, $academicYearIdByName)) {
                         $academicYearIdByName[$ayName] = DB::table('academic_years')->where('name', $ayName)->value('id');
                     }
                     $academicYearId = $record->academic_year_id ?? ($ayName !== null ? $academicYearIdByName[$ayName] : null);
@@ -587,8 +667,6 @@ class ImportService
                     $user->update(['user_type_id' => $studentId]);
 
                     // Create the active enrollment row that StudentController::store also creates.
-                    // Grade/section/group/attendance/promotion views read from student_enrollments,
-                    // so without this the imported student is invisible to them.
                     if ($hasEnrollments && $academicYearId) {
                         DB::table('student_enrollments')->updateOrInsert(
                             ['student_id' => $studentId, 'academic_year_id' => (int) $academicYearId],
@@ -605,6 +683,19 @@ class ImportService
                                 'updated_at' => now(),
                             ]
                         );
+                    }
+
+                    // 🔥 Auto-assign fees according to branch, grade, and transport configuration
+                    try {
+                        $createdStudent = \App\Models\Student::find($studentId);
+                        if ($createdStudent && class_exists(\App\Services\StudentFeeAutoAssignService::class)) {
+                            app(\App\Services\StudentFeeAutoAssignService::class)->syncAllFees($createdStudent);
+                        }
+                    } catch (\Throwable $feeEx) {
+                        Log::warning('Fee auto-assignment skipped or failed for student import', [
+                            'student_id' => $studentId,
+                            'error' => $feeEx->getMessage(),
+                        ]);
                     }
 
                     // Mark as imported
@@ -645,6 +736,10 @@ class ImportService
      */
     public function importTeachersToProduction(string $batchId, bool $skipInvalid = true): array
     {
+        if (function_exists('set_time_limit')) {
+            @set_time_limit(300);
+        }
+
         $query = TeacherImport::where('batch_id', $batchId)->notImported();
 
         if ($skipInvalid) {
@@ -655,6 +750,9 @@ class ImportService
         $importedCount = 0;
         $failedCount = 0;
 
+        // Memoize default password hash
+        $defaultPasswordHash = Hash::make('Welcome@123');
+
         // Memoize branch->school_id to avoid N+1 inside the loop.
         $schoolIdByBranch = [];
 
@@ -663,19 +761,22 @@ class ImportService
         try {
             foreach ($records as $record) {
                 try {
+                    $password = $record->password ?? 'Welcome@123';
+                    $passwordHash = ($password === 'Welcome@123') ? $defaultPasswordHash : Hash::make($password);
+
                     // Create user account
                     $user = User::create([
                         'first_name' => $record->first_name,
                         'last_name' => $record->last_name,
                         'email' => $record->email,
                         'phone' => $record->phone,
-                        'password' => Hash::make($record->password ?? 'Welcome@123'),
+                        'password' => $passwordHash,
                         'role' => 'Teacher',
                         'user_type' => 'Teacher',
                         'branch_id' => $record->branch_id,
                         'is_active' => true,
                     ]);
-                    
+
                     // Assign Teacher role via roles relationship
                     $teacherRole = Role::where('slug', 'teacher')->first();
                     if ($teacherRole) {
@@ -683,7 +784,7 @@ class ImportService
                             'is_primary' => true,
                             'branch_id' => $record->branch_id,
                             'created_at' => now(),
-                            'updated_at' => now()
+                            'updated_at' => now(),
                         ]);
                     }
 
@@ -692,7 +793,7 @@ class ImportService
                         // Resolve school_id from branch (memoized) so the teacher is school-scoped,
                         // matching TeacherController::store.
                         $branchId = $record->branch_id;
-                        if (!array_key_exists($branchId, $schoolIdByBranch)) {
+                        if (! array_key_exists($branchId, $schoolIdByBranch)) {
                             $schoolIdByBranch[$branchId] = DB::table('branches')->where('id', $branchId)->value('school_id');
                         }
 
@@ -794,7 +895,189 @@ class ImportService
             return [];
         }
         $parts = preg_split('/[,;|]/', (string) $value);
+
         return array_values(array_filter(array_map('trim', $parts), fn ($v) => $v !== ''));
+    }
+
+    /**
+     * Revert an import batch from production back to staging
+     */
+    public function revertImport(string $entity, string $batchId, int $userId): array
+    {
+        $batch = ImportHistory::where('batch_id', $batchId)->first();
+        if (! $batch) {
+            throw new \Exception("Batch not found: {$batchId}");
+        }
+
+        if ($batch->status !== 'completed') {
+            throw new \Exception("Only completed batches can be reverted. Current status: {$batch->status}");
+        }
+
+        if ($entity === 'student') {
+            return $this->revertStudentImport($batchId, $userId);
+        } elseif ($entity === 'teacher') {
+            return $this->revertTeacherImport($batchId, $userId);
+        } else {
+            throw new \Exception("Revert not supported for entity type: {$entity}");
+        }
+    }
+
+    /**
+     * Revert student import batch from production back to staging
+     */
+    public function revertStudentImport(string $batchId, int $userId): array
+    {
+        $batch = ImportHistory::where('batch_id', $batchId)->first();
+        if (! $batch) {
+            throw new \Exception("Batch not found: {$batchId}");
+        }
+
+        $records = StudentImport::where('batch_id', $batchId)
+            ->where('imported_to_production', true)
+            ->get();
+
+        $studentIds = $records->pluck('imported_student_id')->filter()->unique()->values()->all();
+        $userIds = $records->pluck('imported_user_id')->filter()->unique()->values()->all();
+
+        // Safety check: verify no collected fee payments exist for these students
+        if (! empty($studentIds) && Schema::hasTable('fee_payments')) {
+            $paidCount = DB::table('fee_payments')
+                ->whereIn('student_id', $studentIds)
+                ->whereNull('deleted_at')
+                ->where(function ($q) {
+                    $q->where('amount_paid', '>', 0)
+                        ->orWhere('paid_amount', '>', 0)
+                        ->orWhere('payment_status', 'Paid')
+                        ->orWhere('payment_status', 'Partial');
+                })
+                ->count();
+
+            if ($paidCount > 0) {
+                throw new \Exception("Cannot revert batch: {$paidCount} fee payment transaction(s) have already been recorded for students in this batch. Please void or refund those payments before reverting.");
+            }
+        }
+
+        DB::beginTransaction();
+        try {
+            if (! empty($studentIds)) {
+                // Delete fee dues
+                if (Schema::hasTable('fee_dues')) {
+                    DB::table('fee_dues')->whereIn('student_id', $studentIds)->delete();
+                }
+
+                // Delete unpaid fee payments
+                if (Schema::hasTable('fee_payments')) {
+                    DB::table('fee_payments')->whereIn('student_id', $studentIds)->delete();
+                }
+
+                // Delete student enrollments
+                if (Schema::hasTable('student_enrollments')) {
+                    DB::table('student_enrollments')->whereIn('student_id', $studentIds)->delete();
+                }
+
+                // Delete student records
+                DB::table('students')->whereIn('id', $studentIds)->delete();
+            }
+
+            if (! empty($userIds)) {
+                DB::table('users')->whereIn('id', $userIds)->delete();
+            }
+
+            // Reset staging records
+            StudentImport::where('batch_id', $batchId)->update([
+                'imported_to_production' => false,
+                'imported_student_id' => null,
+                'imported_user_id' => null,
+                'imported_at' => null,
+            ]);
+
+            // Update import history
+            $revertedCount = count($studentIds);
+            $batch->update([
+                'status' => 'reverted',
+                'imported_rows' => 0,
+                'reverted_by' => $userId,
+                'reverted_at' => now(),
+                'error_message' => "Reverted {$revertedCount} student record(s) on ".now()->toDateTimeString(),
+            ]);
+
+            DB::commit();
+
+            return [
+                'batch_id' => $batchId,
+                'status' => 'reverted',
+                'reverted_students' => $revertedCount,
+                'reverted_users' => count($userIds),
+                'message' => "Successfully reverted {$revertedCount} students back to staging.",
+            ];
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Student import revert failed', ['batch_id' => $batchId, 'error' => $e->getMessage()]);
+            throw $e;
+        }
+    }
+
+    /**
+     * Revert teacher import batch from production back to staging
+     */
+    public function revertTeacherImport(string $batchId, int $userId): array
+    {
+        $batch = ImportHistory::where('batch_id', $batchId)->first();
+        if (! $batch) {
+            throw new \Exception("Batch not found: {$batchId}");
+        }
+
+        $records = TeacherImport::where('batch_id', $batchId)
+            ->where('imported_to_production', true)
+            ->get();
+
+        $teacherIds = $records->pluck('imported_teacher_id')->filter()->unique()->values()->all();
+        $userIds = $records->pluck('imported_user_id')->filter()->unique()->values()->all();
+
+        DB::beginTransaction();
+        try {
+            if (! empty($teacherIds)) {
+                if (Schema::hasTable('teacher_departments')) {
+                    DB::table('teacher_departments')->whereIn('teacher_id', $teacherIds)->delete();
+                }
+
+                DB::table('teachers')->whereIn('id', $teacherIds)->delete();
+            }
+
+            if (! empty($userIds)) {
+                DB::table('users')->whereIn('id', $userIds)->delete();
+            }
+
+            TeacherImport::where('batch_id', $batchId)->update([
+                'imported_to_production' => false,
+                'imported_teacher_id' => null,
+                'imported_user_id' => null,
+                'imported_at' => null,
+            ]);
+
+            $revertedCount = count($teacherIds);
+            $batch->update([
+                'status' => 'reverted',
+                'imported_rows' => 0,
+                'reverted_by' => $userId,
+                'reverted_at' => now(),
+                'error_message' => "Reverted {$revertedCount} teacher record(s) on ".now()->toDateTimeString(),
+            ]);
+
+            DB::commit();
+
+            return [
+                'batch_id' => $batchId,
+                'status' => 'reverted',
+                'reverted_teachers' => $revertedCount,
+                'reverted_users' => count($userIds),
+                'message' => "Successfully reverted {$revertedCount} teachers back to staging.",
+            ];
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Teacher import revert failed', ['batch_id' => $batchId, 'error' => $e->getMessage()]);
+            throw $e;
+        }
     }
 
     /**
@@ -810,12 +1093,13 @@ class ImportService
             ImportHistory::where('batch_id', $batchId)->delete();
 
             DB::commit();
+
             return true;
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Failed to delete batch', ['batch_id' => $batchId, 'error' => $e->getMessage()]);
+
             return false;
         }
     }
 }
-

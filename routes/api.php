@@ -754,17 +754,21 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
         Route::delete('/{id}', [ModuleController::class, 'destroy']);
     });
 
-    // Import Module - Data Import System (Rate limited - 30 per minute)
-    Route::prefix('imports')->middleware('throttle:30,1')->group(function () {
+    // Import Module - Data Import System (Rate limited - 120 per minute)
+    Route::prefix('imports')->middleware('throttle:120,1')->group(function () {
         Route::get('/modules', [App\Http\Controllers\ImportController::class, 'getModules']);
         Route::get('/history', [App\Http\Controllers\ImportController::class, 'history']);
+        Route::get('/batch/{batchId}', [App\Http\Controllers\ImportController::class, 'getBatchDetails']);
         Route::get('/template/{entity}', [App\Http\Controllers\ImportController::class, 'downloadTemplate']);
 
         // Entity-specific import routes
         Route::post('/{entity}/upload', [App\Http\Controllers\ImportController::class, 'upload']);
         Route::post('/{entity}/validate/{batchId}', [App\Http\Controllers\ImportController::class, 'validate']);
         Route::get('/{entity}/preview/{batchId}', [App\Http\Controllers\ImportController::class, 'preview']);
+        Route::get('/{entity}/failed-export/{batchId}', [App\Http\Controllers\ImportController::class, 'exportFailedRows']);
+        Route::patch('/{entity}/record/{id}', [App\Http\Controllers\ImportController::class, 'updateRecord']);
         Route::post('/{entity}/commit/{batchId}', [App\Http\Controllers\ImportController::class, 'commit']);
+        Route::post('/{entity}/revert/{batchId}', [App\Http\Controllers\ImportController::class, 'revert']);
         Route::delete('/{entity}/cancel/{batchId}', [App\Http\Controllers\ImportController::class, 'cancel']);
     });
 
