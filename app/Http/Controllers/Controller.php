@@ -241,6 +241,82 @@ abstract class Controller
     }
 
     /**
+     * Resolve [academic_year_id, academic_year_name] from the request or AcademicYearContext.
+     *
+     * Priority:
+     * 1) Explicit academic_year_id in query/body
+     * 2) Explicit academic_year (string name) in query/body
+     * 3) Request attribute / AcademicYearContext (X-Academic-Year-Id header or default is_current)
+     *
+     * @return array{0: ?int, 1: ?string}
+     */
+    protected function resolveAcademicYearFromRequest(Request $request): array
+    {
+        $companyId = $this->getCurrentCompanyId($request);
+
+        if ($request->filled('academic_year_id')) {
+            $id = (int) $request->input('academic_year_id');
+            $year = \App\Models\AcademicYear::query()
+                ->when($companyId, fn ($q) => $q->where('company_id', $companyId))
+                ->find($id);
+            if ($year) {
+                return [(int) $year->id, $year->name];
+            }
+        }
+
+        if ($request->filled('academic_year')) {
+            $name = trim((string) $request->input('academic_year'));
+            $year = \App\Models\AcademicYear::query()
+                ->when($companyId, fn ($q) => $q->where('company_id', $companyId))
+                ->where('name', $name)
+                ->first();
+            if ($year) {
+                return [(int) $year->id, $year->name];
+            }
+
+            return [null, $name];
+        }
+
+        $contextModel = app(\App\Services\AcademicYearContext::class)->model(false);
+        if ($contextModel) {
+            return [(int) $contextModel->id, $contextModel->name];
+        }
+
+        $attrId = $request->attributes->get('academic_year_id');
+        if ($attrId) {
+            $year = \App\Models\AcademicYear::find((int) $attrId);
+            if ($year) {
+                return [(int) $year->id, $year->name];
+            }
+        }
+
+        return [null, null];
+    }
+
+    /**
+     * Apply academic year filter to a query that has both academic_year_id and academic_year columns.
+     * Matches academic_year_id OR legacy rows with null academic_year_id and matching academic_year name.
+     */
+    protected function applyAcademicYearScope($query, ?int $academicYearId, ?string $academicYearName, string $tablePrefix = ''): void
+    {
+        $idCol = $tablePrefix !== '' ? "{$tablePrefix}.academic_year_id" : 'academic_year_id';
+        $nameCol = $tablePrefix !== '' ? "{$tablePrefix}.academic_year" : 'academic_year';
+
+        if ($academicYearId && $academicYearName) {
+            $query->where(function ($q) use ($idCol, $nameCol, $academicYearId, $academicYearName) {
+                $q->where($idCol, $academicYearId)
+                    ->orWhere(function ($legacy) use ($idCol, $nameCol, $academicYearName) {
+                        $legacy->whereNull($idCol)->where($nameCol, $academicYearName);
+                    });
+            });
+        } elseif ($academicYearId) {
+            $query->where($idCol, $academicYearId);
+        } elseif ($academicYearName) {
+            $query->where($nameCol, $academicYearName);
+        }
+    }
+
+    /**
      * Get current school ID from request
      */
     protected function getCurrentSchoolId(Request $request): ?int

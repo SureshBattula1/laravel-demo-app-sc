@@ -6,9 +6,9 @@ use App\Http\Traits\PaginatesAndSorts;
 use App\Models\AcademicYear;
 use App\Models\AdmissionApplication;
 use App\Models\Branch;
-use App\Models\User;
 use App\Models\Role;
 use App\Models\Student;
+use App\Models\User;
 use App\Services\AcademicYearContext;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -50,9 +50,9 @@ class AdmissionController extends Controller
             // Branch filtering
             $user = $request->user();
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
-            
+
             if ($accessibleBranchIds !== 'all') {
-                if (!empty($accessibleBranchIds)) {
+                if (! empty($accessibleBranchIds)) {
                     $query->whereIn('admission_applications.branch_id', $accessibleBranchIds);
                 } else {
                     $query->whereRaw('1 = 0');
@@ -80,8 +80,14 @@ class AdmissionController extends Controller
                 $query->where('admission_applications.applying_for_section', $request->applying_for_section);
             }
 
-            if ($request->filled('academic_year')) {
-                $query->where('admission_applications.academic_year', $request->academic_year);
+            if ($request->filled('academic_year') || $request->filled('academic_year_id')) {
+                [$academicYearId, $academicYearName] = $this->resolveAcademicYearFromRequest($request);
+                $this->applyAcademicYearScope($query, $academicYearId, $academicYearName, 'admission_applications');
+            } else {
+                $contextYear = $this->academicYearContext->model(false);
+                if ($contextYear) {
+                    $this->applyAcademicYearScope($query, (int) $contextYear->id, $contextYear->name, 'admission_applications');
+                }
             }
 
             if ($request->has('branch_id')) {
@@ -89,32 +95,32 @@ class AdmissionController extends Controller
             }
 
             if ($request->filled('referred_by')) {
-                $query->where('admission_applications.referred_by', 'like', '%' . $request->referred_by . '%');
+                $query->where('admission_applications.referred_by', 'like', '%'.$request->referred_by.'%');
             }
 
             if ($request->has('search')) {
                 $search = strip_tags($request->search);
                 $search = preg_replace('/[^\w\s@.-]/', '', $search);
-                
-                $query->where(function($q) use ($search) {
+
+                $query->where(function ($q) use ($search) {
                     $q->where('admission_applications.application_number', 'like', "{$search}%")
-                      ->orWhere('admission_applications.first_name', 'like', "{$search}%")
-                      ->orWhere('admission_applications.last_name', 'like', "{$search}%")
-                      ->orWhere('admission_applications.email', 'like', "{$search}%")
-                      ->orWhere('admission_applications.phone', 'like', "{$search}%")
-                      ->orWhere('admission_applications.application_status', 'like', "{$search}%")
-                      ->orWhere('admission_applications.academic_year', 'like', "{$search}%")
-                      ->orWhere('admission_applications.applying_for_grade', 'like', "{$search}%")
-                      ->orWhere('admission_applications.applying_for_section', 'like', "{$search}%")
-                      ->orWhere('admission_applications.referred_by', 'like', "{$search}%")
-                      ->orWhereRaw('CONCAT(admission_applications.first_name, " ", admission_applications.last_name) LIKE ?', ["{$search}%"]);
+                        ->orWhere('admission_applications.first_name', 'like', "{$search}%")
+                        ->orWhere('admission_applications.last_name', 'like', "{$search}%")
+                        ->orWhere('admission_applications.email', 'like', "{$search}%")
+                        ->orWhere('admission_applications.phone', 'like', "{$search}%")
+                        ->orWhere('admission_applications.application_status', 'like', "{$search}%")
+                        ->orWhere('admission_applications.academic_year', 'like', "{$search}%")
+                        ->orWhere('admission_applications.applying_for_grade', 'like', "{$search}%")
+                        ->orWhere('admission_applications.applying_for_section', 'like', "{$search}%")
+                        ->orWhere('admission_applications.referred_by', 'like', "{$search}%")
+                        ->orWhereRaw('CONCAT(admission_applications.first_name, " ", admission_applications.last_name) LIKE ?', ["{$search}%"]);
                 });
             }
 
             // Sorting
             $sortableColumns = [
                 'application_number', 'application_date', 'first_name', 'last_name',
-                'application_status', 'applying_for_grade', 'academic_year', 'referred_by'
+                'application_status', 'applying_for_grade', 'academic_year', 'referred_by',
             ];
 
             $query = $this->applySorting($query, $request, $sortableColumns, 'application_date', 'desc');
@@ -133,16 +139,16 @@ class AdmissionController extends Controller
                     'last_page' => $applications->lastPage(),
                     'from' => $applications->firstItem(),
                     'to' => $applications->lastItem(),
-                ]
+                ],
             ]);
 
         } catch (\Exception $e) {
             Log::error('Get admission applications error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch admission applications',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -163,7 +169,7 @@ class AdmissionController extends Controller
                 ->whereNull('deleted_at');
 
             if ($accessibleBranchIds !== 'all') {
-                if (!empty($accessibleBranchIds)) {
+                if (! empty($accessibleBranchIds)) {
                     $query->whereIn('branch_id', $accessibleBranchIds);
                 } else {
                     $query->whereRaw('1 = 0');
@@ -250,15 +256,15 @@ class AdmissionController extends Controller
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
             // Tenant guard: can't create an application in a branch the user can't access.
-            if (!$this->canAccessBranch($request, (int) $request->branch_id)) {
+            if (! $this->canAccessBranch($request, (int) $request->branch_id)) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'You do not have access to the selected branch'
+                    'message' => 'You do not have access to the selected branch',
                 ], 403);
             }
 
@@ -271,9 +277,9 @@ class AdmissionController extends Controller
                 ->whereYear('application_date', $year)
                 ->orderBy('id', 'desc')
                 ->first();
-            
-            $sequence = $lastApplication ? (int)substr($lastApplication->application_number, -4) + 1 : 1;
-            $applicationNumber = $branch->code . '/ADM/' . $year . '/' . str_pad($sequence, 4, '0', STR_PAD_LEFT);
+
+            $sequence = $lastApplication ? (int) substr($lastApplication->application_number, -4) + 1 : 1;
+            $applicationNumber = $branch->code.'/ADM/'.$year.'/'.str_pad($sequence, 4, '0', STR_PAD_LEFT);
 
             [$academicYearId, $academicYearName] = $this->resolveAcademicYearForRequest($request);
 
@@ -350,17 +356,17 @@ class AdmissionController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Admission application created successfully',
-                'data' => $application
+                'data' => $application,
             ], 201);
 
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Create admission application error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create admission application',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -375,10 +381,10 @@ class AdmissionController extends Controller
                 ->findOrFail($id);
 
             // Tenant guard: hide applications outside the user's accessible branches.
-            if (!$this->canAccessBranch($request, (int) $application->branch_id)) {
+            if (! $this->canAccessBranch($request, (int) $application->branch_id)) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Admission application not found'
+                    'message' => 'Admission application not found',
                 ], 404);
             }
 
@@ -391,20 +397,20 @@ class AdmissionController extends Controller
                     ->first();
                 $gradeLabel = $grade?->label ?? null;
             }
-            $application->setAttribute('grade_label', $gradeLabel ?? ('Grade ' . $application->applying_for_grade));
+            $application->setAttribute('grade_label', $gradeLabel ?? ('Grade '.$application->applying_for_grade));
 
             return response()->json([
                 'success' => true,
-                'data' => $application
+                'data' => $application,
             ]);
 
         } catch (\Exception $e) {
             Log::error('Get admission application error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Admission application not found',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 404);
         }
     }
@@ -418,10 +424,10 @@ class AdmissionController extends Controller
             $application = AdmissionApplication::findOrFail($id);
 
             // Tenant guard: can't edit an application outside accessible branches.
-            if (!$this->canAccessBranch($request, (int) $application->branch_id)) {
+            if (! $this->canAccessBranch($request, (int) $application->branch_id)) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Admission application not found'
+                    'message' => 'Admission application not found',
                 ], 404);
             }
 
@@ -437,7 +443,7 @@ class AdmissionController extends Controller
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
@@ -461,7 +467,7 @@ class AdmissionController extends Controller
                 'interview_required', 'interview_date', 'interview_result',
                 'admission_decision', 'admission_decision_date', 'admission_offer_letter', 'admission_validity_date',
                 'registration_fee_paid', 'registration_fee_amount', 'registration_fee_payment_date',
-                'admission_confirmed', 'admission_confirmed_date', 'student_id', 'remarks', 'referred_by', 'documents'
+                'admission_confirmed', 'admission_confirmed_date', 'student_id', 'remarks', 'referred_by', 'documents',
             ]);
 
             // Resolve academic_year_id and academic_year when either is provided
@@ -514,17 +520,17 @@ class AdmissionController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Admission application updated successfully',
-                'data' => $application->fresh()
+                'data' => $application->fresh(),
             ]);
 
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Update admission application error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update admission application',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -538,19 +544,19 @@ class AdmissionController extends Controller
             // Include soft-deleted so we can handle already-deleted records
             $application = AdmissionApplication::withTrashed()->find($id);
 
-            if (!$application) {
+            if (! $application) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Admission application not found',
-                    'error' => 'Application with ID ' . $id . ' does not exist'
+                    'error' => 'Application with ID '.$id.' does not exist',
                 ], 404);
             }
 
             // Tenant guard: can't delete an application outside accessible branches.
-            if (!$this->canAccessBranch($request, (int) $application->branch_id)) {
+            if (! $this->canAccessBranch($request, (int) $application->branch_id)) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Admission application not found'
+                    'message' => 'Admission application not found',
                 ], 404);
             }
 
@@ -563,7 +569,7 @@ class AdmissionController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Admission application deleted successfully'
+                'message' => 'Admission application deleted successfully',
             ]);
 
         } catch (\Exception $e) {
@@ -572,7 +578,7 @@ class AdmissionController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to delete admission application',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -586,44 +592,44 @@ class AdmissionController extends Controller
             $application = AdmissionApplication::findOrFail($id);
 
             // Tenant guard: can't change status of an application outside accessible branches.
-            if (!$this->canAccessBranch($request, (int) $application->branch_id)) {
+            if (! $this->canAccessBranch($request, (int) $application->branch_id)) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Admission application not found'
+                    'message' => 'Admission application not found',
                 ], 404);
             }
 
             $validator = Validator::make($request->all(), [
                 'status' => 'required|in:Applied,Shortlisted,Rejected,Admitted,Waitlisted',
-                'remarks' => 'nullable|string|max:500'
+                'remarks' => 'nullable|string|max:500',
             ]);
 
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
             $application->update([
                 'application_status' => $request->status,
                 'remarks' => $request->remarks,
-                'updated_by' => $request->user()->id
+                'updated_by' => $request->user()->id,
             ]);
 
             return response()->json([
                 'success' => true,
                 'message' => 'Application status updated successfully',
-                'data' => $application->fresh()
+                'data' => $application->fresh(),
             ]);
 
         } catch (\Exception $e) {
             Log::error('Update application status error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update application status',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -637,10 +643,10 @@ class AdmissionController extends Controller
             $application = AdmissionApplication::findOrFail($id);
 
             // Tenant guard: can't convert an application outside accessible branches.
-            if (!$this->canAccessBranch($request, (int) $application->branch_id)) {
+            if (! $this->canAccessBranch($request, (int) $application->branch_id)) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Admission application not found'
+                    'message' => 'Admission application not found',
                 ], 404);
             }
 
@@ -650,27 +656,27 @@ class AdmissionController extends Controller
                     'success' => false,
                     'message' => 'Application must be approved/admitted before converting to student',
                     'current_status' => $application->application_status,
-                    'current_decision' => $application->admission_decision
+                    'current_decision' => $application->admission_decision,
                 ], 400);
             }
-            
+
             // Check 2: Verify registration fee is paid
-            if (!$application->registration_fee_paid) {
+            if (! $application->registration_fee_paid) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Registration fee must be paid before converting to student'
+                    'message' => 'Registration fee must be paid before converting to student',
                 ], 400);
             }
-            
+
             // Check if already converted
             if ($application->student_id) {
                 return response()->json([
                     'success' => false,
                     'message' => 'This application has already been converted to a student',
-                    'data' => ['student_id' => $application->student_id]
+                    'data' => ['student_id' => $application->student_id],
                 ], 400);
             }
-            
+
             // Check 4: Student must have class (grade) and section
             $grade = $application->applying_for_grade ?? $request->input('grade');
             $section = $application->applying_for_section ?? $request->input('section');
@@ -683,9 +689,9 @@ class AdmissionController extends Controller
             if (empty($section)) {
                 $section = 'A'; // Default section when not set
             }
-            
+
             DB::beginTransaction();
-            
+
             // Generate unique admission number for student
             $branch = Branch::findOrFail($application->branch_id);
             $year = date('Y');
@@ -694,24 +700,25 @@ class AdmissionController extends Controller
                 ->whereYear('admission_date', $year)
                 ->orderBy('id', 'desc')
                 ->first();
-            
-            $sequence = $lastStudent ? (int)substr($lastStudent->admission_number, -4) + 1 : 1;
-            $admissionNumber = $branch->code . '/STU/' . $year . '/' . str_pad($sequence, 4, '0', STR_PAD_LEFT);
-            
+
+            $sequence = $lastStudent ? (int) substr($lastStudent->admission_number, -4) + 1 : 1;
+            $admissionNumber = $branch->code.'/STU/'.$year.'/'.str_pad($sequence, 4, '0', STR_PAD_LEFT);
+
             // Check if email already exists
             $existingUser = User::where('email', $application->email)->first();
             if ($existingUser) {
                 DB::rollBack();
+
                 return response()->json([
                     'success' => false,
                     'message' => 'Email already exists in system. Please use a different email.',
-                    'existing_user_id' => $existingUser->id
+                    'existing_user_id' => $existingUser->id,
                 ], 400);
             }
-            
+
             // Generate default password (can be changed later)
             $defaultPassword = $request->get('password', Str::random(12));
-            
+
             // Step 3: Create User account (User is created FIRST, then Student is linked to it)
             $user = User::create([
                 'first_name' => $application->first_name,
@@ -722,12 +729,12 @@ class AdmissionController extends Controller
                 'role' => 'Student',
                 'user_type' => 'Student',
                 'branch_id' => $application->branch_id,
-                'is_active' => true
+                'is_active' => true,
             ]);
-            
+
             // Assign Student role (ensure role exists so converted user always has Student role)
             $studentRole = Role::where('slug', 'student')->first();
-            if (!$studentRole) {
+            if (! $studentRole) {
                 $studentRole = Role::create([
                     'name' => 'Student',
                     'slug' => 'student',
@@ -741,61 +748,61 @@ class AdmissionController extends Controller
                 'is_primary' => true,
                 'branch_id' => $application->branch_id,
                 'created_at' => now(),
-                'updated_at' => now()
+                'updated_at' => now(),
             ]);
-            
+
             // Resolve academic_year_id and academic_year name from application
             [$academicYearId, $academicYearName] = $this->resolveAcademicYearFromApplication($application);
 
             // Step 4: Create Student record (Student is created AFTER User, and linked via user_id)
             $studentData = [
-            'user_id' => $user->id,
-            'branch_id' => $application->branch_id,
-            'school_id' => $branch->school_id ?? $this->getCurrentSchoolId($request),
-            'admission_number' => $admissionNumber,
-            'admission_date' => $application->admission_confirmed_date ?? $application->admission_decision_date ?? now(),
-            'admission_type' => 'Regular',
-            'grade' => $grade,
-            'section' => $section,
-            'academic_year_id' => $academicYearId,
-            'academic_year' => $academicYearName,
-            'date_of_birth' => $application->date_of_birth,
-            'gender' => $application->gender,
-            'blood_group' => $application->blood_group,
-            'religion' => $application->religion,
-            'nationality' => $application->nationality ?? 'Indian',
-            'mother_tongue' => $application->mother_tongue,
-            'category' => $application->category,
-            'current_address' => $application->current_address,
-            'city' => $application->current_city,
-            'state' => $application->current_state,
-            'country' => $application->current_country ?? 'India',
-            'pincode' => $application->current_pincode,
-            'permanent_address' => $application->permanent_address ?? $application->current_address,
-            'father_name' => $application->father_name,
-            'father_phone' => $application->father_phone,
-            'father_email' => $application->father_email,
-            'father_occupation' => $application->father_occupation,
-            'father_qualification' => $application->father_qualification,
-            'mother_name' => $application->mother_name,
-            'mother_phone' => $application->mother_phone,
-            'mother_email' => $application->mother_email,
-            'mother_occupation' => $application->mother_occupation,
-            'mother_qualification' => $application->mother_qualification,
-            'guardian_name' => $application->guardian_name,
-            'guardian_relation' => $application->guardian_relation,
-            'guardian_phone' => $application->guardian_phone,
-            'emergency_contact_name' => $application->guardian_name ?? $application->father_name ?? $application->mother_name,
-            'emergency_contact_phone' => $application->guardian_phone ?? $application->father_phone ?? $application->mother_phone,
-            'emergency_contact_relation' => $application->guardian_relation ?? 'Father',
-            'previous_school' => $application->previous_school,
-            'previous_grade' => $application->previous_grade,
-            'student_status' => 'Active',
-            'admission_status' => 'Admitted',
-            'created_at' => now(),
-            'updated_at' => now()
+                'user_id' => $user->id,
+                'branch_id' => $application->branch_id,
+                'school_id' => $branch->school_id ?? $this->getCurrentSchoolId($request),
+                'admission_number' => $admissionNumber,
+                'admission_date' => $application->admission_confirmed_date ?? $application->admission_decision_date ?? now(),
+                'admission_type' => 'Regular',
+                'grade' => $grade,
+                'section' => $section,
+                'academic_year_id' => $academicYearId,
+                'academic_year' => $academicYearName,
+                'date_of_birth' => $application->date_of_birth,
+                'gender' => $application->gender,
+                'blood_group' => $application->blood_group,
+                'religion' => $application->religion,
+                'nationality' => $application->nationality ?? 'Indian',
+                'mother_tongue' => $application->mother_tongue,
+                'category' => $application->category,
+                'current_address' => $application->current_address,
+                'city' => $application->current_city,
+                'state' => $application->current_state,
+                'country' => $application->current_country ?? 'India',
+                'pincode' => $application->current_pincode,
+                'permanent_address' => $application->permanent_address ?? $application->current_address,
+                'father_name' => $application->father_name,
+                'father_phone' => $application->father_phone,
+                'father_email' => $application->father_email,
+                'father_occupation' => $application->father_occupation,
+                'father_qualification' => $application->father_qualification,
+                'mother_name' => $application->mother_name,
+                'mother_phone' => $application->mother_phone,
+                'mother_email' => $application->mother_email,
+                'mother_occupation' => $application->mother_occupation,
+                'mother_qualification' => $application->mother_qualification,
+                'guardian_name' => $application->guardian_name,
+                'guardian_relation' => $application->guardian_relation,
+                'guardian_phone' => $application->guardian_phone,
+                'emergency_contact_name' => $application->guardian_name ?? $application->father_name ?? $application->mother_name,
+                'emergency_contact_phone' => $application->guardian_phone ?? $application->father_phone ?? $application->mother_phone,
+                'emergency_contact_relation' => $application->guardian_relation ?? 'Father',
+                'previous_school' => $application->previous_school,
+                'previous_grade' => $application->previous_grade,
+                'student_status' => 'Active',
+                'admission_status' => 'Admitted',
+                'created_at' => now(),
+                'updated_at' => now(),
             ];
-            
+
             $studentId = DB::table('students')->insertGetId($studentData);
 
             // Link user to student (user_type_id points to student record)
@@ -820,7 +827,7 @@ class AdmissionController extends Controller
                     ]
                 );
             }
-            
+
             // Step 5: Link application to student
             // Step 6: Update application status
             $application->update([
@@ -828,18 +835,18 @@ class AdmissionController extends Controller
                 'application_status' => 'Admitted',
                 'admission_confirmed' => true,
                 'admission_confirmed_date' => now(),
-                'updated_by' => $request->user()->id
+                'updated_by' => $request->user()->id,
             ]);
-            
+
             DB::commit();
-            
+
             Log::info('Admission application converted to student', [
                 'application_id' => $application->id,
                 'student_id' => $studentId,
                 'user_id' => $user->id,
-                'admission_number' => $admissionNumber
+                'admission_number' => $admissionNumber,
             ]);
-            
+
             return response()->json([
                 'success' => true,
                 'message' => 'Admission application successfully converted to student',
@@ -850,22 +857,22 @@ class AdmissionController extends Controller
                     'grade' => $grade,
                     'section' => $section,
                     'email' => $user->email,
-                    'default_password' => app()->environment('local') ? $defaultPassword : null // Only return in development
-                ]
+                    'default_password' => app()->environment('local') ? $defaultPassword : null, // Only return in development
+                ],
             ], 201);
-        
+
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Convert to student error', [
                 'application_id' => $id,
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
             ]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to convert application to student',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -878,12 +885,15 @@ class AdmissionController extends Controller
     {
         if ($request->filled('academic_year_id')) {
             $ay = AcademicYear::find((int) $request->academic_year_id);
+
             return [(int) $request->academic_year_id, $ay?->name];
         }
         if ($request->filled('academic_year')) {
             $ay = AcademicYear::where('name', $request->academic_year)->first();
+
             return [$ay?->id, $ay?->name ?? $request->academic_year];
         }
+
         return [null, null];
     }
 
@@ -894,14 +904,17 @@ class AdmissionController extends Controller
      */
     private function resolveAcademicYearFromApplication(AdmissionApplication $application): array
     {
-        if (!empty($application->academic_year_id)) {
+        if (! empty($application->academic_year_id)) {
             $ay = AcademicYear::find($application->academic_year_id);
+
             return [$application->academic_year_id, $ay?->name ?? $application->academic_year];
         }
-        if (!empty($application->academic_year)) {
+        if (! empty($application->academic_year)) {
             $ay = AcademicYear::where('name', $application->academic_year)->first();
+
             return [$ay?->id, $ay?->name ?? $application->academic_year];
         }
+
         return [null, null];
     }
 
@@ -916,7 +929,7 @@ class AdmissionController extends Controller
             // Tenant guard: restrict export to the user's accessible branches (was leaking all).
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
             if ($accessibleBranchIds !== 'all') {
-                if (!empty($accessibleBranchIds)) {
+                if (! empty($accessibleBranchIds)) {
                     $query->whereIn('branch_id', $accessibleBranchIds);
                 } else {
                     $query->whereRaw('1 = 0');
@@ -941,18 +954,17 @@ class AdmissionController extends Controller
             return response()->json([
                 'success' => true,
                 'data' => $applications,
-                'count' => $applications->count()
+                'count' => $applications->count(),
             ]);
 
         } catch (\Exception $e) {
             Log::error('Export admission applications error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to export admission applications',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
 }
-

@@ -58,8 +58,12 @@ class ClassController extends Controller
                 $query->where('section', $request->section);
             }
 
-            if ($request->has('academic_year')) {
-                $query->where('academic_year', $request->academic_year);
+            if ($request->filled('academic_year') || $request->filled('academic_year_id')) {
+                [$academicYearId, $academicYearName] = $this->resolveAcademicYearFromRequest($request);
+                $this->applyAcademicYearScope($query, $academicYearId, $academicYearName);
+            } elseif ($request->attributes->get('academic_year_id')) {
+                [$academicYearId, $academicYearName] = $this->resolveAcademicYearFromRequest($request);
+                $this->applyAcademicYearScope($query, $academicYearId, $academicYearName);
             }
 
             if ($request->has('is_active')) {
@@ -107,7 +111,8 @@ class ClassController extends Controller
                 'branch_id' => 'required|exists:branches,id',
                 'grade' => 'required|string|max:20',
                 'section' => 'nullable|string|max:10',
-                'academic_year' => 'required|string|max:20',
+                'academic_year' => 'required_without:academic_year_id|nullable|string|max:20',
+                'academic_year_id' => 'nullable|exists:academic_years,id',
                 'class_teacher_id' => 'nullable|exists:users,id',
                 'capacity' => 'required|integer|min:1|max:100',
                 'room_number' => 'nullable|string|max:50',
@@ -130,11 +135,14 @@ class ClassController extends Controller
                 $className .= '-'.$request->section;
             }
 
+            [$academicYearId, $academicYearName] = $this->resolveAcademicYearFromRequest($request);
+            $academicYearName = $academicYearName ?? strip_tags((string) $request->academic_year);
+
             // Check for duplicate
             $exists = ClassModel::where('branch_id', $request->branch_id)
                 ->where('grade', $request->grade)
                 ->where('section', $request->section)
-                ->where('academic_year', $request->academic_year)
+                ->where('academic_year', $academicYearName)
                 ->exists();
 
             if ($exists) {
@@ -151,7 +159,8 @@ class ClassController extends Controller
                 'grade' => strip_tags($request->grade),
                 'section' => $request->section ? strip_tags($request->section) : null,
                 'class_name' => $className,
-                'academic_year' => strip_tags($request->academic_year),
+                'academic_year' => $academicYearName,
+                'academic_year_id' => $academicYearId,
                 'class_teacher_id' => $request->class_teacher_id,
                 'capacity' => $request->capacity,
                 'current_strength' => 0,
@@ -227,6 +236,7 @@ class ClassController extends Controller
                 'grade' => 'sometimes|string|max:20',
                 'section' => 'nullable|string|max:10',
                 'academic_year' => 'sometimes|string|max:20',
+                'academic_year_id' => 'nullable|exists:academic_years,id',
                 'class_teacher_id' => 'nullable|exists:users,id',
                 'capacity' => 'sometimes|integer|min:1|max:100',
                 'room_number' => 'nullable|string|max:50',
@@ -244,9 +254,19 @@ class ClassController extends Controller
             DB::beginTransaction();
 
             $updateData = $request->only([
-                'grade', 'section', 'academic_year', 'class_teacher_id',
+                'grade', 'section', 'academic_year', 'academic_year_id', 'class_teacher_id',
                 'capacity', 'room_number', 'description', 'is_active',
             ]);
+
+            if ($request->filled('academic_year') || $request->filled('academic_year_id')) {
+                [$resolvedYearId, $resolvedYearName] = $this->resolveAcademicYearFromRequest($request);
+                if ($resolvedYearId) {
+                    $updateData['academic_year_id'] = $resolvedYearId;
+                }
+                if ($resolvedYearName) {
+                    $updateData['academic_year'] = $resolvedYearName;
+                }
+            }
 
             // Sanitize strings
             foreach (['grade', 'section', 'academic_year', 'room_number', 'description'] as $field) {

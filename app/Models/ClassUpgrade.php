@@ -8,8 +8,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class ClassUpgrade extends Model
 {
     protected $table = 'class_upgrades';
-    
+
     protected $fillable = [
+        'batch_id',
         'student_id',
         'academic_year_from',
         'academic_year_to',
@@ -22,13 +23,21 @@ class ClassUpgrade extends Model
         'approved_by',
         'fee_carry_forward_status',
         'fee_carry_forward_amount',
-        'notes'
+        'notes',
     ];
 
     protected $casts = [
         'percentage' => 'decimal:2',
-        'fee_carry_forward_amount' => 'decimal:2'
+        'fee_carry_forward_amount' => 'decimal:2',
     ];
+
+    /**
+     * Get the promotion batch that owns this upgrade
+     */
+    public function promotionBatch(): BelongsTo
+    {
+        return $this->belongsTo(PromotionBatch::class, 'batch_id', 'id');
+    }
 
     /**
      * Get the student that owns the promotion record
@@ -46,6 +55,16 @@ class ClassUpgrade extends Model
         return $this->belongsTo(User::class, 'approved_by');
     }
 
+    public function fromAcademicYear(): BelongsTo
+    {
+        return $this->belongsTo(AcademicYear::class, 'from_academic_year_id');
+    }
+
+    public function toAcademicYear(): BelongsTo
+    {
+        return $this->belongsTo(AcademicYear::class, 'to_academic_year_id');
+    }
+
     /**
      * Scope a query to only include promoted students
      */
@@ -55,12 +74,22 @@ class ClassUpgrade extends Model
     }
 
     /**
-     * Scope a query to filter by academic year
+     * Scope a query to filter by academic year (ID or name)
      */
     public function scopeForAcademicYear($query, $academicYear)
     {
-        return $query->where('academic_year_from', $academicYear)
-            ->orWhere('academic_year_to', $academicYear);
+        if (is_numeric($academicYear)) {
+            $id = (int) $academicYear;
+
+            return $query->where(function ($q) use ($id) {
+                $q->where('from_academic_year_id', $id)
+                    ->orWhere('to_academic_year_id', $id);
+            });
+        }
+
+        return $query->where(function ($q) use ($academicYear) {
+            $q->where('academic_year_from', $academicYear)
+                ->orWhere('academic_year_to', $academicYear);
+        });
     }
 }
-

@@ -2,27 +2,28 @@
 
 namespace App\Http\Controllers;
 
+use App\Exports\AttendanceExport;
 use App\Http\Traits\PaginatesAndSorts;
+use App\Models\AcademicYear;
 use App\Models\Branch;
 use App\Models\ClassModel;
+use App\Models\Notification;
 use App\Models\Student;
-use App\Models\AcademicYear;
+use App\Services\AttendanceNotificationService;
+use App\Services\ExportService;
+use App\Services\PdfExportService;
+use App\Support\StudentEnrollmentScope;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
-use Carbon\Carbon;
-use App\Exports\AttendanceExport;
-use App\Models\Notification;
-use App\Services\PdfExportService;
-use App\Services\AttendanceNotificationService;
-use App\Services\ExportService;
 use Maatwebsite\Excel\Facades\Excel;
 
 class AttendanceController extends Controller
 {
-    use PaginatesAndSorts;
     use \App\Http\Traits\FiltersActiveRecords;
+    use PaginatesAndSorts;
 
     /**
      * Get attendance records with server-side pagination and sorting
@@ -32,17 +33,17 @@ class AttendanceController extends Controller
         try {
             $type = $request->get('type', 'student'); // student or teacher
             $academicYearId = $request->attributes->get('academic_year_id');
-            
+
             if ($type === 'student') {
                 $query = DB::table('student_attendance')
                     ->join('students', 'student_attendance.student_id', '=', 'students.user_id')
                     ->join('users', 'students.user_id', '=', 'users.id')
                     ->leftJoin('branches', 'student_attendance.branch_id', '=', 'branches.id')
                     ->leftJoin('grades', function ($join) {
-                        $join->on('grades.value', '=', 'students.grade');
+                        $join->on('grades.value', '=', 'student_attendance.grade_level');
                         // Prevent duplicate rows when grades are branch-specific
                         if (\Illuminate\Support\Facades\Schema::hasColumn('grades', 'branch_id')) {
-                            $join->on('grades.branch_id', '=', 'students.branch_id');
+                            $join->on('grades.branch_id', '=', 'student_attendance.branch_id');
                         }
                     })
                     ->select(
@@ -51,9 +52,8 @@ class AttendanceController extends Controller
                         'users.last_name',
                         'users.email',
                         'students.admission_number',
-                        'students.grade',
+                        'student_attendance.grade_level as grade',
                         'grades.label as grade_label',
-                        'students.section',
                         'branches.name as branch_name'
                     );
             } else {
@@ -72,14 +72,14 @@ class AttendanceController extends Controller
             // 🔥 APPLY SCHOOL FILTERING - School-level isolation
             $schoolId = $this->getCurrentSchoolId($request);
             if ($schoolId) {
-                $query->where($type . '_attendance.school_id', $schoolId);
+                $query->where($type.'_attendance.school_id', $schoolId);
             }
 
             // 🔥 APPLY BRANCH FILTERING
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
             if ($accessibleBranchIds !== 'all') {
-                if (!empty($accessibleBranchIds)) {
-                    $query->whereIn($type . '_attendance.branch_id', $accessibleBranchIds);
+                if (! empty($accessibleBranchIds)) {
+                    $query->whereIn($type.'_attendance.branch_id', $accessibleBranchIds);
                 } else {
                     $query->whereRaw('1 = 0');
                 }
@@ -90,9 +90,9 @@ class AttendanceController extends Controller
                 $requestedBranchId = (int) $request->input('branch_id');
 
                 if ($accessibleBranchIds === 'all') {
-                    $query->where($type . '_attendance.branch_id', $requestedBranchId);
+                    $query->where($type.'_attendance.branch_id', $requestedBranchId);
                 } elseif (is_array($accessibleBranchIds) && in_array($requestedBranchId, $accessibleBranchIds, true)) {
-                    $query->where($type . '_attendance.branch_id', $requestedBranchId);
+                    $query->where($type.'_attendance.branch_id', $requestedBranchId);
                 } else {
                     // Requested branch is outside accessible scope -> return no rows
                     $query->whereRaw('1 = 0');
@@ -101,51 +101,51 @@ class AttendanceController extends Controller
 
             // Academic year scoping (Option A)
             if ($academicYearId) {
-                $query->where($type . '_attendance.academic_year_id', (int) $academicYearId);
+                $query->where($type.'_attendance.academic_year_id', (int) $academicYearId);
             }
 
             if ($request->has('date')) {
-                $query->whereDate($type . '_attendance.date', $request->date);
+                $query->whereDate($type.'_attendance.date', $request->date);
             }
 
             if ($request->has('from_date')) {
-                $query->whereDate($type . '_attendance.date', '>=', $request->from_date);
+                $query->whereDate($type.'_attendance.date', '>=', $request->from_date);
             }
 
             if ($request->has('to_date')) {
-                $query->whereDate($type . '_attendance.date', '<=', $request->to_date);
+                $query->whereDate($type.'_attendance.date', '<=', $request->to_date);
             }
 
             if ($request->has('status')) {
-                $query->where($type . '_attendance.status', $request->status);
+                $query->where($type.'_attendance.status', $request->status);
             }
 
             if ($type === 'student') {
-                if ($request->has('grade')) {
-                    $query->where('students.grade', $request->grade);
+                if ($request->filled('grade')) {
+                    $query->where('student_attendance.grade_level', $request->grade);
                 }
-                if ($request->has('section')) {
-                    $query->where('students.section', $request->section);
+                if ($request->filled('section')) {
+                    $query->where('student_attendance.section', $request->section);
                 }
             }
 
             // OPTIMIZED Search filter - removed leading wildcards for better index usage
-            if ($request->has('search') && !empty($request->search)) {
+            if ($request->has('search') && ! empty($request->search)) {
                 $search = strip_tags($request->search);
-                $query->where(function($q) use ($search, $type) {
-                    $q->where('users.first_name', 'like', $search . '%')
-                      ->orWhere('users.last_name', 'like', $search . '%')
-                      ->orWhere('users.email', 'like', $search . '%');
-                    
+                $query->where(function ($q) use ($search, $type) {
+                    $q->where('users.first_name', 'like', $search.'%')
+                        ->orWhere('users.last_name', 'like', $search.'%')
+                        ->orWhere('users.email', 'like', $search.'%');
+
                     // Add type-specific search fields
                     if ($type === 'student') {
-                        $q->orWhere('students.admission_number', 'like', $search . '%');
+                        $q->orWhere('students.admission_number', 'like', $search.'%');
                     }
                 });
             }
 
             // Define sortable columns
-            $sortableColumns = $type === 'student' 
+            $sortableColumns = $type === 'student'
                 ? [
                     'student_attendance.id',
                     'student_attendance.date',
@@ -154,8 +154,8 @@ class AttendanceController extends Controller
                     'users.first_name',
                     'users.last_name',
                     'students.admission_number',
-                    'students.grade',
-                    'students.section'
+                    'student_attendance.grade_level',
+                    'student_attendance.section',
                 ]
                 : [
                     'teacher_attendance.id',
@@ -163,15 +163,15 @@ class AttendanceController extends Controller
                     'teacher_attendance.status',
                     'teacher_attendance.created_at',
                     'users.first_name',
-                    'users.last_name'
+                    'users.last_name',
                 ];
 
             // Apply pagination and sorting (default: 25 per page, sorted by date desc)
             $attendance = $this->paginateAndSort(
-                $query, 
-                $request, 
-                $sortableColumns, 
-                $type . '_attendance.date', 
+                $query,
+                $request,
+                $sortableColumns,
+                $type.'_attendance.date',
                 'desc'
             );
 
@@ -187,15 +187,16 @@ class AttendanceController extends Controller
                     'last_page' => $attendance->lastPage(),
                     'from' => $attendance->firstItem(),
                     'to' => $attendance->lastItem(),
-                    'has_more_pages' => $attendance->hasMorePages()
-                ]
+                    'has_more_pages' => $attendance->hasMorePages(),
+                ],
             ]);
         } catch (\Exception $e) {
-            Log::error('Error fetching attendance: ' . $e->getMessage());
+            Log::error('Error fetching attendance: '.$e->getMessage());
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error fetching attendance',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -216,7 +217,7 @@ class AttendanceController extends Controller
             $academicYearName = $academicYearId
                 ? (AcademicYear::query()->where('id', (int) $academicYearId)->value('name') ?? $request->input('academic_year'))
                 : $request->input('academic_year');
-            
+
             if ($type === 'student') {
                 $validator = Validator::make($request->all(), [
                     'student_id' => 'required|exists:users,id',
@@ -225,13 +226,13 @@ class AttendanceController extends Controller
                     'section' => 'required|string',
                     'date' => 'required|date',
                     'status' => 'required|in:Present,Absent,Late,Half-Day,Sick Leave,Leave',
-                    'remarks' => 'nullable|string'
+                    'remarks' => 'nullable|string',
                 ]);
 
                 if ($validator->fails()) {
                     return response()->json([
                         'success' => false,
-                        'errors' => $validator->errors()
+                        'errors' => $validator->errors(),
                     ], 422);
                 }
 
@@ -244,7 +245,7 @@ class AttendanceController extends Controller
                 if ($existing) {
                     return response()->json([
                         'success' => false,
-                        'message' => 'Attendance already marked for this student on this date'
+                        'message' => 'Attendance already marked for this student on this date',
                     ], 422);
                 }
 
@@ -264,7 +265,7 @@ class AttendanceController extends Controller
                     'academic_year_id' => $academicYearId ? (int) $academicYearId : null,
                     'academic_year' => $academicYearName,
                     'created_at' => now(),
-                    'updated_at' => now()
+                    'updated_at' => now(),
                 ]);
             } else {
                 $validator = Validator::make($request->all(), [
@@ -272,13 +273,13 @@ class AttendanceController extends Controller
                     'branch_id' => 'required|exists:branches,id',
                     'date' => 'required|date',
                     'status' => 'required|in:Present,Absent,Late,Half-Day,Leave',
-                    'remarks' => 'nullable|string'
+                    'remarks' => 'nullable|string',
                 ]);
 
                 if ($validator->fails()) {
                     return response()->json([
                         'success' => false,
-                        'errors' => $validator->errors()
+                        'errors' => $validator->errors(),
                     ], 422);
                 }
 
@@ -290,7 +291,7 @@ class AttendanceController extends Controller
                 if ($existing) {
                     return response()->json([
                         'success' => false,
-                        'message' => 'Attendance already marked for this teacher on this date'
+                        'message' => 'Attendance already marked for this teacher on this date',
                     ], 422);
                 }
 
@@ -306,7 +307,7 @@ class AttendanceController extends Controller
                     'status' => $request->status,
                     'remarks' => $request->remarks,
                     'created_at' => now(),
-                    'updated_at' => now()
+                    'updated_at' => now(),
                 ]);
             }
 
@@ -314,16 +315,17 @@ class AttendanceController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Attendance marked successfully'
+                'message' => 'Attendance marked successfully',
             ], 201);
 
         } catch (\Exception $e) {
             DB::rollBack();
-            Log::error('Error marking attendance: ' . $e->getMessage());
+            Log::error('Error marking attendance: '.$e->getMessage());
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error marking attendance',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -342,13 +344,13 @@ class AttendanceController extends Controller
                 'attendance' => 'required|array',
                 'attendance.*.id' => 'required|exists:users,id',
                 'attendance.*.status' => 'required|in:Present,Absent,Late,Half-Day,Sick Leave,Leave',
-                'attendance.*.remarks' => 'nullable|string'
+                'attendance.*.remarks' => 'nullable|string',
             ]);
 
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
@@ -372,15 +374,16 @@ class AttendanceController extends Controller
                 try {
                     if ($type === 'student') {
                         // Check grade and section are provided
-                        if (!isset($item['grade_level']) || !isset($item['section'])) {
+                        if (! isset($item['grade_level']) || ! isset($item['section'])) {
                             $errors[] = "Grade and section required for student ID: {$item['id']}";
+
                             continue;
                         }
 
                         DB::table('student_attendance')->updateOrInsert(
                             [
                                 'student_id' => $item['id'],
-                                'date' => $request->date
+                                'date' => $request->date,
                             ],
                             [
                                 'branch_id' => $request->branch_id,
@@ -393,14 +396,14 @@ class AttendanceController extends Controller
                                 'academic_year_id' => $academicYearId ? (int) $academicYearId : null,
                                 'academic_year' => $academicYearName,
                                 'updated_at' => now(),
-                                'created_at' => now()
+                                'created_at' => now(),
                             ]
                         );
                     } else {
                         DB::table('teacher_attendance')->updateOrInsert(
                             [
                                 'teacher_id' => $item['id'],
-                                'date' => $request->date
+                                'date' => $request->date,
                             ],
                             [
                                 'branch_id' => $request->branch_id,
@@ -409,13 +412,13 @@ class AttendanceController extends Controller
                                 'status' => $item['status'],
                                 'remarks' => $item['remarks'] ?? null,
                                 'updated_at' => now(),
-                                'created_at' => now()
+                                'created_at' => now(),
                             ]
                         );
                     }
                     $marked++;
                 } catch (\Exception $e) {
-                    $errors[] = "Failed for ID {$item['id']}: " . $e->getMessage();
+                    $errors[] = "Failed for ID {$item['id']}: ".$e->getMessage();
                 }
             }
 
@@ -432,22 +435,23 @@ class AttendanceController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => "Bulk attendance marked successfully",
+                'message' => 'Bulk attendance marked successfully',
                 'data' => [
                     'marked' => $marked,
                     'errors' => $errors,
                     'academic_year_id' => $academicYearId ? (int) $academicYearId : null,
                     'academic_year' => $academicYearName,
-                ]
+                ],
             ]);
 
         } catch (\Exception $e) {
             DB::rollBack();
-            Log::error('Error marking bulk attendance: ' . $e->getMessage());
+            Log::error('Error marking bulk attendance: '.$e->getMessage());
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error marking bulk attendance',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -473,26 +477,26 @@ class AttendanceController extends Controller
                     'teachers.employee_type'
                 )
                 ->first();
-            
-            if (!$teacher) {
+
+            if (! $teacher) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Teacher not found'
+                    'message' => 'Teacher not found',
                 ], 404);
             }
-            
+
             // OPTIMIZED: Build base query with filters
             $baseQuery = DB::table('teacher_attendance')
                 ->where('teacher_id', $teacherId);
-            
+
             if (request()->has('from_date')) {
                 $baseQuery->whereDate('date', '>=', request('from_date'));
             }
-            
+
             if (request()->has('to_date')) {
                 $baseQuery->whereDate('date', '<=', request('to_date'));
             }
-            
+
             // Get attendance records
             $attendance = (clone $baseQuery)->orderBy('date', 'desc')->get();
 
@@ -510,7 +514,7 @@ class AttendanceController extends Controller
 
             $totalDays = $summaryQuery->total_days ?? 0;
             $presentCount = $summaryQuery->present ?? 0;
-            
+
             $summary = [
                 'total_days' => (int) $totalDays,
                 'present' => (int) $presentCount,
@@ -518,23 +522,24 @@ class AttendanceController extends Controller
                 'late' => (int) ($summaryQuery->late ?? 0),
                 'leaves' => (int) ($summaryQuery->leaves ?? 0),
                 'half_day' => (int) ($summaryQuery->half_day ?? 0),
-                'percentage' => $totalDays > 0 
+                'percentage' => $totalDays > 0
                     ? round(($presentCount / $totalDays) * 100, 2)
-                    : 0
+                    : 0,
             ];
 
             return response()->json([
                 'success' => true,
                 'data' => $attendance,
                 'summary' => $summary,
-                'teacher' => $teacher // Include teacher info
+                'teacher' => $teacher, // Include teacher info
             ]);
         } catch (\Exception $e) {
-            Log::error('Error fetching teacher attendance: ' . $e->getMessage());
+            Log::error('Error fetching teacher attendance: '.$e->getMessage());
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error fetching teacher attendance',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -565,14 +570,14 @@ class AttendanceController extends Controller
                     'branches.name as branch_name'
                 )
                 ->first();
-            
-            if (!$student) {
+
+            if (! $student) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Student not found'
+                    'message' => 'Student not found',
                 ], 404);
             }
-            
+
             // Build base query with filters
             // Filter by academic_year_id when toolbar year is set (from X-Academic-Year-Id header)
             $baseQuery = DB::table('student_attendance')
@@ -587,15 +592,15 @@ class AttendanceController extends Controller
                     $baseQuery->where('student_attendance.academic_year', $academicYearName);
                 }
             }
-            
+
             if (request()->has('from_date')) {
                 $baseQuery->whereDate('date', '>=', request('from_date'));
             }
-            
+
             if (request()->has('to_date')) {
                 $baseQuery->whereDate('date', '<=', request('to_date'));
             }
-            
+
             // Get attendance records
             $attendance = (clone $baseQuery)->orderBy('date', 'desc')->get();
 
@@ -613,7 +618,7 @@ class AttendanceController extends Controller
 
             $totalDays = $summaryQuery->total_days ?? 0;
             $presentCount = $summaryQuery->present ?? 0;
-            
+
             $summary = [
                 'total_days' => (int) $totalDays,
                 'present' => (int) $presentCount,
@@ -621,23 +626,24 @@ class AttendanceController extends Controller
                 'late' => (int) ($summaryQuery->late ?? 0),
                 'leaves' => (int) ($summaryQuery->leaves ?? 0),
                 'half_day' => (int) ($summaryQuery->half_day ?? 0),
-                'percentage' => $totalDays > 0 
+                'percentage' => $totalDays > 0
                     ? round(($presentCount / $totalDays) * 100, 2)
-                    : 0
+                    : 0,
             ];
 
             return response()->json([
                 'success' => true,
                 'data' => $attendance,
                 'summary' => $summary,
-                'student' => $student // Include student info
+                'student' => $student, // Include student info
             ]);
         } catch (\Exception $e) {
-            Log::error('Error fetching student attendance: ' . $e->getMessage());
+            Log::error('Error fetching student attendance: '.$e->getMessage());
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error fetching student attendance',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -653,7 +659,7 @@ class AttendanceController extends Controller
                 ->whereNull('deleted_at')
                 ->first();
 
-            if (!$student) {
+            if (! $student) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Student not found',
@@ -688,7 +694,7 @@ class AttendanceController extends Controller
                 ],
             ]);
         } catch (\Exception $e) {
-            Log::error('Error fetching student attendance overview: ' . $e->getMessage());
+            Log::error('Error fetching student attendance overview: '.$e->getMessage());
 
             return response()->json([
                 'success' => false,
@@ -699,7 +705,7 @@ class AttendanceController extends Controller
     }
 
     /**
-     * @param \Illuminate\Database\Query\Builder $query
+     * @param  \Illuminate\Database\Query\Builder  $query
      */
     private function summarizeStudentAttendance($query): array
     {
@@ -731,7 +737,7 @@ class AttendanceController extends Controller
     }
 
     /**
-     * @param \Illuminate\Database\Query\Builder $query
+     * @param  \Illuminate\Database\Query\Builder  $query
      */
     private function getAttendanceAbsentByMonth($query): array
     {
@@ -773,14 +779,14 @@ class AttendanceController extends Controller
         try {
             $date = $request->get('date', date('Y-m-d'));
             $branchId = $this->getDefaultBranchId($request) ?? $request->user()?->branch_id;
-            if (!$branchId) {
+            if (! $branchId) {
                 $accessible = $this->getAccessibleBranchIds($request);
                 if (is_array($accessible) && count($accessible) === 1) {
                     $branchId = $accessible[0];
                 }
             }
             $branchId = $branchId ? (int) $branchId : 0;
-            if ($branchId <= 0 || !$this->canAccessBranch($request, $branchId)) {
+            if ($branchId <= 0 || ! $this->canAccessBranch($request, $branchId)) {
                 return response()->json(['success' => false, 'message' => 'Not allowed'], 403);
             }
 
@@ -791,18 +797,43 @@ class AttendanceController extends Controller
                 ->orderBy('section')
                 ->get(['id', 'grade', 'section', 'class_name', 'current_strength']);
 
-            $studentCounts = DB::table('students')
-                ->where('branch_id', $branchId)
-                ->whereNull('deleted_at')
-                ->where('student_status', 'Active')
-                ->select('grade', 'section', DB::raw('COUNT(*) as student_count'))
-                ->groupBy('grade', 'section')
-                ->get()
-                ->keyBy(fn ($row) => ($row->grade ?? '') . '|' . ($row->section ?? ''));
+            $academicYearId = $request->attributes->get('academic_year_id');
+            $yearId = $academicYearId ? (int) $academicYearId : null;
+            $useEnrollment = $yearId && StudentEnrollmentScope::hasEnrollments();
+            $studentCountsQuery = DB::table('students as s')
+                ->where('s.branch_id', $branchId)
+                ->whereNull('s.deleted_at')
+                ->where('s.student_status', 'Active');
 
-            $attendance = DB::table('student_attendance')
+            StudentEnrollmentScope::whereInClass($studentCountsQuery, 's', $yearId, null, null, 'se');
+
+            if ($useEnrollment) {
+                $gradeExpr = StudentEnrollmentScope::column('s', 'se', 'grade');
+                $sectionExpr = StudentEnrollmentScope::column('s', 'se', 'section');
+                $studentCounts = $studentCountsQuery
+                    ->select(
+                        DB::raw($gradeExpr.' as grade'),
+                        DB::raw($sectionExpr.' as section'),
+                        DB::raw('COUNT(*) as student_count')
+                    )
+                    ->groupBy(DB::raw($gradeExpr), DB::raw($sectionExpr))
+                    ->get();
+            } else {
+                $studentCounts = $studentCountsQuery
+                    ->select('s.grade', 's.section', DB::raw('COUNT(*) as student_count'))
+                    ->groupBy('s.grade', 's.section')
+                    ->get();
+            }
+
+            $studentCounts = $studentCounts->keyBy(fn ($row) => ($row->grade ?? '').'|'.($row->section ?? ''));
+
+            $attendanceQuery = DB::table('student_attendance')
                 ->where('branch_id', $branchId)
-                ->whereDate('date', $date)
+                ->whereDate('date', $date);
+            if ($academicYearId) {
+                $attendanceQuery->where('academic_year_id', (int) $academicYearId);
+            }
+            $attendance = $attendanceQuery
                 ->select(
                     'grade_level',
                     'section',
@@ -812,7 +843,7 @@ class AttendanceController extends Controller
                 )
                 ->groupBy('grade_level', 'section')
                 ->get()
-                ->keyBy(fn ($row) => ($row->grade_level ?? '') . '|' . ($row->section ?? ''));
+                ->keyBy(fn ($row) => ($row->grade_level ?? '').'|'.($row->section ?? ''));
 
             $notifyByClass = Notification::withoutTenantScope()
                 ->where('branch_id', $branchId)
@@ -822,11 +853,13 @@ class AttendanceController extends Controller
                 ->get(['id', 'metadata', 'sent_at', 'created_at'])
                 ->groupBy(function ($row) {
                     $meta = is_array($row->metadata) ? $row->metadata : [];
-                    return ($meta['grade'] ?? '') . '|' . ($meta['section'] ?? '');
+
+                    return ($meta['grade'] ?? '').'|'.($meta['section'] ?? '');
                 })
                 ->map(function ($group) {
                     $first = $group->first();
                     $meta = is_array($first->metadata) ? $first->metadata : [];
+
                     return [
                         'notify_sent' => true,
                         'notify_group_key' => $meta['group_key'] ?? null,
@@ -835,19 +868,21 @@ class AttendanceController extends Controller
                 });
 
             $enrich = function (array $row) use ($notifyByClass) {
-                $key = ($row['grade'] ?? '') . '|' . ($row['section'] ?? '');
+                $key = ($row['grade'] ?? '').'|'.($row['section'] ?? '');
                 $notify = $notifyByClass->get($key);
                 $row['notify_sent'] = (bool) ($notify['notify_sent'] ?? false);
                 $row['notify_group_key'] = $notify['notify_group_key'] ?? null;
                 $row['notify_sent_at'] = $notify['notify_sent_at'] ?? null;
+
                 return $row;
             };
 
             if ($classes->isEmpty()) {
                 $data = $studentCounts->map(function ($row) use ($attendance, $enrich) {
-                    $key = ($row->grade ?? '') . '|' . ($row->section ?? '');
+                    $key = ($row->grade ?? '').'|'.($row->section ?? '');
                     $marked = $attendance->get($key);
                     $created = $marked !== null && (int) $marked->marked > 0;
+
                     return $enrich([
                         'grade' => $row->grade,
                         'section' => $row->section,
@@ -860,7 +895,7 @@ class AttendanceController extends Controller
                 })->values();
             } else {
                 $data = $classes->map(function ($class) use ($studentCounts, $attendance, $enrich) {
-                    $key = ($class->grade ?? '') . '|' . ($class->section ?? '');
+                    $key = ($class->grade ?? '').'|'.($class->section ?? '');
                     $counts = $studentCounts->get($key);
                     $marked = $attendance->get($key);
                     $studentCount = (int) ($counts->student_count ?? $class->current_strength ?? 0);
@@ -888,6 +923,7 @@ class AttendanceController extends Controller
             ]);
         } catch (\Throwable $e) {
             Log::error('Class attendance status error', ['error' => $e->getMessage()]);
+
             return response()->json(['success' => false, 'message' => 'Failed to load class attendance status'], 500);
         }
     }
@@ -899,7 +935,7 @@ class AttendanceController extends Controller
     {
         try {
             $user = $request->user();
-            if (!$user || !in_array($user->role, ['BranchAdmin', 'SuperAdmin'], true)) {
+            if (! $user || ! in_array($user->role, ['BranchAdmin', 'SuperAdmin'], true)) {
                 return response()->json(['success' => false, 'message' => 'Not allowed'], 403);
             }
 
@@ -915,7 +951,7 @@ class AttendanceController extends Controller
 
             $branchId = $this->getDefaultBranchId($request) ?? $user->branch_id;
             $branchId = $branchId ? (int) $branchId : 0;
-            if ($branchId <= 0 || !$this->canManageBranch($request, $branchId)) {
+            if ($branchId <= 0 || ! $this->canManageBranch($request, $branchId)) {
                 return response()->json(['success' => false, 'message' => 'Not allowed'], 403);
             }
 
@@ -926,7 +962,7 @@ class AttendanceController extends Controller
                     'section' => strip_tags((string) ($c['section'] ?? '')),
                 ])
                 ->filter(fn ($c) => $c['grade'] !== '' && $c['section'] !== '')
-                ->unique(fn ($c) => $c['grade'] . '|' . $c['section'])
+                ->unique(fn ($c) => $c['grade'].'|'.$c['section'])
                 ->values()
                 ->all();
 
@@ -941,7 +977,7 @@ class AttendanceController extends Controller
                     ->where('section', $class['section'])
                     ->whereDate('date', $date)
                     ->exists();
-                if (!$exists) {
+                if (! $exists) {
                     return response()->json([
                         'success' => false,
                         'message' => "Attendance not created for Grade {$class['grade']} - {$class['section']}",
@@ -970,6 +1006,7 @@ class AttendanceController extends Controller
             ]);
         } catch (\Throwable $e) {
             Log::error('Attendance notify students error', ['error' => $e->getMessage()]);
+
             return response()->json(['success' => false, 'message' => 'Failed to send notifications'], 500);
         }
     }
@@ -981,7 +1018,7 @@ class AttendanceController extends Controller
     {
         try {
             $user = $request->user();
-            if (!$user || !in_array($user->role, ['BranchAdmin', 'SuperAdmin', 'Teacher'], true)) {
+            if (! $user || ! in_array($user->role, ['BranchAdmin', 'SuperAdmin', 'Teacher'], true)) {
                 return response()->json(['success' => false, 'message' => 'Not allowed'], 403);
             }
 
@@ -996,7 +1033,7 @@ class AttendanceController extends Controller
 
             $branchId = $this->getDefaultBranchId($request) ?? $user->branch_id;
             $branchId = $branchId ? (int) $branchId : 0;
-            if ($branchId <= 0 || !$this->canAccessBranch($request, $branchId)) {
+            if ($branchId <= 0 || ! $this->canAccessBranch($request, $branchId)) {
                 return response()->json(['success' => false, 'message' => 'Not allowed'], 403);
             }
 
@@ -1048,9 +1085,10 @@ class AttendanceController extends Controller
             $students = $attendanceRows->map(function ($row) use ($sentUserIds, $sentAtByUser) {
                 $uid = (int) ($row->user_id ?? 0);
                 $sent = $uid > 0 && isset($sentUserIds[$uid]);
+
                 return [
                     'user_id' => $uid > 0 ? $uid : null,
-                    'name' => trim(($row->first_name ?? '') . ' ' . ($row->last_name ?? '')),
+                    'name' => trim(($row->first_name ?? '').' '.($row->last_name ?? '')),
                     'roll_number' => $row->roll_number,
                     'status' => $row->status,
                     'sent' => $sent,
@@ -1072,6 +1110,7 @@ class AttendanceController extends Controller
             ]);
         } catch (\Throwable $e) {
             Log::error('Attendance notify receipts error', ['error' => $e->getMessage()]);
+
             return response()->json(['success' => false, 'message' => 'Failed to load notify status'], 500);
         }
     }
@@ -1126,15 +1165,16 @@ class AttendanceController extends Controller
                     'date' => $date,
                     'total' => (int) ($summaryQuery->total ?? 0),
                     'present' => (int) ($summaryQuery->present ?? 0),
-                    'absent' => (int) ($summaryQuery->absent ?? 0)
-                ]
+                    'absent' => (int) ($summaryQuery->absent ?? 0),
+                ],
             ]);
         } catch (\Exception $e) {
-            Log::error('Error fetching class attendance: ' . $e->getMessage());
+            Log::error('Error fetching class attendance: '.$e->getMessage());
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error fetching class attendance',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -1151,18 +1191,18 @@ class AttendanceController extends Controller
                 'to_date' => 'required|date|after_or_equal:from_date',
                 'branch_id' => 'nullable|exists:branches,id',
                 'grade' => 'nullable|string',
-                'section' => 'nullable|string'
+                'section' => 'nullable|string',
             ]);
 
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
             $type = $request->type;
-            $table = $type . '_attendance';
+            $table = $type.'_attendance';
 
             $query = DB::table($table)
                 ->whereBetween('date', [$request->from_date, $request->to_date])
@@ -1214,7 +1254,7 @@ class AttendanceController extends Controller
                 'late' => (int) ($summaryData->late ?? 0),
                 'percentage' => $totalRecords > 0
                     ? round(($presentCount / $totalRecords) * 100, 2)
-                    : 0
+                    : 0,
             ];
 
             return response()->json([
@@ -1224,15 +1264,16 @@ class AttendanceController extends Controller
                 'filters' => [
                     'from_date' => $request->from_date,
                     'to_date' => $request->to_date,
-                    'type' => $type
-                ]
+                    'type' => $type,
+                ],
             ]);
         } catch (\Exception $e) {
-            Log::error('Error generating attendance report: ' . $e->getMessage());
+            Log::error('Error generating attendance report: '.$e->getMessage());
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error generating report',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -1279,7 +1320,7 @@ class AttendanceController extends Controller
                 'leaves' => (int) ($summaryQuery->leaves ?? 0),
                 'percentage' => $totalDays > 0
                     ? round(($presentCount / $totalDays) * 100, 2)
-                    : 0
+                    : 0,
             ];
 
             return response()->json([
@@ -1288,27 +1329,34 @@ class AttendanceController extends Controller
                 'summary' => $summary,
                 'period' => [
                     'from' => $from_date,
-                    'to' => $to_date
-                ]
+                    'to' => $to_date,
+                ],
             ]);
         } catch (\Exception $e) {
-            Log::error('Error generating student report: ' . $e->getMessage());
+            Log::error('Error generating student report: '.$e->getMessage());
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error generating report',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
 
     // Dummy methods for resource routes
-    public function show($id) {
+    public function show($id)
+    {
         try {
             // Get single attendance record by ID
             $attendance = DB::table('student_attendance')
                 ->join('students', 'student_attendance.student_id', '=', 'students.user_id')
                 ->join('users', 'students.user_id', '=', 'users.id')
-                ->leftJoin('grades', 'students.grade', '=', 'grades.value')
+                ->leftJoin('grades', function ($join) {
+                    $join->on('grades.value', '=', 'student_attendance.grade_level');
+                    if (\Illuminate\Support\Facades\Schema::hasColumn('grades', 'branch_id')) {
+                        $join->on('grades.branch_id', '=', 'student_attendance.branch_id');
+                    }
+                })
                 ->where('student_attendance.id', $id)
                 ->select(
                     'student_attendance.*',
@@ -1316,41 +1364,42 @@ class AttendanceController extends Controller
                     'users.last_name',
                     'users.email',
                     'students.admission_number',
-                    'students.grade',
-                    'grades.label as grade_label',
-                    'students.section'
+                    'student_attendance.grade_level as grade',
+                    'grades.label as grade_label'
                 )
                 ->first();
-            
-            if (!$attendance) {
+
+            if (! $attendance) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Attendance record not found'
+                    'message' => 'Attendance record not found',
                 ], 404);
             }
-            
+
             return response()->json([
                 'success' => true,
-                'data' => $attendance
+                'data' => $attendance,
             ]);
         } catch (\Exception $e) {
-            Log::error('Error fetching attendance record: ' . $e->getMessage());
+            Log::error('Error fetching attendance record: '.$e->getMessage());
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error fetching attendance record',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
 
-    public function update(Request $request, $id) {
+    public function update(Request $request, $id)
+    {
         try {
             // Validate the request
             $validated = $request->validate([
                 'status' => 'required|in:Present,Absent,Late,Half-Day,Sick Leave,Leave',
                 'remarks' => 'nullable|string|max:500',
                 'date' => 'nullable|date',
-                'marked_by' => 'nullable|string|max:255'
+                'marked_by' => 'nullable|string|max:255',
             ]);
 
             // Check if attendance record exists
@@ -1358,10 +1407,10 @@ class AttendanceController extends Controller
                 ->where('id', $id)
                 ->first();
 
-            if (!$attendance) {
+            if (! $attendance) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Attendance record not found'
+                    'message' => 'Attendance record not found',
                 ], 404);
             }
 
@@ -1369,7 +1418,7 @@ class AttendanceController extends Controller
             $updateData = [
                 'status' => $validated['status'],
                 'remarks' => $validated['remarks'] ?? null,
-                'updated_at' => now()
+                'updated_at' => now(),
             ];
 
             // Add optional fields if provided
@@ -1390,7 +1439,12 @@ class AttendanceController extends Controller
             $updatedAttendance = DB::table('student_attendance')
                 ->join('students', 'student_attendance.student_id', '=', 'students.user_id')
                 ->join('users', 'students.user_id', '=', 'users.id')
-                ->leftJoin('grades', 'students.grade', '=', 'grades.value')
+                ->leftJoin('grades', function ($join) {
+                    $join->on('grades.value', '=', 'student_attendance.grade_level');
+                    if (\Illuminate\Support\Facades\Schema::hasColumn('grades', 'branch_id')) {
+                        $join->on('grades.branch_id', '=', 'student_attendance.branch_id');
+                    }
+                })
                 ->where('student_attendance.id', $id)
                 ->select(
                     'student_attendance.*',
@@ -1398,45 +1452,45 @@ class AttendanceController extends Controller
                     'users.last_name',
                     'users.email',
                     'students.admission_number',
-                    'students.grade',
-                    'grades.label as grade_label',
-                    'students.section'
+                    'student_attendance.grade_level as grade',
+                    'grades.label as grade_label'
                 )
                 ->first();
 
             Log::info('Attendance updated successfully', [
                 'id' => $id,
                 'status' => $validated['status'],
-                'updated_by' => auth()->user()->email ?? 'system'
+                'updated_by' => auth()->user()->email ?? 'system',
             ]);
 
             return response()->json([
                 'success' => true,
                 'message' => 'Attendance updated successfully',
-                'data' => $updatedAttendance
+                'data' => $updatedAttendance,
             ]);
 
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Validation failed',
-                'errors' => $e->errors()
+                'errors' => $e->errors(),
             ], 422);
         } catch (\Exception $e) {
-            Log::error('Error updating attendance: ' . $e->getMessage(), [
+            Log::error('Error updating attendance: '.$e->getMessage(), [
                 'id' => $id,
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
             ]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error updating attendance',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
 
-    public function destroy($id) {
+    public function destroy($id)
+    {
         return response()->json(['message' => 'Attendance deletion not allowed'], 400);
     }
 
@@ -1457,7 +1511,7 @@ class AttendanceController extends Controller
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
@@ -1472,7 +1526,7 @@ class AttendanceController extends Controller
             $attendanceRecords = $query->get();
 
             // Export based on format
-            return match($format) {
+            return match ($format) {
                 'excel' => $this->exportExcel($attendanceRecords, $type, $columns),
                 'pdf' => $this->exportPdf($attendanceRecords, $type, $columns),
                 'csv' => $this->exportCsv($attendanceRecords, $type, $columns),
@@ -1480,11 +1534,11 @@ class AttendanceController extends Controller
 
         } catch (\Exception $e) {
             Log::error('Export attendance error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to export attendance',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -1500,17 +1554,21 @@ class AttendanceController extends Controller
             $query = DB::table('student_attendance')
                 ->join('students', 'student_attendance.student_id', '=', 'students.user_id')
                 ->join('users', 'students.user_id', '=', 'users.id')
-                ->leftJoin('grades', 'students.grade', '=', 'grades.value')
-                ->whereNull('students.deleted_at') // ✅ ONLY ACTIVE STUDENTS
+                ->leftJoin('grades', function ($join) {
+                    $join->on('grades.value', '=', 'student_attendance.grade_level');
+                    if (\Illuminate\Support\Facades\Schema::hasColumn('grades', 'branch_id')) {
+                        $join->on('grades.branch_id', '=', 'student_attendance.branch_id');
+                    }
+                })
+                ->whereNull('students.deleted_at')
                 ->select(
                     'student_attendance.*',
                     'users.first_name',
                     'users.last_name',
                     'users.email',
                     'students.admission_number',
-                    'students.grade',
-                    'grades.label as grade_label',
-                    'students.section'
+                    'student_attendance.grade_level as grade',
+                    'grades.label as grade_label'
                 );
         } else {
             $query = DB::table('teacher_attendance')
@@ -1527,14 +1585,14 @@ class AttendanceController extends Controller
         }
 
         if ($academicYearId) {
-            $query->where($type . '_attendance.academic_year_id', (int) $academicYearId);
+            $query->where($type.'_attendance.academic_year_id', (int) $academicYearId);
         }
 
         // Apply branch filtering
         $accessibleBranchIds = $this->getAccessibleBranchIds($request);
         if ($accessibleBranchIds !== 'all') {
-            if (!empty($accessibleBranchIds)) {
-                $query->whereIn($type . '_attendance.branch_id', $accessibleBranchIds);
+            if (! empty($accessibleBranchIds)) {
+                $query->whereIn($type.'_attendance.branch_id', $accessibleBranchIds);
             } else {
                 $query->whereRaw('1 = 0');
             }
@@ -1542,42 +1600,42 @@ class AttendanceController extends Controller
 
         // Apply filters
         if ($request->has('branch_id') && $accessibleBranchIds === 'all') {
-            $query->where($type . '_attendance.branch_id', $request->branch_id);
+            $query->where($type.'_attendance.branch_id', $request->branch_id);
         }
 
         if ($request->has('date')) {
-            $query->whereDate($type . '_attendance.date', $request->date);
+            $query->whereDate($type.'_attendance.date', $request->date);
         }
 
         if ($request->has('from_date')) {
-            $query->whereDate($type . '_attendance.date', '>=', $request->from_date);
+            $query->whereDate($type.'_attendance.date', '>=', $request->from_date);
         }
 
         if ($request->has('to_date')) {
-            $query->whereDate($type . '_attendance.date', '<=', $request->to_date);
+            $query->whereDate($type.'_attendance.date', '<=', $request->to_date);
         }
 
         if ($request->has('status')) {
-            $query->where($type . '_attendance.status', $request->status);
+            $query->where($type.'_attendance.status', $request->status);
         }
 
         if ($type === 'student') {
-            if ($request->has('grade')) {
-                $query->where('students.grade', $request->grade);
+            if ($request->filled('grade')) {
+                $query->where('student_attendance.grade_level', $request->grade);
             }
-            if ($request->has('section')) {
-                $query->where('students.section', $request->section);
+            if ($request->filled('section')) {
+                $query->where('student_attendance.section', $request->section);
             }
         }
 
         // OPTIMIZED Search filter - prefix search for better index usage
-        if ($request->has('search') && !empty($request->search)) {
+        if ($request->has('search') && ! empty($request->search)) {
             $search = strip_tags($request->search);
-            $query->where(function($q) use ($search, $type) {
+            $query->where(function ($q) use ($search, $type) {
                 $q->where('users.first_name', 'like', "{$search}%")
-                  ->orWhere('users.last_name', 'like', "{$search}%")
-                  ->orWhere('users.email', 'like', "{$search}%");
-                
+                    ->orWhere('users.last_name', 'like', "{$search}%")
+                    ->orWhere('users.email', 'like', "{$search}%");
+
                 if ($type === 'student') {
                     $q->orWhere('students.admission_number', 'like', "{$search}%");
                 }
@@ -1595,7 +1653,7 @@ class AttendanceController extends Controller
         $export = new AttendanceExport(collect($data), $type, $columns);
         $module = $type === 'student' ? 'student_attendance' : 'teacher_attendance';
         $filename = (new ExportService($module))->generateFilename('xlsx');
-        
+
         return Excel::download($export, $filename);
     }
 
@@ -1606,19 +1664,19 @@ class AttendanceController extends Controller
     {
         $module = $type === 'student' ? 'student_attendance' : 'teacher_attendance';
         $pdfService = new PdfExportService($module);
-        
+
         if ($columns) {
             $pdfService->setColumns($columns);
         }
-        
+
         // Use A3 paper size for attendance to accommodate more columns
         $pdfService->setPaperSize('a3');
         $pdfService->setOrientation('landscape');
-        
+
         $title = $type === 'student' ? 'Student Attendance Report' : 'Teacher Attendance Report';
         $pdf = $pdfService->generate(collect($data), $title);
         $filename = (new ExportService($module))->generateFilename('pdf');
-        
+
         return $pdf->download($filename);
     }
 
@@ -1629,13 +1687,13 @@ class AttendanceController extends Controller
     {
         $module = $type === 'student' ? 'student_attendance' : 'teacher_attendance';
         $csvService = new CsvExportService($module);
-        
+
         if ($columns) {
             $csvService->setColumns($columns);
         }
-        
+
         $filename = (new ExportService($module))->generateFilename('csv');
-        
+
         return $csvService->generate(collect($data), $filename);
     }
 
@@ -1652,26 +1710,27 @@ class AttendanceController extends Controller
             $fromDate = $dateRange['from'];
             $toDate = $dateRange['to'];
             $period = $request->get('period', 'today');
-            
+
             Log::info('Attendance Dashboard Request', [
                 'type' => $type,
                 'period' => $period,
                 'from_date' => $fromDate,
                 'to_date' => $toDate,
-                'filters' => $request->all()
+                'filters' => $request->all(),
             ]);
-            
+
             if ($type === 'student') {
                 return $this->getStudentAttendanceDashboard($request, $fromDate, $toDate, $period);
             } else {
                 return $this->getTeacherAttendanceDashboard($request, $fromDate, $toDate, $period);
             }
         } catch (\Exception $e) {
-            Log::error('Error fetching attendance dashboard: ' . $e->getMessage());
+            Log::error('Error fetching attendance dashboard: '.$e->getMessage());
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error fetching attendance dashboard',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -1696,16 +1755,16 @@ class AttendanceController extends Controller
         // Apply school filtering (only if school_id is set and not null)
         $schoolId = $this->getCurrentSchoolId($request);
         if ($schoolId) {
-            $baseQuery->where(function($query) use ($schoolId) {
+            $baseQuery->where(function ($query) use ($schoolId) {
                 $query->where('sa.school_id', $schoolId)
-                      ->orWhereNull('sa.school_id'); // Include records without school_id
+                    ->orWhereNull('sa.school_id'); // Include records without school_id
             });
         }
 
         // Apply branch filtering
         $accessibleBranchIds = $this->getAccessibleBranchIds($request);
         if ($accessibleBranchIds !== 'all') {
-            if (!empty($accessibleBranchIds)) {
+            if (! empty($accessibleBranchIds)) {
                 $baseQuery->whereIn('sa.branch_id', $accessibleBranchIds);
             } else {
                 $baseQuery->whereRaw('1 = 0');
@@ -1722,9 +1781,9 @@ class AttendanceController extends Controller
             ->join('students as s', 'sa.student_id', '=', 's.user_id')
             ->join('users as u', 's.user_id', '=', 'u.id')
             ->leftJoin('grades as g', function ($join) {
-                $join->on('g.value', '=', 's.grade');
+                $join->on('g.value', '=', 'sa.grade_level');
                 if (\Illuminate\Support\Facades\Schema::hasColumn('grades', 'branch_id')) {
-                    $join->on('g.branch_id', '=', 's.branch_id');
+                    $join->on('g.branch_id', '=', 'sa.branch_id');
                 }
             })
             ->whereBetween('sa.date', [$fromDate, $toDate])
@@ -1738,14 +1797,14 @@ class AttendanceController extends Controller
 
         // Apply same filters to breakdown query
         if ($schoolId) {
-            $breakdownQuery->where(function($query) use ($schoolId) {
+            $breakdownQuery->where(function ($query) use ($schoolId) {
                 $query->where('sa.school_id', $schoolId)
-                      ->orWhereNull('sa.school_id');
+                    ->orWhereNull('sa.school_id');
             });
         }
 
         if ($accessibleBranchIds !== 'all') {
-            if (!empty($accessibleBranchIds)) {
+            if (! empty($accessibleBranchIds)) {
                 $breakdownQuery->whereIn('sa.branch_id', $accessibleBranchIds);
             } else {
                 $breakdownQuery->whereRaw('1 = 0');
@@ -1756,14 +1815,13 @@ class AttendanceController extends Controller
             $breakdownQuery->where('sa.branch_id', $request->branch_id);
         }
 
-        // Filter by grade (only apply to breakdownQuery since it has the join)
+        // Class on the attendance row, not the student's class after promotion.
         if ($request->has('grade') && $request->grade) {
-            $breakdownQuery->where('s.grade', $request->grade);
+            $breakdownQuery->where('sa.grade_level', $request->grade);
         }
 
-        // Filter by section (only apply to breakdownQuery since it has the join)
         if ($request->has('section') && $request->section) {
-            $breakdownQuery->where('s.section', $request->section);
+            $breakdownQuery->where('sa.section', $request->section);
         }
 
         // Determine which query to use for summary based on filters
@@ -1807,22 +1865,22 @@ class AttendanceController extends Controller
             )
             ->groupBy('sa.status')
             ->get()
-            ->map(function($item) use ($totalCount) {
+            ->map(function ($item) use ($totalCount) {
                 $count = (int) $item->count;
                 $percentage = $totalCount > 0 ? round(($count / $totalCount) * 100, 2) : 0;
-                
+
                 return [
                     'status' => $item->status,
                     'count' => $count,
-                    'percentage' => $percentage
+                    'percentage' => $percentage,
                 ];
             });
 
         // Get breakdown by grade (one row per grade; label from any matching grade row)
         $byGrade = (clone $breakdownQuery)
             ->select(
-                's.grade',
-                DB::raw('COALESCE(MAX(g.label), CONCAT("Grade ", s.grade)) as grade_label'),
+                'sa.grade_level as grade',
+                DB::raw('COALESCE(MAX(g.label), CONCAT("Grade ", sa.grade_level)) as grade_label'),
                 DB::raw('COUNT(*) as total'),
                 DB::raw('SUM(CASE WHEN sa.status = "Present" THEN 1 ELSE 0 END) as present'),
                 DB::raw('SUM(CASE WHEN sa.status = "Absent" THEN 1 ELSE 0 END) as absent'),
@@ -1831,11 +1889,11 @@ class AttendanceController extends Controller
                 DB::raw('SUM(CASE WHEN sa.status = "Leave" THEN 1 ELSE 0 END) as leave_count'),
                 DB::raw('COUNT(DISTINCT sa.student_id) as student_count')
             )
-            ->whereNotNull('s.grade')
-            ->groupBy('s.grade')
-            ->orderBy('s.grade')
+            ->whereNotNull('sa.grade_level')
+            ->groupBy('sa.grade_level')
+            ->orderBy('sa.grade_level')
             ->get()
-            ->map(function($item) {
+            ->map(function ($item) {
                 $total = (int) $item->total;
                 $present = (int) $item->present;
                 $attendancePercentage = $total > 0 ? round(($present / $total) * 100, 2) : 0;
@@ -1850,16 +1908,16 @@ class AttendanceController extends Controller
                     'sick_leave' => (int) $item->sick_leave,
                     'leave' => (int) $item->leave_count,
                     'student_count' => (int) $item->student_count,
-                    'attendance_percentage' => $attendancePercentage
+                    'attendance_percentage' => $attendancePercentage,
                 ];
             });
 
         // Get breakdown by section (one row per grade+section; label from any matching grade row)
         $bySection = (clone $breakdownQuery)
             ->select(
-                's.grade',
-                DB::raw('COALESCE(MAX(g.label), CONCAT("Grade ", s.grade)) as grade_label'),
-                's.section',
+                'sa.grade_level as grade',
+                DB::raw('COALESCE(MAX(g.label), CONCAT("Grade ", sa.grade_level)) as grade_label'),
+                'sa.section',
                 DB::raw('COUNT(*) as total'),
                 DB::raw('SUM(CASE WHEN sa.status = "Present" THEN 1 ELSE 0 END) as present'),
                 DB::raw('SUM(CASE WHEN sa.status = "Absent" THEN 1 ELSE 0 END) as absent'),
@@ -1868,13 +1926,13 @@ class AttendanceController extends Controller
                 DB::raw('SUM(CASE WHEN sa.status = "Leave" THEN 1 ELSE 0 END) as leave_count'),
                 DB::raw('COUNT(DISTINCT sa.student_id) as student_count')
             )
-            ->whereNotNull('s.grade')
-            ->whereNotNull('s.section')
-            ->groupBy('s.grade', 's.section')
-            ->orderBy('s.grade')
-            ->orderBy('s.section')
+            ->whereNotNull('sa.grade_level')
+            ->whereNotNull('sa.section')
+            ->groupBy('sa.grade_level', 'sa.section')
+            ->orderBy('sa.grade_level')
+            ->orderBy('sa.section')
             ->get()
-            ->map(function($item) {
+            ->map(function ($item) {
                 $total = (int) $item->total;
                 $present = (int) $item->present;
                 $attendancePercentage = $total > 0 ? round(($present / $total) * 100, 2) : 0;
@@ -1890,7 +1948,7 @@ class AttendanceController extends Controller
                     'sick_leave' => (int) $item->sick_leave,
                     'leave' => (int) $item->leave_count,
                     'student_count' => (int) $item->student_count,
-                    'attendance_percentage' => $attendancePercentage
+                    'attendance_percentage' => $attendancePercentage,
                 ];
             });
 
@@ -1902,9 +1960,7 @@ class AttendanceController extends Controller
             $studentListQuery = DB::table('students as s')
                 ->join('users as u', 's.user_id', '=', 'u.id')
                 ->whereNull('s.deleted_at')
-                ->whereNull('u.deleted_at')
-                ->where('s.grade', $grade)
-                ->where('s.section', $section);
+                ->whereNull('u.deleted_at');
 
             if ($schoolId) {
                 $studentListQuery->where(function ($q) use ($schoolId) {
@@ -1921,6 +1977,14 @@ class AttendanceController extends Controller
                     $studentListQuery->whereRaw('1 = 0');
                 }
             }
+
+            StudentEnrollmentScope::whereInClassOrMarkedAttendance(
+                $studentListQuery,
+                's',
+                $academicYearId ? (int) $academicYearId : null,
+                (string) $grade,
+                (string) $section
+            );
 
             $allStudents = $studentListQuery
                 ->select(
@@ -2004,7 +2068,7 @@ class AttendanceController extends Controller
                     ->groupBy('student_id');
             }
 
-            $studentList = $allStudents->map(function ($student) use ($allAttendanceRecords, $filteredAttendanceRecords, $request) {
+            $studentList = $allStudents->map(function ($student) use ($allAttendanceRecords, $filteredAttendanceRecords) {
                 $sid = $student->student_id;
                 $allRecords = $allAttendanceRecords->get($sid) ?? collect();
                 $filteredRecords = $filteredAttendanceRecords->get($sid) ?? collect();
@@ -2070,8 +2134,8 @@ class AttendanceController extends Controller
                 'summary' => $summary,
                 'by_status' => $byStatus,
                 'by_grade' => $byGrade,
-                'by_section' => $bySection
-            ]
+                'by_section' => $bySection,
+            ],
         ]);
     }
 
@@ -2095,16 +2159,16 @@ class AttendanceController extends Controller
         // Apply school filtering (only if school_id is set and not null)
         $schoolId = $this->getCurrentSchoolId($request);
         if ($schoolId) {
-            $baseQuery->where(function($query) use ($schoolId) {
+            $baseQuery->where(function ($query) use ($schoolId) {
                 $query->where('ta.school_id', $schoolId)
-                      ->orWhereNull('ta.school_id'); // Include records without school_id
+                    ->orWhereNull('ta.school_id'); // Include records without school_id
             });
         }
 
         // Apply branch filtering
         $accessibleBranchIds = $this->getAccessibleBranchIds($request);
         if ($accessibleBranchIds !== 'all') {
-            if (!empty($accessibleBranchIds)) {
+            if (! empty($accessibleBranchIds)) {
                 $baseQuery->whereIn('ta.branch_id', $accessibleBranchIds);
             } else {
                 $baseQuery->whereRaw('1 = 0');
@@ -2131,14 +2195,14 @@ class AttendanceController extends Controller
 
         // Apply same filters to breakdown query
         if ($schoolId) {
-            $breakdownQuery->where(function($query) use ($schoolId) {
+            $breakdownQuery->where(function ($query) use ($schoolId) {
                 $query->where('ta.school_id', $schoolId)
-                      ->orWhereNull('ta.school_id');
+                    ->orWhereNull('ta.school_id');
             });
         }
 
         if ($accessibleBranchIds !== 'all') {
-            if (!empty($accessibleBranchIds)) {
+            if (! empty($accessibleBranchIds)) {
                 $breakdownQuery->whereIn('ta.branch_id', $accessibleBranchIds);
             } else {
                 $breakdownQuery->whereRaw('1 = 0');
@@ -2183,14 +2247,14 @@ class AttendanceController extends Controller
             )
             ->groupBy('ta.status')
             ->get()
-            ->map(function($item) use ($totalCount) {
+            ->map(function ($item) use ($totalCount) {
                 $count = (int) $item->count;
                 $percentage = $totalCount > 0 ? round(($count / $totalCount) * 100, 2) : 0;
-                
+
                 return [
                     'status' => $item->status,
                     'count' => $count,
-                    'percentage' => $percentage
+                    'percentage' => $percentage,
                 ];
             });
 
@@ -2207,11 +2271,11 @@ class AttendanceController extends Controller
             ->groupBy('d.id', 'd.name')
             ->orderBy('d.name')
             ->get()
-            ->map(function($item) {
+            ->map(function ($item) {
                 $total = (int) $item->total;
                 $present = (int) $item->present;
                 $attendancePercentage = $total > 0 ? round(($present / $total) * 100, 2) : 0;
-                
+
                 return [
                     'department_id' => $item->department_id,
                     'department_name' => $item->department_name,
@@ -2219,7 +2283,7 @@ class AttendanceController extends Controller
                     'present' => $present,
                     'absent' => (int) $item->absent,
                     'teacher_count' => (int) $item->teacher_count,
-                    'attendance_percentage' => $attendancePercentage
+                    'attendance_percentage' => $attendancePercentage,
                 ];
             });
 
@@ -2240,7 +2304,7 @@ class AttendanceController extends Controller
             if ($requestedBranchId) {
                 $teacherListQuery->where('t.branch_id', (int) $requestedBranchId);
             } elseif ($accessibleBranchIds !== 'all') {
-                if (!empty($accessibleBranchIds)) {
+                if (! empty($accessibleBranchIds)) {
                     $teacherListQuery->whereIn('t.branch_id', $accessibleBranchIds);
                 } else {
                     // No accessible branches -> return empty
@@ -2251,9 +2315,9 @@ class AttendanceController extends Controller
             // Apply school filtering if needed
             $schoolId = $this->getCurrentSchoolId($request);
             if ($schoolId) {
-                $teacherListQuery->where(function($query) use ($schoolId) {
+                $teacherListQuery->where(function ($query) use ($schoolId) {
                     $query->where('t.school_id', $schoolId)
-                          ->orWhereNull('t.school_id');
+                        ->orWhereNull('t.school_id');
                 });
             }
 
@@ -2281,16 +2345,16 @@ class AttendanceController extends Controller
 
             // Apply school filtering
             if ($schoolId) {
-                $allAttendanceQuery->where(function($query) use ($schoolId) {
+                $allAttendanceQuery->where(function ($query) use ($schoolId) {
                     $query->where('ta.school_id', $schoolId)
-                          ->orWhereNull('ta.school_id');
+                        ->orWhereNull('ta.school_id');
                 });
             }
 
             // Apply branch filter when a branch_id is explicitly provided
             if ($requestedBranchId) {
                 $allAttendanceQuery->where('ta.branch_id', (int) $requestedBranchId);
-            } elseif ($accessibleBranchIds !== 'all' && !empty($accessibleBranchIds)) {
+            } elseif ($accessibleBranchIds !== 'all' && ! empty($accessibleBranchIds)) {
                 $allAttendanceQuery->whereIn('ta.branch_id', $accessibleBranchIds);
             }
 
@@ -2305,7 +2369,7 @@ class AttendanceController extends Controller
             if ($request->has('status') && $request->status) {
                 $filteredAttendanceQuery = (clone $allAttendanceQuery)
                     ->where('ta.status', $request->status);
-                
+
                 $filteredAttendanceRecords = $filteredAttendanceQuery
                     ->select('ta.teacher_id', 'ta.status', 'ta.date')
                     ->get()
@@ -2313,15 +2377,15 @@ class AttendanceController extends Controller
             }
 
             // Combine teachers with their attendance stats
-            $teacherList = $allTeachers->map(function($teacher) use ($allAttendanceRecords, $filteredAttendanceRecords, $request) {
+            $teacherList = $allTeachers->map(function ($teacher) use ($allAttendanceRecords, $filteredAttendanceRecords) {
                 $teacherId = $teacher->teacher_id;
-                
+
                 // Use all records for stats calculation (to show complete stats)
                 $allRecords = $allAttendanceRecords->get($teacherId) ?? collect();
-                
+
                 // Use filtered records to determine if teacher should be shown
                 $filteredRecords = $filteredAttendanceRecords->get($teacherId) ?? collect();
-                
+
                 // Calculate stats from all records
                 $totalRecords = $allRecords->count();
                 $presentCount = $allRecords->where('status', 'Present')->count();
@@ -2353,30 +2417,32 @@ class AttendanceController extends Controller
                     'attendance_percentage' => $totalRecords > 0 ? round(($presentCount / $totalRecords) * 100, 2) : 0,
                     'latest_status' => $latestRecord ? $latestRecord->status : 'N/A',
                     'latest_date' => $latestRecord ? $latestRecord->date : null,
-                    '_has_filtered_status' => $filteredRecords->count() > 0 // Flag to filter by
+                    '_has_filtered_status' => $filteredRecords->count() > 0, // Flag to filter by
                 ];
             })
-            ->filter(function($teacher) use ($request) {
-                // If status filter is applied, only show teachers who have at least one record with that status
-                if ($request->has('status') && $request->status) {
-                    return $teacher['_has_filtered_status'] === true;
-                }
-                // Otherwise show all teachers (even with 0 records)
-                return true;
-            })
-            ->map(function($teacher) {
-                // Remove the internal flag before returning
-                unset($teacher['_has_filtered_status']);
-                return $teacher;
-            })
-            ->values();
+                ->filter(function ($teacher) use ($request) {
+                    // If status filter is applied, only show teachers who have at least one record with that status
+                    if ($request->has('status') && $request->status) {
+                        return $teacher['_has_filtered_status'] === true;
+                    }
+
+                    // Otherwise show all teachers (even with 0 records)
+                    return true;
+                })
+                ->map(function ($teacher) {
+                    // Remove the internal flag before returning
+                    unset($teacher['_has_filtered_status']);
+
+                    return $teacher;
+                })
+                ->values();
 
             return response()->json([
                 'success' => true,
                 'data' => [
                     'summary' => $summary,
-                    'teachers' => $teacherList
-                ]
+                    'teachers' => $teacherList,
+                ],
             ]);
         }
 
@@ -2385,8 +2451,8 @@ class AttendanceController extends Controller
             'data' => [
                 'summary' => $summary,
                 'by_status' => $byStatus,
-                'by_department' => $byDepartment
-            ]
+                'by_department' => $byDepartment,
+            ],
         ]);
     }
 
@@ -2396,36 +2462,36 @@ class AttendanceController extends Controller
     private function parseAttendanceDateRange(Request $request): array
     {
         $period = $request->get('period', 'today');
-        
+
         switch ($period) {
             case 'today':
                 return [
                     'from' => Carbon::today()->toDateString(),
-                    'to' => Carbon::today()->toDateString()
+                    'to' => Carbon::today()->toDateString(),
                 ];
-            
+
             case 'week':
                 return [
                     'from' => Carbon::now()->startOfWeek()->toDateString(),
-                    'to' => Carbon::now()->endOfWeek()->toDateString()
+                    'to' => Carbon::now()->endOfWeek()->toDateString(),
                 ];
-            
+
             case 'month':
                 return [
                     'from' => Carbon::now()->startOfMonth()->toDateString(),
-                    'to' => Carbon::now()->endOfMonth()->toDateString()
+                    'to' => Carbon::now()->endOfMonth()->toDateString(),
                 ];
-            
+
             case 'custom':
                 return [
                     'from' => $request->get('from_date', Carbon::today()->toDateString()),
-                    'to' => $request->get('to_date', Carbon::today()->toDateString())
+                    'to' => $request->get('to_date', Carbon::today()->toDateString()),
                 ];
-            
+
             default:
                 return [
                     'from' => Carbon::today()->toDateString(),
-                    'to' => Carbon::today()->toDateString()
+                    'to' => Carbon::today()->toDateString(),
                 ];
         }
     }

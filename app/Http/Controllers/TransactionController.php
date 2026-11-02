@@ -2,19 +2,19 @@
 
 namespace App\Http\Controllers;
 
-use App\Http\Traits\PaginatesAndSorts;
-use App\Models\Transaction;
-use App\Models\SalaryPayment;
 use App\Exports\TransactionsExport;
-use App\Services\PdfExportService;
+use App\Http\Traits\PaginatesAndSorts;
+use App\Models\SalaryPayment;
+use App\Models\Transaction;
 use App\Services\CsvExportService;
 use App\Services\ExportService;
-use Maatwebsite\Excel\Facades\Excel;
+use App\Services\PdfExportService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Validator;
+use Maatwebsite\Excel\Facades\Excel;
 
 class TransactionController extends Controller
 {
@@ -65,18 +65,16 @@ class TransactionController extends Controller
             }
 
             // Filter by academic year (via category) - use join for better performance than whereHas
-            $academicYearId = $request->query('academic_year_id')
-                ?? $request->header('X-Academic-Year-Id');
-            $academicYearId = ($academicYearId !== null && $academicYearId !== '') ? (int) $academicYearId : null;
+            [$academicYearId] = $this->resolveAcademicYearFromRequest($request);
             if ($academicYearId != null) {
                 $query->join('account_categories', function ($j) use ($academicYearId) {
-                        $j->on('account_categories.id', '=', 'transactions.category_id')
-                            ->whereNull('account_categories.deleted_at')
-                            ->where(function ($q) use ($academicYearId) {
-                                $q->whereNull('account_categories.academic_year_id')
-                                    ->orWhere('account_categories.academic_year_id', $academicYearId);
-                            });
-                    })
+                    $j->on('account_categories.id', '=', 'transactions.category_id')
+                        ->whereNull('account_categories.deleted_at')
+                        ->where(function ($q) use ($academicYearId) {
+                            $q->whereNull('account_categories.academic_year_id')
+                                ->orWhere('account_categories.academic_year_id', $academicYearId);
+                        });
+                })
                     ->select('transactions.*');
             }
 
@@ -92,7 +90,7 @@ class TransactionController extends Controller
             if ($request->filled('search')) {
                 $search = trim(strip_tags($request->search));
                 if ($search !== '') {
-                    $like = '%' . addcslashes($search, '%_\\') . '%';
+                    $like = '%'.addcslashes($search, '%_\\').'%';
 
                     $query->where(function ($q) use ($search, $like) {
                         $q->where('transactions.transaction_number', 'like', $like)
@@ -123,7 +121,7 @@ class TransactionController extends Controller
                             }
                         }
 
-                        $q->orWhereRaw('CAST(transactions.amount AS CHAR(64)) LIKE ?', ['%' . addcslashes($search, '%_\\') . '%']);
+                        $q->orWhereRaw('CAST(transactions.amount AS CHAR(64)) LIKE ?', ['%'.addcslashes($search, '%_\\').'%']);
                     });
                 }
             }
@@ -131,7 +129,7 @@ class TransactionController extends Controller
             // Define sortable columns (use qualified names when join present - avoids ambiguous column)
             $sortableColumns = [
                 'id', 'transaction_number', 'transaction_date', 'type', 'category_id',
-                'amount', 'status', 'payment_method', 'financial_year', 'created_at'
+                'amount', 'status', 'payment_method', 'financial_year', 'created_at',
             ];
             $sortPrefix = $academicYearId != null ? 'transactions.' : '';
 
@@ -152,17 +150,17 @@ class TransactionController extends Controller
                     'last_page' => $transactions->lastPage(),
                     'from' => $transactions->firstItem(),
                     'to' => $transactions->lastItem(),
-                    'has_more_pages' => $transactions->hasMorePages()
-                ]
+                    'has_more_pages' => $transactions->hasMorePages(),
+                ],
             ]);
 
         } catch (\Exception $e) {
             Log::error('Get transactions error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch transactions',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -190,33 +188,33 @@ class TransactionController extends Controller
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
             // Tenant guard: user must be able to manage the target branch.
-            if (!$this->canManageBranch($request, (int) $request->branch_id)) {
+            if (! $this->canManageBranch($request, (int) $request->branch_id)) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'You do not have access to this branch'
+                    'message' => 'You do not have access to this branch',
                 ], 403);
             }
 
             // Category must belong to the same branch (or be a global category) and match the type.
             $category = \App\Models\AccountCategory::find($request->category_id);
-            if (!$category) {
+            if (! $category) {
                 return response()->json(['success' => false, 'message' => 'Account category not found'], 404);
             }
             if ($category->branch_id !== null && (int) $category->branch_id !== (int) $request->branch_id) {
                 return response()->json([
                     'success' => false,
-                    'errors' => ['category_id' => ['The selected category does not belong to this branch.']]
+                    'errors' => ['category_id' => ['The selected category does not belong to this branch.']],
                 ], 422);
             }
             if ($category->type !== $request->type) {
                 return response()->json([
                     'success' => false,
-                    'errors' => ['category_id' => ["The selected category is for {$category->type}, not {$request->type}."]]
+                    'errors' => ['category_id' => ["The selected category is for {$category->type}, not {$request->type}."]],
                 ], 422);
             }
 
@@ -250,7 +248,7 @@ class TransactionController extends Controller
                 'status' => 'Pending',
                 'created_by' => Auth::id(),
                 'financial_year' => $financialYear,
-                'month' => $month
+                'month' => $month,
             ]);
 
             // If salary payment, create salary record
@@ -265,17 +263,17 @@ class TransactionController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Transaction created successfully',
-                'data' => $transaction->load(['category', 'branch', 'createdBy'])
+                'data' => $transaction->load(['category', 'branch', 'createdBy']),
             ], 201);
 
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Create transaction error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create transaction',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -291,23 +289,23 @@ class TransactionController extends Controller
                 'branch',
                 'createdBy',
                 'approvedBy',
-                'salaryPayment.employee'
+                'salaryPayment.employee',
             ])->findOrFail($id);
 
             // Tenant guard.
-            if (!$this->canAccessBranch($request, (int) $transaction->branch_id)) {
+            if (! $this->canAccessBranch($request, (int) $transaction->branch_id)) {
                 return response()->json(['success' => false, 'message' => 'Transaction not found'], 404);
             }
 
             return response()->json([
                 'success' => true,
-                'data' => $transaction
+                'data' => $transaction,
             ]);
 
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Transaction not found'
+                'message' => 'Transaction not found',
             ], 404);
         }
     }
@@ -321,7 +319,7 @@ class TransactionController extends Controller
             $transaction = Transaction::findOrFail($id);
 
             // Tenant guard.
-            if (!$this->canManageBranch($request, (int) $transaction->branch_id)) {
+            if (! $this->canManageBranch($request, (int) $transaction->branch_id)) {
                 return response()->json(['success' => false, 'message' => 'Transaction not found'], 404);
             }
 
@@ -329,7 +327,7 @@ class TransactionController extends Controller
             if ($transaction->status !== 'Pending') {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Only pending transactions can be edited'
+                    'message' => 'Only pending transactions can be edited',
                 ], 400);
             }
 
@@ -344,16 +342,16 @@ class TransactionController extends Controller
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
             DB::beginTransaction();
 
             $updateData = $request->only([
-                'category_id', 'transaction_date', 'amount', 'party_name', 
-                'payment_method', 'payment_reference', 'bank_name', 
-                'description', 'notes'
+                'category_id', 'transaction_date', 'amount', 'party_name',
+                'payment_method', 'payment_reference', 'bank_name',
+                'description', 'notes',
             ]);
 
             // Sanitize strings
@@ -370,16 +368,16 @@ class TransactionController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Transaction updated successfully',
-                'data' => $transaction->fresh(['category', 'branch', 'createdBy'])
+                'data' => $transaction->fresh(['category', 'branch', 'createdBy']),
             ]);
 
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Update transaction error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to update transaction'
+                'message' => 'Failed to update transaction',
             ], 500);
         }
     }
@@ -395,24 +393,26 @@ class TransactionController extends Controller
             $transaction = Transaction::findOrFail($id);
 
             // Tenant guard.
-            if (!$this->canManageBranch($request, (int) $transaction->branch_id)) {
+            if (! $this->canManageBranch($request, (int) $transaction->branch_id)) {
                 DB::rollBack();
+
                 return response()->json(['success' => false, 'message' => 'Transaction not found'], 404);
             }
 
             // Only pending transactions can be approved.
             if ($transaction->status !== 'Pending') {
                 DB::rollBack();
+
                 return response()->json([
                     'success' => false,
-                    'message' => "Only pending transactions can be approved (current status: {$transaction->status})."
+                    'message' => "Only pending transactions can be approved (current status: {$transaction->status}).",
                 ], 422);
             }
 
             $transaction->update([
                 'status' => 'Approved',
                 'approved_by' => Auth::id(),
-                'approved_at' => now()
+                'approved_at' => now(),
             ]);
 
             DB::commit();
@@ -420,14 +420,15 @@ class TransactionController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Transaction approved successfully',
-                'data' => $transaction->fresh(['category', 'approvedBy'])
+                'data' => $transaction->fresh(['category', 'approvedBy']),
             ]);
 
         } catch (\Exception $e) {
             DB::rollBack();
+
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to approve transaction'
+                'message' => 'Failed to approve transaction',
             ], 500);
         }
     }
@@ -441,7 +442,7 @@ class TransactionController extends Controller
             $transaction = Transaction::findOrFail($id);
 
             // Tenant guard.
-            if (!$this->canManageBranch($request, (int) $transaction->branch_id)) {
+            if (! $this->canManageBranch($request, (int) $transaction->branch_id)) {
                 return response()->json(['success' => false, 'message' => 'Transaction not found'], 404);
             }
 
@@ -449,7 +450,7 @@ class TransactionController extends Controller
             if ($transaction->status !== 'Pending') {
                 return response()->json([
                     'success' => false,
-                    'message' => "Only pending transactions can be rejected (current status: {$transaction->status})."
+                    'message' => "Only pending transactions can be rejected (current status: {$transaction->status}).",
                 ], 422);
             }
 
@@ -457,13 +458,13 @@ class TransactionController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Transaction rejected'
+                'message' => 'Transaction rejected',
             ]);
 
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to reject transaction'
+                'message' => 'Failed to reject transaction',
             ], 500);
         }
     }
@@ -477,7 +478,7 @@ class TransactionController extends Controller
             $transaction = Transaction::with(['category', 'branch', 'createdBy', 'approvedBy'])->findOrFail($id);
 
             // Tenant guard — don't leak another school's receipt PDF.
-            if (!$this->canAccessBranch($request, (int) $transaction->branch_id)) {
+            if (! $this->canAccessBranch($request, (int) $transaction->branch_id)) {
                 return response()->json(['success' => false, 'message' => 'Transaction not found'], 404);
             }
 
@@ -509,7 +510,7 @@ class TransactionController extends Controller
                 'message' => 'Transaction not found',
             ], 404);
         } catch (\Exception $e) {
-            Log::error('Error generating transaction receipt PDF: ' . $e->getMessage(), [
+            Log::error('Error generating transaction receipt PDF: '.$e->getMessage(), [
                 'transaction_id' => $id,
             ]);
 
@@ -530,14 +531,14 @@ class TransactionController extends Controller
             $transaction = Transaction::findOrFail($id);
 
             // Tenant guard.
-            if (!$this->canManageBranch($request, (int) $transaction->branch_id)) {
+            if (! $this->canManageBranch($request, (int) $transaction->branch_id)) {
                 return response()->json(['success' => false, 'message' => 'Transaction not found'], 404);
             }
 
             if ($transaction->status === 'Approved') {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Cannot delete approved transactions'
+                    'message' => 'Cannot delete approved transactions',
                 ], 400);
             }
 
@@ -545,13 +546,13 @@ class TransactionController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Transaction deleted successfully'
+                'message' => 'Transaction deleted successfully',
             ]);
 
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to delete transaction'
+                'message' => 'Failed to delete transaction',
             ], 500);
         }
     }
@@ -564,7 +565,7 @@ class TransactionController extends Controller
         $prefix = $type === 'Income' ? 'INC' : 'EXP';
         $date = date('Ymd');
         $random = strtoupper(substr(md5(uniqid()), 0, 4));
-        
+
         return "{$prefix}-{$date}-{$random}";
     }
 
@@ -573,13 +574,13 @@ class TransactionController extends Controller
      */
     private function getFinancialYear(\DateTime $date): string
     {
-        $month = (int)$date->format('n');
-        $year = (int)$date->format('Y');
-        
+        $month = (int) $date->format('n');
+        $year = (int) $date->format('Y');
+
         if ($month < 4) {
-            return ($year - 1) . '-' . $year;
+            return ($year - 1).'-'.$year;
         } else {
-            return $year . '-' . ($year + 1);
+            return $year.'-'.($year + 1);
         }
     }
 
@@ -598,7 +599,7 @@ class TransactionController extends Controller
             'net_salary' => $salaryDetails['net_salary'],
             'salary_month' => $salaryDetails['salary_month'],
             'salary_year' => $salaryDetails['salary_year'],
-            'remarks' => $salaryDetails['remarks'] ?? null
+            'remarks' => $salaryDetails['remarks'] ?? null,
         ]);
     }
 
@@ -619,7 +620,7 @@ class TransactionController extends Controller
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
@@ -630,15 +631,15 @@ class TransactionController extends Controller
             $transactions = $query->get();
 
             // Transform data for export
-            $exportData = collect($transactions)->map(function($transaction) {
+            $exportData = collect($transactions)->map(function ($transaction) {
                 $createdByName = '';
                 if ($transaction->createdBy) {
-                    $createdByName = $transaction->createdBy->first_name . ' ' . $transaction->createdBy->last_name;
+                    $createdByName = $transaction->createdBy->first_name.' '.$transaction->createdBy->last_name;
                 }
 
                 $approvedByName = '';
                 if ($transaction->approvedBy) {
-                    $approvedByName = $transaction->approvedBy->first_name . ' ' . $transaction->approvedBy->last_name;
+                    $approvedByName = $transaction->approvedBy->first_name.' '.$transaction->approvedBy->last_name;
                 }
 
                 return [
@@ -668,7 +669,7 @@ class TransactionController extends Controller
             $type = strtolower($request->type); // 'income' or 'expense'
             $columns = $request->columns;
 
-            return match($format) {
+            return match ($format) {
                 'excel' => $this->exportExcel($exportData, $type, $columns),
                 'pdf' => $this->exportPdf($exportData, $type, $columns),
                 'csv' => $this->exportCsv($exportData, $type, $columns),
@@ -676,11 +677,11 @@ class TransactionController extends Controller
 
         } catch (\Exception $e) {
             Log::error('Export transactions error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to export transactions',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -736,10 +737,10 @@ class TransactionController extends Controller
         // Global search
         if ($request->has('search') && $request->search !== '') {
             $searchTerm = $request->search;
-            $query->where(function($q) use ($searchTerm) {
-                $q->where('transaction_number', 'like', '%' . $searchTerm . '%')
-                  ->orWhere('party_name', 'like', '%' . $searchTerm . '%')
-                  ->orWhere('description', 'like', '%' . $searchTerm . '%');
+            $query->where(function ($q) use ($searchTerm) {
+                $q->where('transaction_number', 'like', '%'.$searchTerm.'%')
+                    ->orWhere('party_name', 'like', '%'.$searchTerm.'%')
+                    ->orWhere('description', 'like', '%'.$searchTerm.'%');
             });
         }
 
@@ -754,7 +755,7 @@ class TransactionController extends Controller
         $export = new TransactionsExport($data, $type, $columns);
         $module = $type === 'income' ? 'income_transactions' : 'expense_transactions';
         $filename = (new ExportService($module))->generateFilename('xlsx');
-        
+
         return Excel::download($export, $filename);
     }
 
@@ -765,19 +766,19 @@ class TransactionController extends Controller
     {
         $module = $type === 'income' ? 'income_transactions' : 'expense_transactions';
         $pdfService = new PdfExportService($module);
-        
+
         if ($columns) {
             $pdfService->setColumns($columns);
         }
-        
+
         // Use A3 paper for transactions to accommodate more columns
         $pdfService->setPaperSize('a3');
         $pdfService->setOrientation('landscape');
-        
+
         $title = $type === 'income' ? 'Income Transactions Report' : 'Expense Transactions Report';
         $pdf = $pdfService->generate($data, $title);
         $filename = (new ExportService($module))->generateFilename('pdf');
-        
+
         return $pdf->download($filename);
     }
 
@@ -788,14 +789,13 @@ class TransactionController extends Controller
     {
         $module = $type === 'income' ? 'income_transactions' : 'expense_transactions';
         $csvService = new CsvExportService($module);
-        
+
         if ($columns) {
             $csvService->setColumns($columns);
         }
-        
+
         $filename = (new ExportService($module))->generateFilename('csv');
-        
+
         return $csvService->generate($data, $filename);
     }
 }
-

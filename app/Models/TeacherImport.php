@@ -9,10 +9,13 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class TeacherImport extends Model
 {
     use BelongsToTenant;
+
     protected $fillable = [
         'batch_id',
         'row_number',
         'branch_id',
+        'role_id',
+        'role_name',
         'first_name',
         'last_name',
         'email',
@@ -84,6 +87,14 @@ class TeacherImport extends Model
     }
 
     /**
+     * Get the role assigned to this teacher import
+     */
+    public function role(): BelongsTo
+    {
+        return $this->belongsTo(Role::class, 'role_id');
+    }
+
+    /**
      * Get the created user (if imported)
      */
     public function importedUser(): BelongsTo
@@ -128,7 +139,7 @@ class TeacherImport extends Model
      */
     public function hasErrors(): bool
     {
-        return !empty($this->validation_errors);
+        return ! empty($this->validation_errors);
     }
 
     /**
@@ -136,7 +147,6 @@ class TeacherImport extends Model
      */
     public function hasWarnings(): bool
     {
-        return !empty($this->validation_warnings);
+        return ! empty($this->validation_warnings);
     }
 }
-

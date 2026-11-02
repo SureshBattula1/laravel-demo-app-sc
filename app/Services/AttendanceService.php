@@ -2,10 +2,9 @@
 
 namespace App\Services;
 
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Carbon\Carbon;
 
 class AttendanceService
 {
@@ -31,13 +30,13 @@ class AttendanceService
                     'status' => $item['status'],
                     'remarks' => $item['remarks'] ?? null,
                     'updated_at' => now(),
-                    'created_at' => now()
+                    'created_at' => now(),
                 ];
 
                 if ($type === 'student') {
                     $record['grade_level'] = $item['grade_level'];
                     $record['section'] = $item['section'];
-                    $record['academic_year'] = $academicYear ?? date('Y') . '-' . (date('Y') + 1);
+                    $record['academic_year'] = $academicYear ?? date('Y').'-'.(date('Y') + 1);
                     $record['marked_by'] = auth()->user()->email ?? null;
                 }
 
@@ -75,7 +74,7 @@ class AttendanceService
             Log::info('Bulk attendance marked', [
                 'type' => $type,
                 'date' => $date,
-                'marked' => $marked
+                'marked' => $marked,
             ]);
 
             return ['marked' => $marked, 'errors' => $errors];
@@ -92,8 +91,8 @@ class AttendanceService
      */
     public function getAttendance($type, $filters = [])
     {
-        $cacheKey = "attendance:{$type}:" . md5(json_encode($filters));
-        
+        $cacheKey = "attendance:{$type}:".md5(json_encode($filters));
+
         return Cache::remember($cacheKey, 180, function () use ($type, $filters) {
             $table = $type === 'student' ? 'student_attendance' : 'teacher_attendance';
             $typeTable = $type === 'student' ? 'students' : 'teachers';
@@ -105,7 +104,7 @@ class AttendanceService
                 ->select("{$table}.*", 'users.first_name', 'users.last_name', 'users.email');
 
             if ($type === 'student') {
-                $query->addSelect('students.admission_number', 'students.grade', 'students.section');
+                $query->addSelect('students.admission_number', DB::raw("{$table}.grade_level as grade"));
             } else {
                 $query->addSelect('teachers.employee_id');
             }
@@ -121,32 +120,32 @@ class AttendanceService
      */
     private function applyAttendanceFilters($query, $filters, $table, $type)
     {
-        if (!empty($filters['branch_id'])) {
+        if (! empty($filters['branch_id'])) {
             $query->where("{$table}.branch_id", $filters['branch_id']);
         }
 
-        if (!empty($filters['date'])) {
+        if (! empty($filters['date'])) {
             $query->whereDate("{$table}.date", $filters['date']);
         }
 
-        if (!empty($filters['from_date'])) {
+        if (! empty($filters['from_date'])) {
             $query->whereDate("{$table}.date", '>=', $filters['from_date']);
         }
 
-        if (!empty($filters['to_date'])) {
+        if (! empty($filters['to_date'])) {
             $query->whereDate("{$table}.date", '<=', $filters['to_date']);
         }
 
-        if (!empty($filters['status'])) {
+        if (! empty($filters['status'])) {
             $query->where("{$table}.status", $filters['status']);
         }
 
         if ($type === 'student') {
-            if (!empty($filters['grade'])) {
-                $query->where('students.grade', $filters['grade']);
+            if (! empty($filters['grade'])) {
+                $query->where("{$table}.grade_level", $filters['grade']);
             }
-            if (!empty($filters['section'])) {
-                $query->where('students.section', $filters['section']);
+            if (! empty($filters['section'])) {
+                $query->where("{$table}.section", $filters['section']);
             }
         }
     }
@@ -161,11 +160,11 @@ class AttendanceService
         $query = DB::table($table)
             ->whereBetween('date', [$fromDate, $toDate]);
 
-        if (!empty($filters['branch_id'])) {
+        if (! empty($filters['branch_id'])) {
             $query->where('branch_id', $filters['branch_id']);
         }
 
-        if ($type === 'student' && !empty($filters['grade'])) {
+        if ($type === 'student' && ! empty($filters['grade'])) {
             $query->where('grade_level', $filters['grade']);
         }
 
@@ -180,8 +179,8 @@ class AttendanceService
                 'late' => $records->where('status', 'Late')->count(),
                 'percentage' => $records->count() > 0
                     ? round(($records->where('status', 'Present')->count() / $records->count()) * 100, 2)
-                    : 0
-            ]
+                    : 0,
+            ],
         ];
     }
 
@@ -190,7 +189,6 @@ class AttendanceService
      */
     private function clearAttendanceCache($type, $branchId)
     {
-        Cache::forget("attendance:{$type}:" . md5(json_encode(['branch_id' => $branchId])));
+        Cache::forget("attendance:{$type}:".md5(json_encode(['branch_id' => $branchId])));
     }
 }
-

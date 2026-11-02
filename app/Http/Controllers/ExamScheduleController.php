@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Traits\PaginatesAndSorts;
 use App\Models\ExamSchedule;
+use App\Support\StudentEnrollmentScope;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -434,12 +435,17 @@ class ExamScheduleController extends Controller
 
             $query = DB::table('students')
                 ->join('users', 'students.user_id', '=', 'users.id')
-                ->where('students.grade', $schedule->grade);
+                ->whereNull('students.deleted_at')
+                ->where('students.student_status', 'Active');
 
-            // Add section filter if specified
-            if ($schedule->section) {
-                $query->where('students.section', $schedule->section);
-            }
+            $academicYearId = $schedule->exam?->academic_year_id;
+            StudentEnrollmentScope::whereInClass(
+                $query,
+                'students',
+                $academicYearId ? (int) $academicYearId : null,
+                (string) $schedule->grade,
+                $schedule->section ? (string) $schedule->section : null
+            );
 
             // Add branch filter from exam
             if ($schedule->exam && $schedule->exam->branch_id) {

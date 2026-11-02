@@ -21,6 +21,12 @@ class AuthController extends Controller
      */
     public function register(Request $request)
     {
+        $actor = $request->user('sanctum');
+        $isAdminActor = $actor && in_array($actor->role, ['SuperAdmin', 'BranchAdmin'], true);
+        $allowedRoles = $isAdminActor
+            ? 'SuperAdmin,BranchAdmin,Teacher,Student,Parent,Staff,Driver'
+            : 'Student,Parent';
+
         try {
             $validator = Validator::make($request->all(), [
                 'first_name' => 'required|string|max:255|regex:/^[a-zA-Z\s]+$/',
@@ -34,7 +40,7 @@ class AuthController extends Controller
                     'confirmed',
                     'regex:/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/',
                 ],
-                'role' => 'required|in:SuperAdmin,BranchAdmin,Teacher,Student,Parent,Staff,Driver',
+                'role' => 'required|in:'.$allowedRoles,
                 'branch_id' => 'required|exists:branches,id',
             ], [
                 'password.regex' => 'Password must contain uppercase, lowercase, number and special character',
@@ -49,6 +55,11 @@ class AuthController extends Controller
 
             DB::beginTransaction();
 
+            $companyId = DB::table('branches')
+                ->join('schools', 'branches.school_id', '=', 'schools.id')
+                ->where('branches.id', (int) $request->branch_id)
+                ->value('schools.company_id');
+
             // Sanitize inputs
             $user = User::create([
                 'first_name' => strip_tags($request->first_name),
@@ -57,8 +68,9 @@ class AuthController extends Controller
                 'phone' => preg_replace('/[^0-9+\-\s()]/', '', $request->phone),
                 'password' => Hash::make($request->password),
                 'role' => $request->role,
-                'user_type' => $request->role === 'Driver' ? 'Driver' : null,
+                'user_type' => $request->role === 'Driver' ? 'Driver' : 'SchoolUser',
                 'branch_id' => $request->branch_id,
+                'company_id' => $companyId ? (int) $companyId : null,
                 'is_active' => true,
             ]);
 

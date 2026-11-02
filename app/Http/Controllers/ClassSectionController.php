@@ -2,10 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Support\StudentEnrollmentScope;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Validator;
 
 class ClassSectionController extends Controller
 {
@@ -42,29 +42,29 @@ class ClassSectionController extends Controller
 
             if ($request->has('search')) {
                 $search = strip_tags($request->search);
-                $query->where(function($q) use ($search) {
-                    $q->where('grade', 'like', '%' . $search . '%')
-                      ->orWhere('section', 'like', '%' . $search . '%');
+                $query->where(function ($q) use ($search) {
+                    $q->where('grade', 'like', '%'.$search.'%')
+                        ->orWhere('section', 'like', '%'.$search.'%');
                 });
             }
 
             $classes = $query->orderBy('grade', 'asc')
-                            ->orderBy('section', 'asc')
-                            ->get();
+                ->orderBy('section', 'asc')
+                ->get();
 
             return response()->json([
                 'success' => true,
                 'data' => $classes,
-                'count' => $classes->count()
+                'count' => $classes->count(),
             ]);
 
         } catch (\Exception $e) {
             Log::error('Get classes error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch classes',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -77,32 +77,38 @@ class ClassSectionController extends Controller
         try {
             $query = DB::table('students')
                 ->join('users', 'students.user_id', '=', 'users.id')
-                ->where('students.grade', $grade)
+                ->whereNull('students.deleted_at')
+                ->where('students.student_status', 'Active')
                 ->scopedToTenant('students.branch_id');
 
-            if ($section && $section !== 'null') {
-                $query->where('students.section', $section);
-            }
+            $academicYearId = $request->attributes->get('academic_year_id');
+            StudentEnrollmentScope::whereInClass(
+                $query,
+                'students',
+                $academicYearId ? (int) $academicYearId : null,
+                (string) $grade,
+                ($section && $section !== 'null') ? (string) $section : null
+            );
 
             if ($request->has('branch_id')) {
                 $query->where('students.branch_id', $request->branch_id);
             }
 
             $students = $query->select('students.*', 'users.first_name', 'users.last_name', 'users.email')
-                             ->get();
+                ->get();
 
             return response()->json([
                 'success' => true,
                 'data' => $students,
-                'count' => $students->count()
+                'count' => $students->count(),
             ]);
 
         } catch (\Exception $e) {
             Log::error('Get class students error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to fetch class students'
+                'message' => 'Failed to fetch class students',
             ], 500);
         }
     }
@@ -126,13 +132,13 @@ class ClassSectionController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data' => $grades
+                'data' => $grades,
             ]);
 
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to fetch grades'
+                'message' => 'Failed to fetch grades',
             ], 500);
         }
     }
@@ -158,15 +164,14 @@ class ClassSectionController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data' => $sections
+                'data' => $sections,
             ]);
 
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to fetch sections'
+                'message' => 'Failed to fetch sections',
             ], 500);
         }
     }
 }
-

@@ -17,6 +17,7 @@ class TimetableController extends Controller
     {
         try {
             $query = Timetable::with(['branch', 'subject', 'teacher', 'creator']);
+            $this->applyBranchFilter($query, $request);
 
             if ($request->has('branch_id')) {
                 $query->where('branch_id', $request->branch_id);
@@ -38,27 +39,31 @@ class TimetableController extends Controller
                 $query->where('teacher_id', $request->teacher_id);
             }
 
-            if ($request->has('academic_year')) {
-                $query->where('academic_year', $request->academic_year);
+            if ($request->filled('academic_year') || $request->filled('academic_year_id')) {
+                [$academicYearId, $academicYearName] = $this->resolveAcademicYearFromRequest($request);
+                $this->applyAcademicYearScope($query, $academicYearId, $academicYearName);
+            } elseif ($request->attributes->get('academic_year_id')) {
+                [$academicYearId, $academicYearName] = $this->resolveAcademicYearFromRequest($request);
+                $this->applyAcademicYearScope($query, $academicYearId, $academicYearName);
             }
 
             $timetables = $query->orderBy('day_order')
-                                ->orderBy('start_time')
-                                ->get();
+                ->orderBy('start_time')
+                ->get();
 
             return response()->json([
                 'success' => true,
                 'data' => $timetables,
-                'message' => 'Timetables retrieved successfully'
+                'message' => 'Timetables retrieved successfully',
             ]);
 
         } catch (\Exception $e) {
             Log::error('Get timetables error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch timetables',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -82,16 +87,24 @@ class TimetableController extends Controller
                 'start_time' => 'required|date_format:H:i',
                 'end_time' => 'required|date_format:H:i|after:start_time',
                 'room_number' => 'nullable|string|max:50',
-                'academic_year' => 'required|string|max:20',
-                'is_active' => 'boolean'
+                'academic_year' => 'required_without:academic_year_id|nullable|string|max:20',
+                'academic_year_id' => 'nullable|exists:academic_years,id',
+                'is_active' => 'boolean',
             ]);
 
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
+
+            if (! $this->canManageBranch($request, (int) $request->branch_id)) {
+                return $this->forbiddenResponse('You do not have access to this branch');
+            }
+
+            [$academicYearId, $academicYearName] = $this->resolveAcademicYearFromRequest($request);
+            $academicYearName = $academicYearName ?? $request->academic_year;
 
             // Check for conflicts
             $conflict = Timetable::where('branch_id', $request->branch_id)
@@ -99,13 +112,13 @@ class TimetableController extends Controller
                 ->where('section', $request->section)
                 ->where('day', $request->day)
                 ->where('period_number', $request->period_number)
-                ->where('academic_year', $request->academic_year)
+                ->where('academic_year', $academicYearName)
                 ->first();
 
             if ($conflict) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Timetable conflict: This slot is already occupied'
+                    'message' => 'Timetable conflict: This slot is already occupied',
                 ], 422);
             }
 
@@ -113,13 +126,13 @@ class TimetableController extends Controller
             $teacherConflict = Timetable::where('teacher_id', $request->teacher_id)
                 ->where('day', $request->day)
                 ->where('period_number', $request->period_number)
-                ->where('academic_year', $request->academic_year)
+                ->where('academic_year', $academicYearName)
                 ->first();
 
             if ($teacherConflict) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Teacher is already assigned to another class at this time'
+                    'message' => 'Teacher is already assigned to another class at this time',
                 ], 422);
             }
 
@@ -137,9 +150,10 @@ class TimetableController extends Controller
                 'start_time' => $request->start_time,
                 'end_time' => $request->end_time,
                 'room_number' => $request->room_number,
-                'academic_year' => $request->academic_year,
+                'academic_year' => $academicYearName,
+                'academic_year_id' => $academicYearId,
                 'is_active' => $request->is_active ?? true,
-                'created_by' => $request->user()->id
+                'created_by' => $request->user()->id,
             ]);
 
             DB::commit();
@@ -149,17 +163,17 @@ class TimetableController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Timetable created successfully',
-                'data' => $timetable->load(['branch', 'subject', 'teacher'])
+                'data' => $timetable->load(['branch', 'subject', 'teacher']),
             ], 201);
 
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Create timetable error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create timetable',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -174,13 +188,13 @@ class TimetableController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data' => $timetable
+                'data' => $timetable,
             ]);
 
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Timetable not found'
+                'message' => 'Timetable not found',
             ], 404);
         }
     }
@@ -193,6 +207,9 @@ class TimetableController extends Controller
         DB::beginTransaction();
         try {
             $timetable = Timetable::findOrFail($id);
+            if (! $this->canManageBranch($request, (int) $timetable->branch_id)) {
+                return $this->forbiddenResponse('You do not have access to this branch');
+            }
 
             $validator = Validator::make($request->all(), [
                 'subject_id' => 'exists:subjects,id',
@@ -203,13 +220,13 @@ class TimetableController extends Controller
                 'start_time' => 'date_format:H:i',
                 'end_time' => 'date_format:H:i',
                 'room_number' => 'nullable|string|max:50',
-                'is_active' => 'boolean'
+                'is_active' => 'boolean',
             ]);
 
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
@@ -227,22 +244,49 @@ class TimetableController extends Controller
                 if ($conflict) {
                     return response()->json([
                         'success' => false,
-                        'message' => 'Timetable conflict: This slot is already occupied'
+                        'message' => 'Timetable conflict: This slot is already occupied',
                     ], 422);
                 }
             }
 
             $updateData = [];
-            if ($request->has('subject_id')) $updateData['subject_id'] = $request->subject_id;
-            if ($request->has('teacher_id')) $updateData['teacher_id'] = $request->teacher_id;
-            if ($request->has('day')) $updateData['day'] = $request->day;
-            if ($request->has('day_order')) $updateData['day_order'] = $request->day_order;
-            if ($request->has('period_number')) $updateData['period_number'] = $request->period_number;
-            if ($request->has('start_time')) $updateData['start_time'] = $request->start_time;
-            if ($request->has('end_time')) $updateData['end_time'] = $request->end_time;
-            if ($request->has('room_number')) $updateData['room_number'] = $request->room_number;
-            if ($request->has('is_active')) $updateData['is_active'] = $request->is_active;
-            
+            if ($request->has('subject_id')) {
+                $updateData['subject_id'] = $request->subject_id;
+            }
+            if ($request->has('teacher_id')) {
+                $updateData['teacher_id'] = $request->teacher_id;
+            }
+            if ($request->has('day')) {
+                $updateData['day'] = $request->day;
+            }
+            if ($request->has('day_order')) {
+                $updateData['day_order'] = $request->day_order;
+            }
+            if ($request->has('period_number')) {
+                $updateData['period_number'] = $request->period_number;
+            }
+            if ($request->has('start_time')) {
+                $updateData['start_time'] = $request->start_time;
+            }
+            if ($request->has('end_time')) {
+                $updateData['end_time'] = $request->end_time;
+            }
+            if ($request->has('room_number')) {
+                $updateData['room_number'] = $request->room_number;
+            }
+            if ($request->has('is_active')) {
+                $updateData['is_active'] = $request->is_active;
+            }
+            if ($request->filled('academic_year') || $request->filled('academic_year_id')) {
+                [$resolvedYearId, $resolvedYearName] = $this->resolveAcademicYearFromRequest($request);
+                if ($resolvedYearId) {
+                    $updateData['academic_year_id'] = $resolvedYearId;
+                }
+                if ($resolvedYearName) {
+                    $updateData['academic_year'] = $resolvedYearName;
+                }
+            }
+
             $updateData['updated_by'] = $request->user()->id;
 
             $timetable->update($updateData);
@@ -254,17 +298,17 @@ class TimetableController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Timetable updated successfully',
-                'data' => $timetable->load(['branch', 'subject', 'teacher'])
+                'data' => $timetable->load(['branch', 'subject', 'teacher']),
             ]);
 
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Update timetable error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update timetable',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -272,11 +316,14 @@ class TimetableController extends Controller
     /**
      * Delete timetable
      */
-    public function destroy(string $id)
+    public function destroy(Request $request, string $id)
     {
         DB::beginTransaction();
         try {
             $timetable = Timetable::findOrFail($id);
+            if (! $this->canManageBranch($request, (int) $timetable->branch_id)) {
+                return $this->forbiddenResponse('You do not have access to this branch');
+            }
             $timetable->delete();
             DB::commit();
 
@@ -284,17 +331,17 @@ class TimetableController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Timetable deleted successfully'
+                'message' => 'Timetable deleted successfully',
             ]);
 
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Delete timetable error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to delete timetable',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -306,7 +353,7 @@ class TimetableController extends Controller
     {
         try {
             $academicYear = request()->get('academic_year', date('Y'));
-            
+
             $timetables = Timetable::with(['subject', 'teacher'])
                 ->where('grade', $grade)
                 ->where('section', $section)
@@ -317,7 +364,7 @@ class TimetableController extends Controller
                 ->get();
 
             // Group by day
-            $grouped = $timetables->groupBy('day')->map(function($daySchedule) {
+            $grouped = $timetables->groupBy('day')->map(function ($daySchedule) {
                 return $daySchedule->sortBy('period_number')->values();
             });
 
@@ -327,17 +374,17 @@ class TimetableController extends Controller
                     'grade' => $grade,
                     'section' => $section,
                     'academic_year' => $academicYear,
-                    'schedule' => $grouped
-                ]
+                    'schedule' => $grouped,
+                ],
             ]);
 
         } catch (\Exception $e) {
             Log::error('Get class timetable error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch class timetable',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }

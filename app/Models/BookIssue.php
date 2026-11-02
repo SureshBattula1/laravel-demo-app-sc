@@ -57,6 +57,16 @@ class BookIssue extends Model
         return $this->belongsTo(Branch::class);
     }
 
+    public function academicYear(): BelongsTo
+    {
+        return $this->belongsTo(AcademicYear::class, 'academic_year_id');
+    }
+
+    public function scopeForAcademicYear($query, int $academicYearId)
+    {
+        return $query->where('academic_year_id', $academicYearId);
+    }
+
     public function student(): BelongsTo
     {
         return $this->belongsTo(User::class, 'student_id');

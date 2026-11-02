@@ -9,10 +9,14 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class StudentImport extends Model
 {
     use BelongsToTenant;
+
     protected $fillable = [
         'batch_id',
         'row_number',
         'branch_id',
+        'academic_year_id',
+        'role_id',
+        'role_name',
         'grade',
         'section',
         'academic_year',
@@ -115,6 +119,14 @@ class StudentImport extends Model
     }
 
     /**
+     * Get the academic year this import record belongs to
+     */
+    public function academicYear(): BelongsTo
+    {
+        return $this->belongsTo(AcademicYear::class, 'academic_year_id');
+    }
+
+    /**
      * Scope to get valid records
      */
     public function scopeValid($query)
@@ -151,7 +163,7 @@ class StudentImport extends Model
      */
     public function hasErrors(): bool
     {
-        return !empty($this->validation_errors);
+        return ! empty($this->validation_errors);
     }
 
     /**
@@ -159,7 +171,6 @@ class StudentImport extends Model
      */
     public function hasWarnings(): bool
     {
-        return !empty($this->validation_warnings);
+        return ! empty($this->validation_warnings);
     }
 }
-

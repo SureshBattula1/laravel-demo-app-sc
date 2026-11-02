@@ -5,12 +5,13 @@ namespace App\Http\Controllers;
 use App\Http\Traits\PaginatesAndSorts;
 use App\Models\Student;
 use App\Models\Teacher;
+use App\Support\StudentEnrollmentScope;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
-use Carbon\Carbon;
 
 class LeaveController extends Controller
 {
@@ -25,15 +26,24 @@ class LeaveController extends Controller
             $type = $this->leaveType($request); // 'student' or 'teacher' (clamped)
             $studentHasAcademicYear = $this->tableHasAcademicYearId('student_leaves');
             $teacherHasAcademicYear = $this->tableHasAcademicYearId('teacher_leaves');
-            
+            $useYearClass = $studentHasAcademicYear && Schema::hasTable('student_enrollments');
+            $gradeExpr = StudentEnrollmentScope::column('students', $useYearClass ? 'se' : null, 'grade');
+            $sectionExpr = StudentEnrollmentScope::column('students', $useYearClass ? 'se' : null, 'section');
+
             if ($type === 'student') {
                 $query = DB::table('student_leaves')
                     ->join('users', 'student_leaves.student_id', '=', 'users.id')
-                    ->leftJoin('students', 'users.id', '=', 'students.user_id')
-                    ->leftJoin('grades', function ($join) {
-                        $join->on('students.grade', '=', 'grades.value')
-                            ->whereColumn('grades.branch_id', '=', 'student_leaves.branch_id');
-                    })
+                    ->leftJoin('students', 'users.id', '=', 'students.user_id');
+                if ($useYearClass) {
+                    $query->leftJoin('student_enrollments as se', function ($join) {
+                        $join->on('se.student_id', '=', 'students.id')
+                            ->whereColumn('se.academic_year_id', 'student_leaves.academic_year_id');
+                    });
+                }
+                $query->leftJoin('grades', function ($join) use ($gradeExpr) {
+                    $join->on('grades.value', '=', DB::raw($gradeExpr))
+                        ->whereColumn('grades.branch_id', '=', 'student_leaves.branch_id');
+                })
                     ->leftJoin('branches', 'student_leaves.branch_id', '=', 'branches.id')
                     ->select(
                         'student_leaves.*',
@@ -42,9 +52,9 @@ class LeaveController extends Controller
                         'users.email',
                         'users.phone as mobile_number',
                         'students.admission_number',
-                        'students.grade',
+                        DB::raw($gradeExpr.' as grade'),
                         'grades.label as grade_label',
-                        'students.section',
+                        DB::raw($sectionExpr.' as section'),
                         'branches.name as branch_name'
                     );
                 if ($studentHasAcademicYear) {
@@ -77,13 +87,13 @@ class LeaveController extends Controller
             }
 
             // Exclude soft-deleted rows (the query builder bypasses the model's SoftDeletes scope).
-            $query->whereNull($type . '_leaves.deleted_at');
+            $query->whereNull($type.'_leaves.deleted_at');
 
             // Apply branch filtering
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
             if ($accessibleBranchIds !== 'all') {
-                if (!empty($accessibleBranchIds)) {
-                    $query->whereIn($type . '_leaves.branch_id', $accessibleBranchIds);
+                if (! empty($accessibleBranchIds)) {
+                    $query->whereIn($type.'_leaves.branch_id', $accessibleBranchIds);
                 } else {
                     $query->whereRaw('1 = 0');
                 }
@@ -93,58 +103,65 @@ class LeaveController extends Controller
             if ($request->filled('branch_id')) {
                 $requestBranchId = (int) $request->branch_id;
                 if ($accessibleBranchIds === 'all') {
-                    $query->where($type . '_leaves.branch_id', $requestBranchId);
+                    $query->where($type.'_leaves.branch_id', $requestBranchId);
                 } elseif (is_array($accessibleBranchIds) && in_array($requestBranchId, $accessibleBranchIds, false)) {
-                    $query->where($type . '_leaves.branch_id', $requestBranchId);
+                    $query->where($type.'_leaves.branch_id', $requestBranchId);
                 }
             }
 
             if ($request->has('from_date')) {
-                $query->whereDate($type . '_leaves.from_date', '>=', $request->from_date);
+                $query->whereDate($type.'_leaves.from_date', '>=', $request->from_date);
             }
 
             if ($request->has('to_date')) {
-                $query->whereDate($type . '_leaves.to_date', '<=', $request->to_date);
+                $query->whereDate($type.'_leaves.to_date', '<=', $request->to_date);
             }
 
             if ($request->has('status')) {
-                $query->where($type . '_leaves.status', $request->status);
+                $query->where($type.'_leaves.status', $request->status);
             }
 
             if ($request->has('leave_type')) {
-                $query->where($type . '_leaves.leave_type', $request->leave_type);
+                $query->where($type.'_leaves.leave_type', $request->leave_type);
             }
-            if ($request->has('academic_year_id') && (($type === 'student' && $studentHasAcademicYear) || ($type === 'teacher' && $teacherHasAcademicYear))) {
-                $query->where($type . '_leaves.academic_year_id', $request->academic_year_id);
+            $academicYearId = $request->filled('academic_year_id')
+                ? (int) $request->academic_year_id
+                : $request->attributes->get('academic_year_id');
+            if ($academicYearId && (($type === 'student' && $studentHasAcademicYear) || ($type === 'teacher' && $teacherHasAcademicYear))) {
+                $table = $type.'_leaves';
+                $query->where(function ($q) use ($table, $academicYearId) {
+                    $q->where("{$table}.academic_year_id", (int) $academicYearId)
+                        ->orWhereNull("{$table}.academic_year_id");
+                });
             }
 
             if ($type === 'student') {
-                if ($request->has('grade')) {
-                    $query->where('students.grade', $request->grade);
+                if ($request->filled('grade')) {
+                    $query->whereRaw($gradeExpr.' = ?', [$request->grade]);
                 }
-                if ($request->has('section')) {
-                    $query->where('students.section', $request->section);
+                if ($request->filled('section')) {
+                    $query->whereRaw($sectionExpr.' = ?', [$request->section]);
                 }
             }
 
             // Search filter
-            if ($request->has('search') && !empty($request->search)) {
+            if ($request->has('search') && ! empty($request->search)) {
                 $search = strip_tags($request->search);
-                $query->where(function($q) use ($search, $type) {
-                    $q->where('users.first_name', 'like', $search . '%')
-                      ->orWhere('users.last_name', 'like', $search . '%')
-                      ->orWhere('users.email', 'like', $search . '%');
-                    
+                $query->where(function ($q) use ($search, $type) {
+                    $q->where('users.first_name', 'like', $search.'%')
+                        ->orWhere('users.last_name', 'like', $search.'%')
+                        ->orWhere('users.email', 'like', $search.'%');
+
                     if ($type === 'student') {
-                        $q->orWhere('students.admission_number', 'like', $search . '%');
+                        $q->orWhere('students.admission_number', 'like', $search.'%');
                     } else {
-                        $q->orWhere('teachers.employee_id', 'like', $search . '%');
+                        $q->orWhere('teachers.employee_id', 'like', $search.'%');
                     }
                 });
             }
 
             // Define sortable columns
-            $sortableColumns = $type === 'student' 
+            $sortableColumns = $type === 'student'
                 ? [
                     'student_leaves.id',
                     'student_leaves.from_date',
@@ -156,7 +173,7 @@ class LeaveController extends Controller
                     'users.last_name',
                     'branches.name',
                     'students.admission_number',
-                    'students.grade'
+                    'students.grade',
                 ]
                 : [
                     'teacher_leaves.id',
@@ -168,7 +185,7 @@ class LeaveController extends Controller
                     'users.first_name',
                     'users.last_name',
                     'branches.name',
-                    'teachers.employee_id'
+                    'teachers.employee_id',
                 ];
             if ($type === 'student' && $studentHasAcademicYear) {
                 $sortableColumns[] = 'student_leaves.academic_year_id';
@@ -179,10 +196,10 @@ class LeaveController extends Controller
 
             // Apply pagination and sorting
             $leaves = $this->paginateAndSort(
-                $query, 
-                $request, 
-                $sortableColumns, 
-                $type . '_leaves.created_at', 
+                $query,
+                $request,
+                $sortableColumns,
+                $type.'_leaves.created_at',
                 'desc'
             );
 
@@ -193,6 +210,7 @@ class LeaveController extends Controller
                 if ($from && $to) {
                     $row['total_days'] = $this->calculateTotalDays($from, $to);
                 }
+
                 return $row;
             })->all();
 
@@ -207,15 +225,16 @@ class LeaveController extends Controller
                     'last_page' => $leaves->lastPage(),
                     'from' => $leaves->firstItem(),
                     'to' => $leaves->lastItem(),
-                    'has_more_pages' => $leaves->hasMorePages()
-                ]
+                    'has_more_pages' => $leaves->hasMorePages(),
+                ],
             ]);
         } catch (\Exception $e) {
-            Log::error('Error fetching leaves: ' . $e->getMessage());
+            Log::error('Error fetching leaves: '.$e->getMessage());
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error fetching leaves',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -239,7 +258,7 @@ class LeaveController extends Controller
                     'to_date' => 'required|date|after_or_equal:from_date',
                     'leave_type' => 'required|in:Sick Leave,Casual Leave,Medical Leave,Family Emergency,Other',
                     'reason' => 'required|string',
-                    'remarks' => 'nullable|string'
+                    'remarks' => 'nullable|string',
                 ];
                 if ($studentHasAcademicYear) {
                     $rules['academic_year_id'] = 'nullable|exists:academic_years,id';
@@ -249,7 +268,7 @@ class LeaveController extends Controller
                 if ($validator->fails()) {
                     return response()->json([
                         'success' => false,
-                        'errors' => $validator->errors()
+                        'errors' => $validator->errors(),
                     ], 422);
                 }
 
@@ -257,8 +276,9 @@ class LeaveController extends Controller
                 // in the branch-scoped list — and verify the user may manage that branch.
                 $branchId = $request->branch_id
                     ?: DB::table('users')->where('id', $request->student_id)->value('branch_id');
-                if (!$this->canManageBranch($request, (int) $branchId)) {
+                if (! $this->canManageBranch($request, (int) $branchId)) {
                     DB::rollBack();
+
                     return response()->json(['success' => false, 'message' => 'You do not have access to this branch'], 403);
                 }
 
@@ -276,7 +296,7 @@ class LeaveController extends Controller
                     'remarks' => $request->remarks,
                     'created_by' => auth()->id() ?? null,
                     'created_at' => now(),
-                    'updated_at' => now()
+                    'updated_at' => now(),
                 ];
                 if ($studentHasAcademicYear) {
                     // Default to the toolbar academic-year context so the leave isn't hidden
@@ -299,7 +319,7 @@ class LeaveController extends Controller
                     'leave_type' => 'required|in:Sick Leave,Casual Leave,Medical Leave,Maternity Leave,Paternity Leave,Compensatory Leave,Unpaid Leave,Other',
                     'reason' => 'required|string',
                     'remarks' => 'nullable|string',
-                    'substitute_teacher_id' => 'nullable|exists:users,id'
+                    'substitute_teacher_id' => 'nullable|exists:users,id',
                 ];
                 if ($teacherHasAcademicYear) {
                     $rules['academic_year_id'] = 'nullable|exists:academic_years,id';
@@ -309,14 +329,15 @@ class LeaveController extends Controller
                 if ($validator->fails()) {
                     return response()->json([
                         'success' => false,
-                        'errors' => $validator->errors()
+                        'errors' => $validator->errors(),
                     ], 422);
                 }
 
                 $branchId = $request->branch_id
                     ?: DB::table('users')->where('id', $request->teacher_id)->value('branch_id');
-                if (!$this->canManageBranch($request, (int) $branchId)) {
+                if (! $this->canManageBranch($request, (int) $branchId)) {
                     DB::rollBack();
+
                     return response()->json(['success' => false, 'message' => 'You do not have access to this branch'], 403);
                 }
 
@@ -335,7 +356,7 @@ class LeaveController extends Controller
                     'substitute_teacher_id' => $request->substitute_teacher_id,
                     'created_by' => auth()->id() ?? null,
                     'created_at' => now(),
-                    'updated_at' => now()
+                    'updated_at' => now(),
                 ];
                 if ($teacherHasAcademicYear) {
                     $insertData['academic_year_id'] = $request->academic_year_id
@@ -353,16 +374,17 @@ class LeaveController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Leave application submitted successfully'
+                'message' => 'Leave application submitted successfully',
             ], 201);
 
         } catch (\Exception $e) {
             DB::rollBack();
-            Log::error('Error creating leave: ' . $e->getMessage());
+            Log::error('Error creating leave: '.$e->getMessage());
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error creating leave',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -441,19 +463,19 @@ class LeaveController extends Controller
                 }
                 $leave = $leave->first();
             }
-            
-            if (!$leave) {
+
+            if (! $leave) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Leave record not found'
+                    'message' => 'Leave record not found',
                 ], 404);
             }
 
             // Tenant guard: don't leak leaves from other branches/schools.
-            if (!$this->canAccessLeaveBranch(request(), isset($leave->branch_id) ? (int) $leave->branch_id : null)) {
+            if (! $this->canAccessLeaveBranch(request(), isset($leave->branch_id) ? (int) $leave->branch_id : null)) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Leave record not found'
+                    'message' => 'Leave record not found',
                 ], 404);
             }
 
@@ -469,24 +491,25 @@ class LeaveController extends Controller
                 $leave['profile_picture'] = $leave['student_profile_picture'] ?? $leave['user_avatar'] ?? null;
             } else {
                 $pic = $leave['user_avatar'] ?? null;
-                if (empty($pic) && !empty($leave['teacher_id'])) {
+                if (empty($pic) && ! empty($leave['teacher_id'])) {
                     $teacher = Teacher::where('user_id', $leave['teacher_id'])->first();
                     $pic = $teacher?->profile_picture;
                 }
                 $leave['profile_picture'] = $pic;
             }
             unset($leave['student_profile_picture'], $leave['user_avatar']);
-            
+
             return response()->json([
                 'success' => true,
-                'data' => $leave
+                'data' => $leave,
             ]);
         } catch (\Exception $e) {
-            Log::error('Error fetching leave record: ' . $e->getMessage());
+            Log::error('Error fetching leave record: '.$e->getMessage());
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error fetching leave record',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -507,7 +530,7 @@ class LeaveController extends Controller
                 'to_date' => 'nullable|date|after_or_equal:from_date',
                 'leave_type' => 'nullable|string',
                 'reason' => 'nullable|string',
-                'remarks' => 'nullable|string'
+                'remarks' => 'nullable|string',
             ];
             if ($hasAcademicYear) {
                 $rules['academic_year_id'] = 'nullable|exists:academic_years,id';
@@ -517,24 +540,24 @@ class LeaveController extends Controller
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
             $leave = DB::table($table)->where('id', $id)->whereNull('deleted_at')->first();
 
-            if (!$leave) {
+            if (! $leave) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Leave record not found'
+                    'message' => 'Leave record not found',
                 ], 404);
             }
 
             // Tenant guard: only manage leaves in branches the user can manage.
-            if (!$this->canManageBranch($request, isset($leave->branch_id) ? (int) $leave->branch_id : 0)) {
+            if (! $this->canManageBranch($request, isset($leave->branch_id) ? (int) $leave->branch_id : 0)) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Leave record not found'
+                    'message' => 'Leave record not found',
                 ], 404);
             }
 
@@ -548,31 +571,44 @@ class LeaveController extends Controller
                 }
             }
 
-            if ($request->has('from_date')) $updateData['from_date'] = $request->from_date;
-            if ($request->has('to_date')) $updateData['to_date'] = $request->to_date;
-            if ($hasAcademicYear && $request->has('academic_year_id')) $updateData['academic_year_id'] = $request->academic_year_id;
+            if ($request->has('from_date')) {
+                $updateData['from_date'] = $request->from_date;
+            }
+            if ($request->has('to_date')) {
+                $updateData['to_date'] = $request->to_date;
+            }
+            if ($hasAcademicYear && $request->has('academic_year_id')) {
+                $updateData['academic_year_id'] = $request->academic_year_id;
+            }
             if ($request->has('from_date') || $request->has('to_date')) {
                 $from = $request->has('from_date') ? $request->from_date : $leave->from_date;
                 $to = $request->has('to_date') ? $request->to_date : $leave->to_date;
                 $updateData['total_days'] = $this->calculateTotalDays($from, $to);
             }
-            if ($request->has('leave_type')) $updateData['leave_type'] = $request->leave_type;
-            if ($request->has('reason')) $updateData['reason'] = $request->reason;
-            if ($request->has('remarks')) $updateData['remarks'] = $request->remarks;
+            if ($request->has('leave_type')) {
+                $updateData['leave_type'] = $request->leave_type;
+            }
+            if ($request->has('reason')) {
+                $updateData['reason'] = $request->reason;
+            }
+            if ($request->has('remarks')) {
+                $updateData['remarks'] = $request->remarks;
+            }
 
             DB::table($table)->where('id', $id)->update($updateData);
 
             return response()->json([
                 'success' => true,
-                'message' => 'Leave updated successfully'
+                'message' => 'Leave updated successfully',
             ]);
 
         } catch (\Exception $e) {
-            Log::error('Error updating leave: ' . $e->getMessage());
+            Log::error('Error updating leave: '.$e->getMessage());
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error updating leave',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -588,18 +624,18 @@ class LeaveController extends Controller
             $table = $type === 'student' ? 'student_leaves' : 'teacher_leaves';
 
             $leave = DB::table($table)->where('id', $id)->whereNull('deleted_at')->first();
-            if (!$leave) {
+            if (! $leave) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Leave record not found'
+                    'message' => 'Leave record not found',
                 ], 404);
             }
 
             // Tenant guard.
-            if (!$this->canManageBranch($request, isset($leave->branch_id) ? (int) $leave->branch_id : 0)) {
+            if (! $this->canManageBranch($request, isset($leave->branch_id) ? (int) $leave->branch_id : 0)) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Leave record not found'
+                    'message' => 'Leave record not found',
                 ], 404);
             }
 
@@ -608,14 +644,15 @@ class LeaveController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Leave deleted successfully'
+                'message' => 'Leave deleted successfully',
             ]);
         } catch (\Exception $e) {
-            Log::error('Error deleting leave: ' . $e->getMessage());
+            Log::error('Error deleting leave: '.$e->getMessage());
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error deleting leave',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -628,7 +665,7 @@ class LeaveController extends Controller
         try {
             // Tenant guard: only view leaves of a student in an accessible branch.
             $studentBranch = DB::table('users')->where('id', $studentId)->value('branch_id');
-            if (!$this->canAccessLeaveBranch(request(), $studentBranch !== null ? (int) $studentBranch : null)) {
+            if (! $this->canAccessLeaveBranch(request(), $studentBranch !== null ? (int) $studentBranch : null)) {
                 return response()->json(['success' => false, 'message' => 'Student not found'], 404);
             }
 
@@ -641,15 +678,15 @@ class LeaveController extends Controller
             if ($academicYearId && $hasAcademicYear) {
                 $baseQuery->where('student_leaves.academic_year_id', (int) $academicYearId);
             }
-            
+
             if (request()->has('from_date')) {
                 $baseQuery->whereDate('from_date', '>=', request('from_date'));
             }
-            
+
             if (request()->has('to_date')) {
                 $baseQuery->whereDate('to_date', '<=', request('to_date'));
             }
-            
+
             $leavesQuery = (clone $baseQuery)->orderBy('student_leaves.created_at', 'desc');
             if ($hasAcademicYear) {
                 $leavesQuery->leftJoin('academic_years as leave_academic_years', 'student_leaves.academic_year_id', '=', 'leave_academic_years.id')
@@ -675,20 +712,21 @@ class LeaveController extends Controller
                 'total_days_taken' => (int) ($summaryQuery->total_days_taken ?? 0),
                 'approved' => (int) ($summaryQuery->approved ?? 0),
                 'pending' => (int) ($summaryQuery->pending ?? 0),
-                'rejected' => (int) ($summaryQuery->rejected ?? 0)
+                'rejected' => (int) ($summaryQuery->rejected ?? 0),
             ];
 
             return response()->json([
                 'success' => true,
                 'data' => $leaves,
-                'summary' => $summary
+                'summary' => $summary,
             ]);
         } catch (\Exception $e) {
-            Log::error('Error fetching student leaves: ' . $e->getMessage());
+            Log::error('Error fetching student leaves: '.$e->getMessage());
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error fetching student leaves',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -701,7 +739,7 @@ class LeaveController extends Controller
         try {
             // Tenant guard: only view leaves of a teacher in an accessible branch.
             $teacherBranch = DB::table('users')->where('id', $teacherId)->value('branch_id');
-            if (!$this->canAccessLeaveBranch(request(), $teacherBranch !== null ? (int) $teacherBranch : null)) {
+            if (! $this->canAccessLeaveBranch(request(), $teacherBranch !== null ? (int) $teacherBranch : null)) {
                 return response()->json(['success' => false, 'message' => 'Teacher not found'], 404);
             }
 
@@ -719,11 +757,11 @@ class LeaveController extends Controller
             if (request()->has('from_date')) {
                 $baseQuery->whereDate('from_date', '>=', request('from_date'));
             }
-            
+
             if (request()->has('to_date')) {
                 $baseQuery->whereDate('to_date', '<=', request('to_date'));
             }
-            
+
             $leavesQuery = (clone $baseQuery)->orderBy('teacher_leaves.created_at', 'desc');
             if ($hasAcademicYear) {
                 $leavesQuery->leftJoin('academic_years as leave_academic_years', 'teacher_leaves.academic_year_id', '=', 'leave_academic_years.id')
@@ -749,20 +787,21 @@ class LeaveController extends Controller
                 'total_days_taken' => (int) ($summaryQuery->total_days_taken ?? 0),
                 'approved' => (int) ($summaryQuery->approved ?? 0),
                 'pending' => (int) ($summaryQuery->pending ?? 0),
-                'rejected' => (int) ($summaryQuery->rejected ?? 0)
+                'rejected' => (int) ($summaryQuery->rejected ?? 0),
             ];
 
             return response()->json([
                 'success' => true,
                 'data' => $leaves,
-                'summary' => $summary
+                'summary' => $summary,
             ]);
         } catch (\Exception $e) {
-            Log::error('Error fetching teacher leaves: ' . $e->getMessage());
+            Log::error('Error fetching teacher leaves: '.$e->getMessage());
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error fetching teacher leaves',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -773,22 +812,22 @@ class LeaveController extends Controller
      */
     protected function getAcademicYearDateRange($academicYear)
     {
-        if (!$academicYear || !preg_match('/^(\d{4})-(\d{4})$/', $academicYear, $matches)) {
+        if (! $academicYear || ! preg_match('/^(\d{4})-(\d{4})$/', $academicYear, $matches)) {
             return null;
         }
-        
-        $startYear = (int)$matches[1];
-        $endYear = (int)$matches[2];
-        
+
+        $startYear = (int) $matches[1];
+        $endYear = (int) $matches[2];
+
         // Academic year typically runs from July to June
         // Start: July 1 of start year
         // End: June 30 of end year
         $startDate = Carbon::create($startYear, 7, 1)->startOfDay();
         $endDate = Carbon::create($endYear, 6, 30)->endOfDay();
-        
+
         return [
             'start' => $startDate->format('Y-m-d'),
-            'end' => $endDate->format('Y-m-d')
+            'end' => $endDate->format('Y-m-d'),
         ];
     }
 
@@ -797,11 +836,12 @@ class LeaveController extends Controller
      */
     private function calculateTotalDays(?string $fromDate, ?string $toDate): int
     {
-        if (!$fromDate || !$toDate) {
+        if (! $fromDate || ! $toDate) {
             return 1;
         }
         $from = Carbon::parse($fromDate)->startOfDay();
         $to = Carbon::parse($toDate)->startOfDay();
+
         return max(1, $from->diffInDays($to) + 1);
     }
 
@@ -825,12 +865,14 @@ class LeaveController extends Controller
         $accessible = $this->getAccessibleBranchIds($request);
         if ($accessible === 'all') {
             $schoolId = $this->getCurrentSchoolId($request);
-            if (!$schoolId || $branchId === null) {
+            if (! $schoolId || $branchId === null) {
                 return true;
             }
             $branchSchool = DB::table('branches')->where('id', $branchId)->value('school_id');
+
             return (int) $branchSchool === (int) $schoolId;
         }
+
         return $branchId !== null && in_array((int) $branchId, array_map('intval', (array) $accessible), true);
     }
 
@@ -842,4 +884,3 @@ class LeaveController extends Controller
         return $request->get('type') === 'teacher' ? 'teacher' : 'student';
     }
 }
-

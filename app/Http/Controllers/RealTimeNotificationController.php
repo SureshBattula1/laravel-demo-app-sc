@@ -15,17 +15,21 @@ class RealTimeNotificationController extends Controller
     {
         $user = $request->user();
 
-        if (!$user) {
+        if (! $user) {
             return response()->json([
                 'success' => false,
-                'message' => 'Unauthenticated'
+                'message' => 'Unauthenticated',
             ], 401);
         }
 
         return response()->stream(function () use ($user) {
             $lastCheck = now();
-            
-            while (true) {
+            $maxIterations = 12; // ~24s bounded stream so PHP-FPM workers are released cleanly
+
+            for ($i = 0; $i < $maxIterations; $i++) {
+                if (connection_aborted()) {
+                    break;
+                }
                 try {
                     // Check for new notifications
                     $notifications = Notification::where('user_id', $user->id)
@@ -38,13 +42,15 @@ class RealTimeNotificationController extends Controller
                     if ($notifications->count() > 0) {
                         $data = [
                             'notifications' => $notifications->toArray(),
-                            'count' => $notifications->count()
+                            'count' => $notifications->count(),
                         ];
-                        
-                        echo "data: " . json_encode($data) . "\n\n";
-                        ob_flush();
+
+                        echo 'data: '.json_encode($data)."\n\n";
+                        if (ob_get_level() > 0) {
+                            ob_flush();
+                        }
                         flush();
-                        
+
                         $lastCheck = now();
                     }
 
@@ -54,7 +60,7 @@ class RealTimeNotificationController extends Controller
                 } catch (\Exception $e) {
                     Log::error('Error in notification stream', [
                         'user_id' => $user->id,
-                        'error' => $e->getMessage()
+                        'error' => $e->getMessage(),
                     ]);
                     break;
                 }
@@ -63,7 +69,7 @@ class RealTimeNotificationController extends Controller
             'Content-Type' => 'text/event-stream',
             'Cache-Control' => 'no-cache',
             'X-Accel-Buffering' => 'no',
-            'Connection' => 'keep-alive'
+            'Connection' => 'keep-alive',
         ]);
     }
 }

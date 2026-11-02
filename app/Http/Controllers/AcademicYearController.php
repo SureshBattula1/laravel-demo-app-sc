@@ -17,22 +17,22 @@ class AcademicYearController extends Controller
     public function current(Request $request)
     {
         try {
-            $query = AcademicYear::query()->current()->active();
-            $this->applyAcademicYearTenantFilter($query, $request);
-            $academicYear = $query->first();
-            if (!$academicYear) {
+            $academicYear = app(\App\Services\AcademicYearContext::class)->current(false);
+            if (! $academicYear) {
                 return response()->json([
                     'success' => false,
                     'message' => 'No current academic year is set.',
                     'data' => null,
                 ], 404);
             }
+
             return response()->json([
                 'success' => true,
                 'data' => $academicYear,
             ]);
         } catch (\Exception $e) {
             Log::error('Academic year current error', ['error' => $e->getMessage()]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch current academic year',
@@ -53,12 +53,12 @@ class AcademicYearController extends Controller
             if ($request->boolean('active')) {
                 $query->where('is_active', true);
             }
-            if (!$request->boolean('include_past')) {
+            if (! $request->boolean('include_past')) {
                 // By default exclude past years for dropdowns; use include_past=1 to get all
                 $query->where('end_date', '>=', now()->toDateString());
             }
             if ($request->has('search') && $request->search) {
-                $search = '%' . $request->search . '%';
+                $search = '%'.$request->search.'%';
                 $query->where(function ($q) use ($search) {
                     $q->where('name', 'like', $search)
                         ->orWhere('description', 'like', $search);
@@ -85,6 +85,7 @@ class AcademicYearController extends Controller
             ]);
         } catch (\Exception $e) {
             Log::error('Academic years index error', ['error' => $e->getMessage()]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch academic years',
@@ -99,6 +100,7 @@ class AcademicYearController extends Controller
             $query = AcademicYear::query()->whereKey($id);
             $this->applyAcademicYearTenantFilter($query, $request);
             $academicYear = $query->firstOrFail();
+
             return response()->json([
                 'success' => true,
                 'data' => $academicYear,
@@ -111,7 +113,7 @@ class AcademicYearController extends Controller
     public function store(Request $request)
     {
         $companyId = $this->getCurrentCompanyId($request);
-        if (!$companyId && $request->user()?->role === 'SuperAdmin' && empty($request->user()?->company_id)) {
+        if (! $companyId && $request->user()?->role === 'SuperAdmin' && empty($request->user()?->company_id)) {
             // Platform SuperAdmin must still attach years to a company when creating
             $companyId = $request->filled('company_id') ? (int) $request->company_id : null;
         }
@@ -126,10 +128,10 @@ class AcademicYearController extends Controller
             'company_id' => 'nullable|exists:companies,id',
         ]);
 
-        if (!$companyId && !empty($validated['company_id'])) {
+        if (! $companyId && ! empty($validated['company_id'])) {
             $companyId = (int) $validated['company_id'];
         }
-        if (!$companyId) {
+        if (! $companyId) {
             return response()->json([
                 'success' => false,
                 'message' => 'Company context is required to create an academic year.',
@@ -138,7 +140,7 @@ class AcademicYearController extends Controller
 
         $validated['company_id'] = $companyId;
 
-        if (!empty($validated['is_current'])) {
+        if (! empty($validated['is_current'])) {
             AcademicYear::query()
                 ->where('company_id', $companyId)
                 ->update(['is_current' => false]);
@@ -146,6 +148,7 @@ class AcademicYearController extends Controller
         }
 
         $academicYear = AcademicYear::create($validated);
+
         return response()->json([
             'success' => true,
             'message' => 'Academic year created successfully',
@@ -168,7 +171,7 @@ class AcademicYearController extends Controller
             'description' => 'nullable|string|max:500',
         ]);
 
-        if (!empty($validated['is_current'])) {
+        if (! empty($validated['is_current'])) {
             AcademicYear::query()
                 ->where('company_id', $academicYear->company_id)
                 ->where('id', '!=', $id)
@@ -176,6 +179,7 @@ class AcademicYearController extends Controller
             \App\Services\AcademicYearContext::clearCurrentCache($academicYear->company_id);
         }
         $academicYear->update($validated);
+
         return response()->json([
             'success' => true,
             'message' => 'Academic year updated successfully',
@@ -192,6 +196,7 @@ class AcademicYearController extends Controller
             $companyId = $academicYear->company_id;
             $academicYear->delete();
             \App\Services\AcademicYearContext::clearCurrentCache($companyId);
+
             return response()->json([
                 'success' => true,
                 'message' => 'Academic year deleted successfully',

@@ -42,6 +42,7 @@ return Application::configure(basePath: dirname(__DIR__))
                 // (and controllers) see integer IDs.
                 \App\Http\Middleware\DecodeHashids::class,
                 \App\Http\Middleware\SetAcademicYearContext::class,
+                \App\Http\Middleware\AuditActivityMiddleware::class,
             ]
         );
 

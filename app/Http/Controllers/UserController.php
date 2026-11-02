@@ -46,9 +46,9 @@ class UserController extends Controller
         ];
 
         // Transform user data to ensure proper serialization
-        $usersData = collect($users->items())->map(function($user) use ($rolesMap, $roleMapping) {
+        $usersData = collect($users->items())->map(function ($user) use ($rolesMap, $roleMapping) {
             $roleName = $roleMapping[$user->role] ?? $user->role;
-            
+
             return [
                 'id' => $user->id,
                 'first_name' => $user->first_name,
@@ -62,13 +62,13 @@ class UserController extends Controller
                 'branch' => $user->branch ? [
                     'id' => $user->branch->id,
                     'name' => $user->branch->name,
-                    'code' => $user->branch->code
+                    'code' => $user->branch->code,
                 ] : null,
                 'avatar' => $user->avatar,
                 'is_active' => $user->is_active,
                 'last_login' => $user->last_login,
                 'created_at' => $user->created_at,
-                'updated_at' => $user->updated_at
+                'updated_at' => $user->updated_at,
             ];
         })->toArray();
 
@@ -82,8 +82,8 @@ class UserController extends Controller
                 'current_page' => $users->currentPage(),
                 'last_page' => $users->lastPage(),
                 'from' => $users->firstItem(),
-                'to' => $users->lastItem()
-            ]
+                'to' => $users->lastItem(),
+            ],
         ]);
     }
 
@@ -239,9 +239,9 @@ class UserController extends Controller
         ];
 
         // Transform user data to ensure proper serialization
-        $usersData = $users->map(function($user) use ($rolesMap, $roleMapping) {
+        $usersData = $users->map(function ($user) use ($rolesMap, $roleMapping) {
             $roleName = $roleMapping[$user->role] ?? $user->role;
-            
+
             return [
                 'id' => $user->id,
                 'first_name' => $user->first_name,
@@ -255,20 +255,20 @@ class UserController extends Controller
                 'branch' => $user->branch ? [
                     'id' => $user->branch->id,
                     'name' => $user->branch->name,
-                    'code' => $user->branch->code
+                    'code' => $user->branch->code,
                 ] : null,
                 'avatar' => $user->avatar,
                 'is_active' => $user->is_active,
                 'last_login' => $user->last_login,
                 'created_at' => $user->created_at,
-                'updated_at' => $user->updated_at
+                'updated_at' => $user->updated_at,
             ];
         })->toArray();
 
         return response()->json([
             'success' => true,
             'message' => 'Users retrieved successfully',
-            'data' => $usersData
+            'data' => $usersData,
         ]);
     }
 
@@ -278,7 +278,7 @@ class UserController extends Controller
     public function show(Request $request, $id)
     {
         $user = User::with(['branch'])->findOrFail($id);
-        if (!$this->canAccessManagedUser($request, $user)) {
+        if (! $this->canAccessManagedUser($request, $user)) {
             return $this->forbiddenResponse('You do not have access to this user');
         }
 
@@ -292,7 +292,7 @@ class UserController extends Controller
             'Staff' => 'Staff',
             'Accountant' => 'Accountant',
         ];
-        
+
         $roleName = $roleMapping[$user->role] ?? $user->role;
         $roleRecord = DB::table('roles')->where('name', $roleName)->select('id')->first();
         $user->role_id = $roleRecord ? $roleRecord->id : null;
@@ -300,7 +300,7 @@ class UserController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'User retrieved successfully',
-            'data' => $user
+            'data' => $user,
         ]);
     }
 
@@ -309,7 +309,7 @@ class UserController extends Controller
      */
     public function store(Request $request)
     {
-        if ($request->filled('branch_id') && !$this->canAccessBranch($request, (int) $request->branch_id)) {
+        if ($request->filled('branch_id') && ! $this->canAccessBranch($request, (int) $request->branch_id)) {
             return $this->forbiddenResponse('You do not have access to this branch');
         }
 
@@ -320,23 +320,36 @@ class UserController extends Controller
             'password' => 'required|string|min:8|confirmed',
             'role_id' => 'required|exists:roles,id',
             'branch_id' => 'nullable|exists:branches,id',
-            'is_active' => 'boolean'
+            'is_active' => 'boolean',
         ]);
 
         if ($validator->fails()) {
             return response()->json([
                 'success' => false,
                 'message' => 'Validation failed',
-                'errors' => $validator->errors()
+                'errors' => $validator->errors(),
             ], 422);
         }
 
         // Get role name from role_id
         $role = DB::table('roles')->where('id', $request->role_id)->first();
-        if (!$this->canAssignRole($request, $role)) {
+        if (! $this->canAssignRole($request, $role)) {
             return $this->forbiddenResponse('You cannot assign a role above your own level');
         }
-        $roleName = $role ? $role->name : 'Student';
+        $roleMapping = [
+            'Super Admin' => 'SuperAdmin',
+            'Branch Admin' => 'BranchAdmin',
+            'Teacher' => 'Teacher',
+            'Staff' => 'Staff',
+            'Accountant' => 'Accountant',
+            'Student' => 'Student',
+            'Parent' => 'Parent',
+            'Driver' => 'Driver',
+            'Admin' => 'SuperAdmin',
+            'BranchAdmin' => 'BranchAdmin',
+            'SuperAdmin' => 'SuperAdmin',
+        ];
+        $roleName = $role ? ($roleMapping[$role->name] ?? $role->name) : 'Student';
 
         $user = User::create([
             'first_name' => $request->first_name,
@@ -347,8 +360,19 @@ class UserController extends Controller
             'branch_id' => $request->branch_id,
             'company_id' => $request->user()?->company_id,
             'is_active' => $request->get('is_active', true),
-            'email_verified_at' => now()
+            'email_verified_at' => now(),
         ]);
+
+        if ($role) {
+            DB::table('user_roles')->insert([
+                'user_id' => $user->id,
+                'role_id' => $role->id,
+                'is_primary' => true,
+                'branch_id' => $request->branch_id,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
 
         // Add role_id to response for frontend
         $userData = $user->toArray();
@@ -357,7 +381,7 @@ class UserController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'User created successfully',
-            'data' => $userData
+            'data' => $userData,
         ], 201);
     }
 
@@ -367,11 +391,11 @@ class UserController extends Controller
     public function update(Request $request, $id)
     {
         $user = User::findOrFail($id);
-        if (!$this->canAccessManagedUser($request, $user)) {
+        if (! $this->canAccessManagedUser($request, $user)) {
             return $this->forbiddenResponse('You do not have access to this user');
         }
 
-        if ($request->filled('branch_id') && !$this->canAccessBranch($request, (int) $request->branch_id)) {
+        if ($request->filled('branch_id') && ! $this->canAccessBranch($request, (int) $request->branch_id)) {
             return $this->forbiddenResponse('You do not have access to this branch');
         }
 
@@ -382,23 +406,23 @@ class UserController extends Controller
             'password' => 'sometimes|string|min:8|confirmed',
             'role_id' => 'sometimes|exists:roles,id',
             'branch_id' => 'nullable|exists:branches,id',
-            'is_active' => 'boolean'
+            'is_active' => 'boolean',
         ]);
 
         if ($validator->fails()) {
             return response()->json([
                 'success' => false,
                 'message' => 'Validation failed',
-                'errors' => $validator->errors()
+                'errors' => $validator->errors(),
             ], 422);
         }
 
         $data = $request->only(['first_name', 'last_name', 'email', 'branch_id', 'is_active']);
 
-        // Convert role_id to role name
+        // Convert role_id to role name and update user_roles pivot
         if ($request->has('role_id')) {
             $role = DB::table('roles')->where('id', $request->role_id)->first();
-            if (!$this->canAssignRole($request, $role)) {
+            if (! $this->canAssignRole($request, $role)) {
                 return $this->forbiddenResponse('You cannot assign a role above your own level');
             }
             if ($role) {
@@ -406,11 +430,28 @@ class UserController extends Controller
                 $roleMapping = [
                     'Super Admin' => 'SuperAdmin',
                     'Branch Admin' => 'BranchAdmin',
+                    'Teacher' => 'Teacher',
+                    'Staff' => 'Staff',
+                    'Accountant' => 'Accountant',
+                    'Student' => 'Student',
+                    'Parent' => 'Parent',
+                    'Driver' => 'Driver',
                     'Admin' => 'SuperAdmin',
                     'BranchAdmin' => 'BranchAdmin',
-                    'SuperAdmin' => 'SuperAdmin'
+                    'SuperAdmin' => 'SuperAdmin',
                 ];
-                $data['role'] = $roleMapping[$role->name] ?? $user->role;
+                $data['role'] = $roleMapping[$role->name] ?? $role->name ?? $user->role;
+
+                // Sync user_roles pivot table so role-based queries and permissions remain in sync
+                DB::table('user_roles')->where('user_id', $user->id)->delete();
+                DB::table('user_roles')->insert([
+                    'user_id' => $user->id,
+                    'role_id' => $role->id,
+                    'is_primary' => true,
+                    'branch_id' => $request->branch_id ?? $user->branch_id,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
             }
         }
 
@@ -429,7 +470,7 @@ class UserController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'User updated successfully',
-            'data' => $userData
+            'data' => $userData,
         ]);
     }
 
@@ -439,7 +480,7 @@ class UserController extends Controller
     public function destroy(Request $request, $id)
     {
         $user = User::findOrFail($id);
-        if (!$this->canAccessManagedUser($request, $user)) {
+        if (! $this->canAccessManagedUser($request, $user)) {
             return $this->forbiddenResponse('You do not have access to this user');
         }
 
@@ -447,7 +488,7 @@ class UserController extends Controller
         if ($user->id === auth()->id()) {
             return response()->json([
                 'success' => false,
-                'message' => 'You cannot delete your own account'
+                'message' => 'You cannot delete your own account',
             ], 403);
         }
 
@@ -455,7 +496,7 @@ class UserController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => 'User deleted successfully'
+            'message' => 'User deleted successfully',
         ]);
     }
 
@@ -465,7 +506,7 @@ class UserController extends Controller
     public function toggleStatus(Request $request, $id)
     {
         $user = User::findOrFail($id);
-        if (!$this->canAccessManagedUser($request, $user)) {
+        if (! $this->canAccessManagedUser($request, $user)) {
             return $this->forbiddenResponse('You do not have access to this user');
         }
 
@@ -473,17 +514,17 @@ class UserController extends Controller
         if ($user->id === auth()->id()) {
             return response()->json([
                 'success' => false,
-                'message' => 'You cannot toggle your own status'
+                'message' => 'You cannot toggle your own status',
             ], 403);
         }
 
-        $user->is_active = !$user->is_active;
+        $user->is_active = ! $user->is_active;
         $user->save();
 
         return response()->json([
             'success' => true,
             'message' => 'User status updated successfully',
-            'data' => $user
+            'data' => $user,
         ]);
     }
 
@@ -493,19 +534,19 @@ class UserController extends Controller
     public function resetPassword(Request $request, $id)
     {
         $validator = Validator::make($request->all(), [
-            'password' => 'required|string|min:8|confirmed'
+            'password' => 'required|string|min:8|confirmed',
         ]);
 
         if ($validator->fails()) {
             return response()->json([
                 'success' => false,
                 'message' => 'Validation failed',
-                'errors' => $validator->errors()
+                'errors' => $validator->errors(),
             ], 422);
         }
 
         $user = User::findOrFail($id);
-        if (!$this->canAccessManagedUser($request, $user)) {
+        if (! $this->canAccessManagedUser($request, $user)) {
             return $this->forbiddenResponse('You do not have access to this user');
         }
         $user->password = Hash::make($request->password);
@@ -513,13 +554,13 @@ class UserController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => 'Password reset successfully'
+            'message' => 'Password reset successfully',
         ]);
     }
 
     /**
      * Get user's permissions showing role permissions + user-specific overrides
-     * 
+     *
      * Returns:
      * - from_role: true if permission comes from user's role(s)
      * - overridden: true if user has specific override for this permission
@@ -528,7 +569,7 @@ class UserController extends Controller
     public function getPermissions(Request $request, $id)
     {
         $user = User::with(['roles'])->findOrFail($id);
-        if (!$this->canAccessManagedUser($request, $user)) {
+        if (! $this->canAccessManagedUser($request, $user)) {
             return $this->forbiddenResponse('You do not have access to this user');
         }
 
@@ -599,20 +640,20 @@ class UserController extends Controller
         $groupedPermissions = [];
         foreach ($permissionsData as $perm) {
             $moduleSlug = $perm['module_slug'];
-            if (!isset($groupedPermissions[$moduleSlug])) {
+            if (! isset($groupedPermissions[$moduleSlug])) {
                 $groupedPermissions[$moduleSlug] = [
                     'module_name' => $perm['module_name'],
                     'module_slug' => $moduleSlug,
                     'module_icon' => $perm['module_icon'],
                     'module_order' => $perm['module_order'],
-                    'permissions' => []
+                    'permissions' => [],
                 ];
             }
             $groupedPermissions[$moduleSlug]['permissions'][] = $perm;
         }
 
         // Sort by module order
-        usort($groupedPermissions, function($a, $b) {
+        usort($groupedPermissions, function ($a, $b) {
             return $a['module_order'] <=> $b['module_order'];
         });
 
@@ -625,17 +666,17 @@ class UserController extends Controller
                     'name' => $user->full_name,
                     'email' => $user->email,
                     'role' => $user->role,
-                    'roles' => $user->roles->map(function($role) {
+                    'roles' => $user->roles->map(function ($role) {
                         return [
                             'id' => $role->id,
                             'name' => $role->name,
-                            'slug' => $role->slug
+                            'slug' => $role->slug,
                         ];
-                    })
+                    }),
                 ],
                 'permissions' => $permissionsData,
-                'grouped_permissions' => array_values($groupedPermissions)
-            ]
+                'grouped_permissions' => array_values($groupedPermissions),
+            ],
         ]);
     }
 
@@ -646,7 +687,7 @@ class UserController extends Controller
     public function updatePermissions(Request $request, $id)
     {
         $target = User::findOrFail($id);
-        if (!$this->canAccessManagedUser($request, $target)) {
+        if (! $this->canAccessManagedUser($request, $target)) {
             return $this->forbiddenResponse('You do not have access to this user');
         }
 
@@ -660,7 +701,7 @@ class UserController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Validation failed',
-                'errors' => $validator->errors()
+                'errors' => $validator->errors(),
             ], 422);
         }
 
@@ -682,11 +723,11 @@ class UserController extends Controller
                     'granted' => (bool) $perm['granted'], // true = grant override, false = revoke override
                     'branch_id' => $user->branch_id,
                     'created_at' => now(),
-                    'updated_at' => now()
+                    'updated_at' => now(),
                 ];
             }
 
-            if (!empty($permissionsToInsert)) {
+            if (! empty($permissionsToInsert)) {
                 DB::table('user_permissions')->insert($permissionsToInsert);
             }
 
@@ -696,14 +737,15 @@ class UserController extends Controller
                 'success' => true,
                 'message' => 'User permission overrides updated successfully',
                 'data' => [
-                    'overrides_count' => count($permissionsToInsert)
-                ]
+                    'overrides_count' => count($permissionsToInsert),
+                ],
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
+
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to update permissions: ' . $e->getMessage()
+                'message' => 'Failed to update permissions: '.$e->getMessage(),
             ], 500);
         }
     }
@@ -714,28 +756,28 @@ class UserController extends Controller
     public function assignRoles(Request $request, $id)
     {
         $target = User::findOrFail($id);
-        if (!$this->canAccessManagedUser($request, $target)) {
+        if (! $this->canAccessManagedUser($request, $target)) {
             return $this->forbiddenResponse('You do not have access to this user');
         }
 
         $validator = Validator::make($request->all(), [
             'role_ids' => 'required|array',
             'role_ids.*' => 'exists:roles,id',
-            'primary_role_id' => 'nullable|exists:roles,id'
+            'primary_role_id' => 'nullable|exists:roles,id',
         ]);
 
         if ($validator->fails()) {
             return response()->json([
                 'success' => false,
                 'message' => 'Validation failed',
-                'errors' => $validator->errors()
+                'errors' => $validator->errors(),
             ], 422);
         }
 
         $user = User::findOrFail($id);
         $assignableRoles = DB::table('roles')->whereIn('id', $request->role_ids)->get();
         foreach ($assignableRoles as $role) {
-            if (!$this->canAssignRole($request, $role)) {
+            if (! $this->canAssignRole($request, $role)) {
                 return $this->forbiddenResponse('You cannot assign a role above your own level');
             }
         }
@@ -755,7 +797,7 @@ class UserController extends Controller
                     'is_primary' => $roleId == $primaryRoleId,
                     'branch_id' => $user->branch_id,
                     'created_at' => now(),
-                    'updated_at' => now()
+                    'updated_at' => now(),
                 ];
             }
 
@@ -772,15 +814,15 @@ class UserController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'User roles updated successfully'
+                'message' => 'User roles updated successfully',
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
+
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to update roles: ' . $e->getMessage()
+                'message' => 'Failed to update roles: '.$e->getMessage(),
             ], 500);
         }
     }
 }
-

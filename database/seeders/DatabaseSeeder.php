@@ -490,6 +490,14 @@ class DatabaseSeeder extends Seeder
                 'order' => 30,
                 'permissions' => ['view', 'create', 'edit', 'delete', 'assign', 'export'],
             ],
+            [
+                'name' => 'Promotions',
+                'slug' => 'promotions',
+                'icon' => 'trending_up',
+                'route' => '/promotions',
+                'order' => 32,
+                'permissions' => ['view', 'promote', 'revert', 'export'],
+            ],
         ];
 
         foreach ($modulesData as $moduleData) {
@@ -568,6 +576,7 @@ class DatabaseSeeder extends Seeder
             'leaves.view', 'leaves.create', 'leaves.edit', 'leaves.delete', 'leaves.approve', 'leaves.reject',
             'import.view', 'import.upload', 'import.validate', 'import.commit', 'import.cancel', 'import.template',
             'reports.view', 'reports.generate', 'reports.export',
+            'promotions.view', 'promotions.promote', 'promotions.revert', 'promotions.export',
             'settings.view',
             'users.view',
             'search.global',

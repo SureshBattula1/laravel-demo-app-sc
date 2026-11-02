@@ -64,10 +64,15 @@ class TransportDashboardController extends Controller
 
             $todayTripsCount = (clone $todayTripsQuery)->count();
 
+            $activeTripsCount = (clone $todayTripsQuery)
+                ->whereIn('transport_trips.status', ['Started', 'In Progress'])
+                ->count();
+
             // Today's Trips live list
             $todayTrips = $todayTripsQuery
                 ->select(
                     'transport_trips.id',
+                    'transport_trips.route_id',
                     'transport_trips.trip_code',
                     'transport_trips.trip_date',
                     'transport_trips.trip_type',
@@ -80,9 +85,9 @@ class TransportDashboardController extends Controller
                     'vehicles.vehicle_type',
                     'transport_drivers.name as driver_name',
                     'transport_drivers.phone as driver_phone',
-                    DB::raw('(select count(*) from trip_boarding_logs where trip_boarding_logs.trip_id = transport_trips.id and trip_boarding_logs.boarding_status = "Boarded") as boarded_count'),
-                    DB::raw('(select count(*) from trip_boarding_logs where trip_boarding_logs.trip_id = transport_trips.id and trip_boarding_logs.drop_status = "Dropped") as dropped_count'),
-                    DB::raw('(select count(*) from student_transport where student_transport.route_id = transport_trips.route_id and student_transport.status = "Active") as total_riders')
+                    DB::raw("(select count(*) from trip_boarding_logs where trip_boarding_logs.trip_id = transport_trips.id and trip_boarding_logs.boarding_status = 'Boarded') as boarded_count"),
+                    DB::raw("(select count(*) from trip_boarding_logs where trip_boarding_logs.trip_id = transport_trips.id and trip_boarding_logs.drop_status = 'Dropped') as dropped_count"),
+                    DB::raw("(select count(*) from student_transport where student_transport.route_id = transport_trips.route_id and student_transport.status = 'Active') as total_riders")
                 )
                 ->orderByRaw("CASE 
                     WHEN transport_trips.status IN ('Started', 'In Progress') THEN 1 
@@ -90,12 +95,28 @@ class TransportDashboardController extends Controller
                     ELSE 3 END")
                 ->orderBy('transport_trips.id', 'desc')
                 ->limit(50)
-                ->get();
+                ->get()
+                ->map(function ($trip) {
+                    $row = (array) $trip;
+
+                    return array_merge($row, [
+                        'boarded_students' => (int) ($trip->boarded_count ?? 0),
+                        'total_students' => (int) ($trip->total_riders ?? 0),
+                    ]);
+                })
+                ->values();
 
             return response()->json([
                 'success' => true,
                 'data' => [
                     'date' => $date,
+                    'students_count' => $studentsCount,
+                    'routes_count' => $routesCount,
+                    'vehicles_count' => $vehiclesCount,
+                    'drivers_count' => $driversCount,
+                    'today_trips_count' => $todayTripsCount,
+                    'active_trips_count' => $activeTripsCount,
+                    'today_trips' => $todayTrips,
                     'kpis' => [
                         'students' => $studentsCount,
                         'routes' => $routesCount,
@@ -103,7 +124,6 @@ class TransportDashboardController extends Controller
                         'drivers' => $driversCount,
                         'today_trips' => $todayTripsCount,
                     ],
-                    'today_trips' => $todayTrips,
                 ],
                 'message' => 'Transport dashboard metrics retrieved',
             ]);

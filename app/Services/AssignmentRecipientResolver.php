@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\StudentEnrollmentScope;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
@@ -149,8 +150,6 @@ class AssignmentRecipientResolver
     private function eligibleQuery(int $branchId, string $grade, string $section, ?int $academicYearId)
     {
         $section = trim($section);
-        $gradeWide = $section === '';
-        $hasEnrollments = Schema::hasTable('student_enrollments');
 
         $query = DB::table('students')
             ->join('users', 'students.user_id', '=', 'users.id')
@@ -160,25 +159,13 @@ class AssignmentRecipientResolver
             ->where('users.is_active', 1)
             ->where('students.student_status', 'Active');
 
-        if ($hasEnrollments && $academicYearId) {
-            $query->leftJoin('student_enrollments as se', function ($join) use ($academicYearId) {
-                $join->on('se.student_id', '=', 'students.id')
-                    ->where('se.academic_year_id', '=', $academicYearId);
-            })
-                ->whereRaw('COALESCE(se.grade, students.grade) = ?', [$grade])
-                ->whereRaw('COALESCE(se.academic_year_id, students.academic_year_id) = ?', [$academicYearId]);
-            if (! $gradeWide) {
-                $query->whereRaw('COALESCE(se.section, students.section) = ?', [$section]);
-            }
-        } else {
-            $query->where('students.grade', $grade);
-            if (! $gradeWide) {
-                $query->where('students.section', $section);
-            }
-            if ($academicYearId) {
-                $query->where('students.academic_year_id', $academicYearId);
-            }
-        }
+        StudentEnrollmentScope::whereInClass(
+            $query,
+            'students',
+            $academicYearId ? (int) $academicYearId : null,
+            $grade,
+            $section === '' ? null : $section
+        );
 
         return $query;
     }

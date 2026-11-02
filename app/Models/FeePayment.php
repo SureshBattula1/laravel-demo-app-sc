@@ -33,7 +33,7 @@ class FeePayment extends Model
         'academic_year_id',
         'remarks',
         'created_by',
-        'updated_by'
+        'updated_by',
     ];
 
     protected $casts = [
@@ -41,10 +41,11 @@ class FeePayment extends Model
         'discount_amount' => 'decimal:2',
         'late_fee' => 'decimal:2',
         'total_amount' => 'decimal:2',
-        'payment_date' => 'datetime'
+        'payment_date' => 'datetime',
     ];
 
     protected $keyType = 'string';
+
     public $incrementing = false;
 
     protected static function boot()
@@ -56,7 +57,7 @@ class FeePayment extends Model
             }
             // Auto-generate receipt number
             if (empty($model->receipt_number)) {
-                $model->receipt_number = 'RCPT-' . strtoupper(substr(Str::uuid(), 0, 8));
+                $model->receipt_number = 'RCPT-'.strtoupper(substr(Str::uuid(), 0, 8));
             }
         });
     }
@@ -80,5 +81,19 @@ class FeePayment extends Model
     public function updater()
     {
         return $this->belongsTo(User::class, 'updated_by');
+    }
+
+    public function academicYear()
+    {
+        return $this->belongsTo(AcademicYear::class, 'academic_year_id');
+    }
+
+    public function scopeForAcademicYear($query, $yearOrId)
+    {
+        if (is_numeric($yearOrId)) {
+            return $query->where('academic_year_id', (int) $yearOrId);
+        }
+
+        return $query->where('academic_year', $yearOrId);
     }
 }

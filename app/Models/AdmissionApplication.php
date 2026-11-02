@@ -93,7 +93,7 @@ class AdmissionApplication extends Model
         'referred_by',
         'documents',
         'created_by',
-        'updated_by'
+        'updated_by',
     ];
 
     protected $casts = [
@@ -143,6 +143,11 @@ class AdmissionApplication extends Model
         return $this->belongsTo(User::class, 'updated_by');
     }
 
+    public function academicYear(): BelongsTo
+    {
+        return $this->belongsTo(AcademicYear::class, 'academic_year_id');
+    }
+
     // Scopes
     public function scopeByStatus($query, $status)
     {
@@ -156,7 +161,16 @@ class AdmissionApplication extends Model
 
     public function scopeByAcademicYear($query, $year)
     {
+        if (is_numeric($year)) {
+            return $query->where('academic_year_id', (int) $year);
+        }
+
         return $query->where('academic_year', $year);
+    }
+
+    public function scopeForAcademicYear($query, $yearOrId)
+    {
+        return $this->scopeByAcademicYear($query, $yearOrId);
     }
 
     public function scopePending($query)
@@ -169,4 +183,3 @@ class AdmissionApplication extends Model
         return $query->where('application_status', 'Admitted');
     }
 }
-

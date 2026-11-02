@@ -15,6 +15,7 @@ class StudentLeave extends Model
     protected $fillable = [
         'student_id',
         'branch_id',
+        'academic_year_id',
         'from_date',
         'to_date',
         'total_days',
@@ -26,20 +27,20 @@ class StudentLeave extends Model
         'approved_by',
         'approved_at',
         'created_by',
-        'updated_by'
+        'updated_by',
     ];
 
     protected $casts = [
         'from_date' => 'date',
         'to_date' => 'date',
         'approved_at' => 'datetime',
-        'total_days' => 'integer'
+        'total_days' => 'integer',
     ];
 
     protected static function boot()
     {
         parent::boot();
-        
+
         static::creating(function ($model) {
             // Calculate total days if not set
             if (empty($model->total_days) && $model->from_date && $model->to_date) {
@@ -84,5 +85,14 @@ class StudentLeave extends Model
     {
         return $this->belongsTo(User::class, 'updated_by');
     }
-}
 
+    public function academicYear()
+    {
+        return $this->belongsTo(AcademicYear::class, 'academic_year_id');
+    }
+
+    public function scopeForAcademicYear($query, int $academicYearId)
+    {
+        return $query->where('academic_year_id', $academicYearId);
+    }
+}

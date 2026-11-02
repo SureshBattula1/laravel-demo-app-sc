@@ -39,8 +39,9 @@ class Invoice extends Model
         'notes',
         'terms_conditions',
         'academic_year',
+        'academic_year_id',
         'created_by',
-        'sent_at'
+        'sent_at',
     ];
 
     protected $appends = ['is_overdue'];
@@ -69,6 +70,11 @@ class Invoice extends Model
         return $this->belongsTo(Branch::class);
     }
 
+    public function academicYear()
+    {
+        return $this->belongsTo(AcademicYear::class, 'academic_year_id');
+    }
+
     // Student relationship removed - no Student model exists
     // Student data loaded manually in controller via DB::table('students')
 
@@ -85,8 +91,8 @@ class Invoice extends Model
     public function transactions()
     {
         return $this->belongsToMany(Transaction::class, 'invoice_transaction')
-                    ->withPivot('amount')
-                    ->withTimestamps();
+            ->withPivot('amount')
+            ->withTimestamps();
     }
 
     // Accessors
@@ -95,6 +101,7 @@ class Invoice extends Model
         if ($this->payment_status === 'Paid') {
             return false;
         }
+
         return $this->due_date && $this->due_date->isPast();
     }
 
@@ -117,7 +124,7 @@ class Invoice extends Model
     public function scopeOverdue($query)
     {
         return $query->where('payment_status', '!=', 'Paid')
-                     ->where('due_date', '<', now());
+            ->where('due_date', '<', now());
     }
 
     public function scopeByDateRange($query, $start, $end)
@@ -135,19 +142,28 @@ class Invoice extends Model
         return $query->where('branch_id', $branchId);
     }
 
+    public function scopeForAcademicYear($query, $yearOrId)
+    {
+        if (is_numeric($yearOrId)) {
+            return $query->where('academic_year_id', (int) $yearOrId);
+        }
+
+        return $query->where('academic_year', $yearOrId);
+    }
+
     // Helper methods
     public static function generateInvoiceNumber()
     {
         $year = date('Y');
         $month = date('m');
         $lastInvoice = self::whereYear('created_at', $year)
-                          ->whereMonth('created_at', $month)
-                          ->orderBy('id', 'desc')
-                          ->first();
-        
-        $sequence = $lastInvoice ? (int)substr($lastInvoice->invoice_number, -4) + 1 : 1;
-        
-        return 'INV-' . $year . $month . '-' . str_pad($sequence, 4, '0', STR_PAD_LEFT);
+            ->whereMonth('created_at', $month)
+            ->orderBy('id', 'desc')
+            ->first();
+
+        $sequence = $lastInvoice ? (int) substr($lastInvoice->invoice_number, -4) + 1 : 1;
+
+        return 'INV-'.$year.$month.'-'.str_pad($sequence, 4, '0', STR_PAD_LEFT);
     }
 
     /**
@@ -156,7 +172,7 @@ class Invoice extends Model
     public static function createFromTransactions($transactions, $data = [])
     {
         $firstTransaction = is_array($transactions) ? $transactions[0] : $transactions;
-        
+
         $subtotal = 0;
         if (is_array($transactions)) {
             foreach ($transactions as $trans) {
@@ -169,6 +185,10 @@ class Invoice extends Model
         $taxAmount = $data['tax_amount'] ?? 0;
         $discountAmount = $data['discount_amount'] ?? 0;
         $totalAmount = $subtotal + $taxAmount - $discountAmount;
+
+        $contextYear = app(\App\Services\AcademicYearContext::class)->model(false);
+        $academicYearId = $data['academic_year_id'] ?? $contextYear?->id;
+        $academicYearName = $data['academic_year'] ?? $contextYear?->name ?? date('Y').'-'.(date('Y') + 1);
 
         $invoice = self::create([
             'invoice_number' => self::generateInvoiceNumber(),
@@ -187,11 +207,11 @@ class Invoice extends Model
             'balance_amount' => $totalAmount,
             'status' => 'Draft',
             'payment_status' => 'Unpaid',
-            'academic_year' => $data['academic_year'] ?? date('Y') . '-' . (date('Y') + 1),
-            'created_by' => auth()->id()
+            'academic_year' => $academicYearName,
+            'academic_year_id' => $academicYearId,
+            'created_by' => auth()->id(),
         ]);
 
         return $invoice;
     }
 }
-

@@ -55,9 +55,9 @@ class AttendanceCampaignModule implements NotificationCampaignModule
             ->whereNull('s.deleted_at')
             ->whereNotNull('sa.section')
             ->where('sa.section', '!=', '')
-            ->selectRaw('s.grade as grade, sa.section as section, COUNT(*) as marked_count')
-            ->groupBy('s.grade', 'sa.section')
-            ->orderBy('s.grade')
+            ->selectRaw('sa.grade_level as grade, sa.section as section, COUNT(*) as marked_count')
+            ->groupBy('sa.grade_level', 'sa.section')
+            ->orderBy('sa.grade_level')
             ->orderBy('sa.section')
             ->get();
 
@@ -101,8 +101,8 @@ class AttendanceCampaignModule implements NotificationCampaignModule
             ->whereNull('s.deleted_at')
             ->whereNotNull('sa.section')
             ->where('sa.section', '!=', '')
-            ->selectRaw('s.grade as grade, sa.section as section, sa.status as status, COUNT(*) as tally')
-            ->groupBy('s.grade', 'sa.section', 'sa.status')
+            ->selectRaw('sa.grade_level as grade, sa.section as section, sa.status as status, COUNT(*) as tally')
+            ->groupBy('sa.grade_level', 'sa.section', 'sa.status')
             ->get();
 
         foreach ($statusRows as $row) {

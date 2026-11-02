@@ -11,7 +11,7 @@ class AuditService
     /**
      * Log a fee-related action
      */
-    public function log($action, $studentId, $data = [], Request $request = null): FeeAuditLog
+    public function log($action, $studentId, $data = [], ?Request $request = null): FeeAuditLog
     {
         try {
             $auditData = [
@@ -24,7 +24,7 @@ class AuditService
                 'metadata' => $data['metadata'] ?? [],
                 'fee_payment_id' => $data['fee_payment_id'] ?? null,
                 'fee_due_id' => $data['fee_due_id'] ?? null,
-                'created_by' => $data['user_id'] ?? ($request ? $request->user()->id : null)
+                'created_by' => $data['user_id'] ?? ($request ? $request->user()->id : null),
             ];
 
             // Add request information if available
@@ -38,13 +38,31 @@ class AuditService
 
             $auditLog = FeeAuditLog::create($auditData);
 
+            // Also record in the unified enterprise audit_logs stream
+            app(\App\Services\SystemAuditLogger::class)->record([
+                'module' => 'fees',
+                'action' => strtolower((string) $action),
+                'severity' => 'warning',
+                'auditable_type' => 'StudentFee',
+                'auditable_id' => (string) $studentId,
+                'description' => "Fee audit ({$action}) for Student #{$studentId}".(! empty($data['reason']) ? ": {$data['reason']}" : ''),
+                'old_values' => ['amount_before' => $auditData['amount_before']],
+                'new_values' => [
+                    'amount_after' => $auditData['amount_after'],
+                    'action_amount' => $auditData['action_amount'],
+                    'fee_payment_id' => $auditData['fee_payment_id'],
+                    'fee_due_id' => $auditData['fee_due_id'],
+                ],
+                'changed_fields' => ['amount_after', 'action_amount'],
+            ], $request);
+
             return $auditLog;
 
         } catch (\Exception $e) {
             Log::error('Error creating audit log', [
                 'action' => $action,
                 'student_id' => $studentId,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ]);
             throw $e;
         }
@@ -92,4 +110,3 @@ class AuditService
         return $query->orderBy('created_at', 'desc')->get();
     }
 }
-

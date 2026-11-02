@@ -17,6 +17,7 @@ class FeeDue extends Model
         'student_id',
         'fee_structure_id',
         'academic_year',
+        'academic_year_id',
         'original_grade',
         'current_grade',
         'original_amount',
@@ -29,7 +30,7 @@ class FeeDue extends Model
         'carry_forward_reason',
         'fee_type',
         'installment_number',
-        'metadata'
+        'metadata',
     ];
 
     protected $casts = [
@@ -40,10 +41,11 @@ class FeeDue extends Model
         'carry_forward_date' => 'date',
         'overdue_days' => 'integer',
         'installment_number' => 'integer',
-        'metadata' => 'array'
+        'metadata' => 'array',
     ];
 
     protected $keyType = 'string';
+
     public $incrementing = false;
 
     protected static function boot()
@@ -52,6 +54,9 @@ class FeeDue extends Model
         static::creating(function ($model) {
             if (empty($model->id)) {
                 $model->id = (string) Str::uuid();
+            }
+            if (empty($model->due_date)) {
+                $model->due_date = now()->toDateString();
             }
         });
     }
@@ -72,6 +77,11 @@ class FeeDue extends Model
         return $this->belongsTo(FeeStructure::class);
     }
 
+    public function academicYear(): BelongsTo
+    {
+        return $this->belongsTo(AcademicYear::class, 'academic_year_id');
+    }
+
     /**
      * Scope a query to only include pending dues
      */
@@ -86,9 +96,9 @@ class FeeDue extends Model
     public function scopeOverdue($query)
     {
         return $query->where('status', 'Overdue')
-            ->orWhere(function($q) {
+            ->orWhere(function ($q) {
                 $q->where('status', 'Pending')
-                  ->where('due_date', '<', now());
+                    ->where('due_date', '<', now());
             });
     }
 
@@ -101,10 +111,14 @@ class FeeDue extends Model
     }
 
     /**
-     * Scope a query to filter by academic year
+     * Scope a query to filter by academic year (ID or name)
      */
     public function scopeForAcademicYear($query, $academicYear)
     {
+        if (is_numeric($academicYear)) {
+            return $query->where('academic_year_id', (int) $academicYear);
+        }
+
         return $query->where('academic_year', $academicYear);
     }
 
@@ -124,4 +138,3 @@ class FeeDue extends Model
         }
     }
 }
-

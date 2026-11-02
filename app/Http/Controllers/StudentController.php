@@ -11,6 +11,7 @@ use App\Services\AcademicYearContext;
 use App\Services\CsvExportService;
 use App\Services\PdfExportService;
 use App\Services\StudentFeeAutoAssignService;
+use App\Support\StudentEnrollmentScope;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -51,14 +52,15 @@ class StudentController extends Controller
                 $query
                     ->leftJoin('student_enrollments as se', function ($join) use ($academicYearId) {
                         $join->on('se.student_id', '=', 'students.id')
-                            ->where('se.academic_year_id', '=', $academicYearId);
+                            ->where('se.academic_year_id', '=', $academicYearId)
+                            ->where('se.status', '=', StudentEnrollmentScope::STATUS_ACTIVE);
                     })
                     ->leftJoin('academic_years as ay', 'se.academic_year_id', '=', 'ay.id')
                     ->leftJoin('grades', function ($join) use ($schoolId, $hasGradesBranchId) {
-                        $join->on('grades.value', '=', DB::raw('COALESCE(se.grade, students.grade)'));
+                        $join->on('grades.value', '=', DB::raw(StudentEnrollmentScope::column('students', 'se', 'grade')));
                         if ($hasGradesBranchId) {
                             // Grades are branch-specific; prevent duplicate matches across branches.
-                            $join->where('grades.branch_id', '=', DB::raw('COALESCE(se.branch_id, students.branch_id)'));
+                            $join->where('grades.branch_id', '=', DB::raw(StudentEnrollmentScope::column('students', 'se', 'branch_id')));
                         } elseif ($schoolId) {
                             // Legacy fallback (before grades became branch-specific).
                             $join->where('grades.school_id', '=', $schoolId);
@@ -101,11 +103,16 @@ class StudentController extends Controller
                 'branches.name as branch_name',
                 'branches.code as branch_code',
                 DB::raw('COALESCE('.($hasEnrollments && $academicYearId ? 'se.grade' : 'NULL').', students.grade) as current_grade'),
+                DB::raw('COALESCE('.($hasEnrollments && $academicYearId ? 'se.grade' : 'NULL').', students.grade) as grade'),
                 DB::raw('COALESCE(grades.label, CONCAT("Grade ", COALESCE('.($hasEnrollments && $academicYearId ? 'se.grade' : 'NULL').', students.grade))) as current_grade_label'),
                 DB::raw('COALESCE('.($hasEnrollments && $academicYearId ? 'se.section' : 'NULL').', students.section) as current_section'),
+                DB::raw('COALESCE('.($hasEnrollments && $academicYearId ? 'se.section' : 'NULL').', students.section) as section'),
                 DB::raw('COALESCE('.($hasEnrollments && $academicYearId ? 'se.academic_year_id' : 'NULL').', students.academic_year_id) as current_academic_year_id'),
                 DB::raw('COALESCE(ay.name, students.academic_year) as current_academic_year'),
-                'grades.label as grade_label'
+                'students.grade as base_grade',
+                'students.section as base_section',
+                'grades.label as grade_label',
+                DB::raw(''.($hasEnrollments && $academicYearId ? 'se.status' : 'NULL').' as enrollment_status')
             );
 
             // Include students with school_id = current school OR null school_id but branch belongs to current school (e.g. converted from admission)
@@ -146,7 +153,7 @@ class StudentController extends Controller
             // Apply filters
             if ($request->has('grade')) {
                 if ($hasEnrollments && $academicYearId) {
-                    $query->whereRaw('COALESCE(se.grade, students.grade) = ?', [$request->grade]);
+                    $query->whereRaw(StudentEnrollmentScope::column('students', 'se', 'grade').' = ?', [$request->grade]);
                 } else {
                     $query->where('students.grade', $request->grade);
                 }
@@ -154,7 +161,7 @@ class StudentController extends Controller
 
             if ($request->filled('section')) {
                 if ($hasEnrollments && $academicYearId) {
-                    $query->whereRaw('COALESCE(se.section, students.section) = ?', [$request->section]);
+                    $query->whereRaw(StudentEnrollmentScope::column('students', 'se', 'section').' = ?', [$request->section]);
                 } else {
                     $query->where('students.section', $request->section);
                 }
@@ -187,7 +194,7 @@ class StudentController extends Controller
             // students in the selected branch/grade/section regardless of their enrollment year.
             if ($academicYearId && ! $request->boolean('for_group_membership') && ! $request->boolean('all_academic_years')) {
                 if ($hasEnrollments) {
-                    $query->whereRaw('COALESCE(se.academic_year_id, students.academic_year_id) = ?', [$academicYearId]);
+                    StudentEnrollmentScope::whereYearMatch($query, 'students', (int) $academicYearId, 'se');
                 } else {
                     $query->where('students.academic_year_id', $academicYearId);
                 }
@@ -292,13 +299,14 @@ class StudentController extends Controller
                 $query
                     ->leftJoin('student_enrollments as se', function ($join) use ($academicYearId) {
                         $join->on('se.student_id', '=', 'students.id')
-                            ->where('se.academic_year_id', '=', $academicYearId);
+                            ->where('se.academic_year_id', '=', $academicYearId)
+                            ->where('se.status', '=', StudentEnrollmentScope::STATUS_ACTIVE);
                     })
                     ->leftJoin('academic_years as ay', 'se.academic_year_id', '=', 'ay.id')
                     ->leftJoin('grades', function ($join) use ($schoolId, $hasGradesBranchId) {
-                        $join->on('grades.value', '=', DB::raw('COALESCE(se.grade, students.grade)'));
+                        $join->on('grades.value', '=', DB::raw(StudentEnrollmentScope::column('students', 'se', 'grade')));
                         if ($hasGradesBranchId) {
-                            $join->where('grades.branch_id', '=', DB::raw('COALESCE(se.branch_id, students.branch_id)'));
+                            $join->where('grades.branch_id', '=', DB::raw(StudentEnrollmentScope::column('students', 'se', 'branch_id')));
                         } elseif ($schoolId) {
                             $join->where('grades.school_id', '=', $schoolId);
                         }
@@ -708,6 +716,18 @@ class StudentController extends Controller
             // Get student model for file upload handling
             $studentModel = Student::findOrFail($id);
 
+            // Track whether fee-relevant fields actually changed before running syncAllFees
+            $feeRelevantKeys = [
+                'transport_required', 'transport_route', 'transport_fee', 'transport_due_date',
+                'pickup_point', 'drop_point', 'vehicle_number', 'pickup_time', 'drop_time',
+                'hostel_required', 'hostel_name', 'hostel_room_number', 'hostel_fee', 'hostel_due_date',
+                'fee_concession_applicable', 'concession_type', 'concession_percentage', 'scholarship_name',
+            ];
+            $originalFeeSnapshot = [];
+            foreach ($feeRelevantKeys as $fKey) {
+                $originalFeeSnapshot[$fKey] = $studentModel->getAttribute($fKey);
+            }
+
             // Prepare update data using structured helper method
             $updateData = $this->prepareStudentUpdateData($request);
 
@@ -724,14 +744,22 @@ class StudentController extends Controller
             // Update user fields if provided
             $this->updateUserFields($request, $student->user_id);
 
-            // Sync transport, hostel, and fee dues if relevant details changed
-            if ($request->hasAny([
-                'transport_required', 'transport_route', 'transport_fee', 'transport_due_date',
-                'pickup_point', 'drop_point', 'vehicle_number', 'pickup_time', 'drop_time',
-                'hostel_required', 'hostel_name', 'hostel_room_number', 'hostel_fee', 'hostel_due_date',
-                'fee_concession_applicable', 'concession_type', 'concession_percentage', 'scholarship_name',
-            ])) {
-                app(StudentFeeAutoAssignService::class)->syncAllFees($studentModel->fresh());
+            // Only sync transport, hostel, and fee dues if at least one fee-related attribute actually changed
+            $freshStudent = $studentModel->fresh();
+            $feeFieldsChanged = false;
+            if ($freshStudent) {
+                foreach ($feeRelevantKeys as $fKey) {
+                    $beforeVal = $originalFeeSnapshot[$fKey] ?? null;
+                    $afterVal = $freshStudent->getAttribute($fKey);
+                    if ((string) ($beforeVal ?? '') !== (string) ($afterVal ?? '')) {
+                        $feeFieldsChanged = true;
+                        break;
+                    }
+                }
+            }
+
+            if ($feeFieldsChanged && $freshStudent) {
+                app(StudentFeeAutoAssignService::class)->syncAllFees($freshStudent);
             }
 
             DB::commit();
@@ -894,6 +922,13 @@ class StudentController extends Controller
      */
     public function promote(Request $request)
     {
+        $user = $request->user();
+        if ($user && method_exists($user, 'isSuperAdmin') && ! $user->isSuperAdmin()) {
+            if (! $user->hasAnyPermission(['promotions.promote', 'students.promote'])) {
+                return $this->forbiddenResponse('You do not have permission to promote students');
+            }
+        }
+
         $this->academicYearContext->rejectIfPast('Promotions are not allowed for past academic years.');
 
         try {
@@ -1020,6 +1055,13 @@ class StudentController extends Controller
      */
     public function promoteWithFeeHandling(Request $request)
     {
+        $user = $request->user();
+        if ($user && method_exists($user, 'isSuperAdmin') && ! $user->isSuperAdmin()) {
+            if (! $user->hasAnyPermission(['promotions.promote', 'students.promote'])) {
+                return $this->forbiddenResponse('You do not have permission to promote students');
+            }
+        }
+
         $this->academicYearContext->rejectIfPast('Promotions are not allowed for past academic years.');
 
         try {
@@ -1069,6 +1111,10 @@ class StudentController extends Controller
                 ], 403);
             }
 
+            $batchId = $request->filled('batch_id') ? (string) $request->batch_id : null;
+            $studentSections = is_array($request->student_sections) ? $request->student_sections : [];
+            $studentDispositions = is_array($request->student_dispositions) ? $request->student_dispositions : [];
+
             $result = $promotionService->promoteStudentsWithFeeHandling(
                 $studentIds,
                 $request->from_grade,
@@ -1078,13 +1124,16 @@ class StudentController extends Controller
                 $request->boolean('check_eligibility', false),
                 $fromAcademicYearId,
                 $request->filled('from_section') ? (string) $request->from_section : null,
-                $request->filled('to_section') ? (string) $request->to_section : null
+                $request->filled('to_section') ? (string) $request->to_section : null,
+                $batchId,
+                $studentSections,
+                $studentDispositions
             );
 
-            if ($result['promoted_count'] === 0) {
+            if (($result['promoted_count'] ?? 0) === 0 && ($result['retained_count'] ?? 0) === 0) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'No students were promoted. Students may not match the selected grade/section for the from academic year, or may have been skipped.',
+                    'message' => 'No students were promoted or retained. Students may not match the selected grade/section for the from academic year, or may have been skipped.',
                     'data' => $result,
                 ], 422);
             }
@@ -1111,6 +1160,13 @@ class StudentController extends Controller
      */
     public function previewPromotion(Request $request)
     {
+        $user = $request->user();
+        if ($user && method_exists($user, 'isSuperAdmin') && ! $user->isSuperAdmin()) {
+            if (! $user->hasAnyPermission(['promotions.view', 'promotions.promote', 'students.promote'])) {
+                return $this->forbiddenResponse('You do not have permission to preview promotions');
+            }
+        }
+
         try {
             $validator = Validator::make($request->all(), [
                 'student_ids' => 'required|array',
@@ -1173,6 +1229,9 @@ class StudentController extends Controller
                 $preview['student_id'] = $studentId;
                 $student->load('user');
                 $preview['student_name'] = ($student->user ? $student->user->first_name.' '.$student->user->last_name : 'N/A');
+                $preview['admission_number'] = $student->admission_number ?? 'N/A';
+                $preview['from_grade'] = $student->grade ?? $request->from_grade;
+                $preview['from_section'] = $student->section ?? $request->from_section;
                 $previews[] = $preview;
             }
 
@@ -1212,6 +1271,13 @@ class StudentController extends Controller
      */
     public function revertPromotion(Request $request)
     {
+        $user = $request->user();
+        if ($user && method_exists($user, 'isSuperAdmin') && ! $user->isSuperAdmin()) {
+            if (! $user->hasAnyPermission(['promotions.revert', 'promotions.promote', 'students.promote'])) {
+                return $this->forbiddenResponse('You do not have permission to revert promotions');
+            }
+        }
+
         try {
             $validator = Validator::make($request->all(), [
                 'student_ids' => 'required|array',
@@ -1268,6 +1334,13 @@ class StudentController extends Controller
      */
     public function getPromotionHistory(Request $request, $id)
     {
+        $user = $request->user();
+        if ($user && method_exists($user, 'isSuperAdmin') && ! $user->isSuperAdmin()) {
+            if (! $user->hasAnyPermission(['promotions.view', 'promotions.promote', 'students.promote', 'students.view'])) {
+                return $this->forbiddenResponse('You do not have permission to view promotion history');
+            }
+        }
+
         try {
             $student = \App\Models\Student::findOrFail($id);
 
@@ -1301,15 +1374,224 @@ class StudentController extends Controller
     }
 
     /**
+     * Get accessible branch ID for user context
+     */
+    protected function getUserBranchId(Request $request): ?int
+    {
+        $accessible = $this->getAccessibleBranchIds($request);
+        if ($accessible !== 'all' && is_array($accessible) && ! empty($accessible)) {
+            return (int) $accessible[0];
+        }
+
+        return $request->user()?->branch_id ? (int) $request->user()->branch_id : null;
+    }
+
+    /**
+     * Check if user can access a specific branch
+     */
+    protected function canAccessBranch(Request $request, int $branchId): bool
+    {
+        $accessible = $this->getAccessibleBranchIds($request);
+        if ($accessible === 'all') {
+            return true;
+        }
+
+        return is_array($accessible) && in_array((int) $branchId, array_map('intval', $accessible), true);
+    }
+
+    /**
+     * Get paginated promotion batches
+     */
+    public function getPromotionBatches(Request $request)
+    {
+        $user = $request->user();
+        if ($user && method_exists($user, 'isSuperAdmin') && ! $user->isSuperAdmin()) {
+            if (! $user->hasAnyPermission(['promotions.view', 'promotions.promote', 'students.promote'])) {
+                return $this->forbiddenResponse('You do not have permission to view promotion batches');
+            }
+        }
+
+        try {
+            $promotionService = app(\App\Services\StudentPromotionService::class);
+            $filters = $request->only(['branch_id', 'from_academic_year_id', 'to_academic_year_id', 'from_grade', 'to_grade', 'status', 'search', 'sort_by', 'sort_dir']);
+
+            if ($user && method_exists($user, 'isSuperAdmin') && ! $user->isSuperAdmin()) {
+                $userBranchId = $this->getUserBranchId($request);
+                if ($userBranchId) {
+                    $filters['branch_id'] = $userBranchId;
+                }
+            }
+
+            $perPage = (int) $request->input('per_page', 25);
+            $page = (int) $request->input('page', 1);
+
+            $batches = $promotionService->getPromotionBatches($filters, $perPage, $page);
+
+            return response()->json([
+                'success' => true,
+                'data' => $batches->items(),
+                'pagination' => [
+                    'total' => $batches->total(),
+                    'per_page' => $batches->perPage(),
+                    'current_page' => $batches->currentPage(),
+                    'last_page' => $batches->lastPage(),
+                ],
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Get promotion batches error', ['error' => $e->getMessage()]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to retrieve promotion batches',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+            ], 500);
+        }
+    }
+
+    /**
+     * Get detailed promotion batch information with student roster
+     */
+    public function getPromotionBatchDetails(Request $request, $batchId)
+    {
+        $user = $request->user();
+        if ($user && method_exists($user, 'isSuperAdmin') && ! $user->isSuperAdmin()) {
+            if (! $user->hasAnyPermission(['promotions.view', 'promotions.promote', 'students.promote'])) {
+                return $this->forbiddenResponse('You do not have permission to view promotion batch details');
+            }
+        }
+
+        try {
+            $promotionService = app(\App\Services\StudentPromotionService::class);
+            $details = $promotionService->getPromotionBatchDetails((string) $batchId);
+
+            if ($details['batch']->branch_id && ! $this->canAccessBranch($request, (int) $details['batch']->branch_id)) {
+                return response()->json(['success' => false, 'message' => 'Batch not found for your branch.'], 404);
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => $details,
+            ]);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json(['success' => false, 'message' => 'Promotion batch not found.'], 404);
+        } catch (\Exception $e) {
+            Log::error('Get promotion batch details error', ['batch_id' => $batchId, 'error' => $e->getMessage()]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to retrieve promotion batch details',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+            ], 500);
+        }
+    }
+
+    /**
+     * Revert all or specific students in a promotion batch
+     */
+    public function revertPromotionBatch(Request $request, $batchId)
+    {
+        $user = $request->user();
+        if ($user && method_exists($user, 'isSuperAdmin') && ! $user->isSuperAdmin()) {
+            if (! $user->hasAnyPermission(['promotions.revert', 'promotions.promote', 'students.promote'])) {
+                return $this->forbiddenResponse('You do not have permission to revert promotions');
+            }
+        }
+
+        try {
+            $batch = \App\Models\PromotionBatch::where('batch_id', $batchId)->first();
+            if (! $batch) {
+                return response()->json(['success' => false, 'message' => 'Promotion batch not found.'], 404);
+            }
+
+            if ($batch->branch_id && ! $this->canAccessBranch($request, (int) $batch->branch_id)) {
+                return response()->json(['success' => false, 'message' => 'Batch not found for your branch.'], 403);
+            }
+
+            $studentIds = $request->input('student_ids');
+            if (! empty($studentIds) && is_array($studentIds)) {
+                $studentIds = $this->filterAccessibleStudentIds($request, $studentIds);
+            }
+
+            $reason = $request->input('reason', 'Promotion batch reverted.');
+
+            $promotionService = app(\App\Services\StudentPromotionService::class);
+            $result = $promotionService->revertBatch((string) $batchId, $request->user()->id, $studentIds, $reason);
+
+            return response()->json([
+                'success' => true,
+                'message' => $result['message'] ?? 'Promotion reverted successfully.',
+                'data' => $result,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Revert promotion batch error', ['batch_id' => $batchId, 'error' => $e->getMessage()]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to revert promotion batch',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+            ], 500);
+        }
+    }
+
+    /**
+     * Get KPI stats for promotion dashboard
+     */
+    public function getPromotionDashboardStats(Request $request)
+    {
+        $user = $request->user();
+        if ($user && method_exists($user, 'isSuperAdmin') && ! $user->isSuperAdmin()) {
+            if (! $user->hasAnyPermission(['promotions.view', 'promotions.promote', 'students.promote'])) {
+                return $this->forbiddenResponse('You do not have permission to view promotion statistics');
+            }
+        }
+
+        try {
+            $branchId = $request->filled('branch_id') ? (int) $request->branch_id : null;
+            if ($user && method_exists($user, 'isSuperAdmin') && ! $user->isSuperAdmin()) {
+                $userBranchId = $this->getUserBranchId($request);
+                if ($userBranchId) {
+                    $branchId = $userBranchId;
+                }
+            }
+
+            $academicYearId = $request->filled('academic_year_id')
+                ? (int) $request->academic_year_id
+                : $this->academicYearContext->id(false);
+
+            $promotionService = app(\App\Services\StudentPromotionService::class);
+            $stats = $promotionService->getPromotionDashboardStats($branchId, $academicYearId);
+
+            return response()->json([
+                'success' => true,
+                'data' => $stats,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Get promotion dashboard stats error', ['error' => $e->getMessage()]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to retrieve promotion dashboard statistics',
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+            ], 500);
+        }
+    }
+
+    /**
      * Get student dues with fee_type breakdown
      */
-    public function getStudentDues($id)
+    public function getStudentDues(Request $request, $id)
     {
         try {
-            $student = \App\Models\Student::findOrFail($id);
+            $student = \App\Models\Student::find($id);
+            if (! $student) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Student not found',
+                ], 404);
+            }
 
             $duesService = new \App\Services\FeeDuesService;
-            $result = $duesService->getStudentDues($student->user_id);
+            $result = $duesService->getStudentDues($student->user_id, $request->all());
 
             return response()->json([
                 'success' => true,
@@ -2360,7 +2642,12 @@ class StudentController extends Controller
         }
 
         if (! empty($userUpdate)) {
-            User::where('id', $userId)->update($userUpdate);
+            $userModel = User::find($userId);
+            if ($userModel) {
+                $userModel->update($userUpdate);
+            } else {
+                User::where('id', $userId)->update($userUpdate);
+            }
         }
     }
 

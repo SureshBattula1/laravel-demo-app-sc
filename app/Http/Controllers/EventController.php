@@ -5,17 +5,17 @@ namespace App\Http\Controllers;
 use App\Http\Traits\PaginatesAndSorts;
 use App\Models\Event;
 use App\Models\Holiday;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
-use Carbon\Carbon;
 
 class EventController extends Controller
 {
     use PaginatesAndSorts;
     // ==================== EVENTS MANAGEMENT ====================
-    
+
     /**
      * Get all events
      */
@@ -23,6 +23,7 @@ class EventController extends Controller
     {
         try {
             $query = Event::with(['branch', 'creator']);
+            $this->applyBranchFilter($query, $request);
 
             if ($request->has('branch_id')) {
                 $query->where('branch_id', $request->branch_id);
@@ -45,12 +46,12 @@ class EventController extends Controller
             }
 
             // OPTIMIZED Search filter - prefix search for better index usage
-            if ($request->has('search') && !empty($request->search)) {
+            if ($request->has('search') && ! empty($request->search)) {
                 $search = strip_tags($request->search);
-                $query->where(function($q) use ($search) {
+                $query->where(function ($q) use ($search) {
                     $q->where('title', 'like', "{$search}%")
-                      ->orWhere('event_type', 'like', "{$search}%")
-                      ->orWhere('venue', 'like', "{$search}%");
+                        ->orWhere('event_type', 'like', "{$search}%")
+                        ->orWhere('venue', 'like', "{$search}%");
                 });
             }
 
@@ -63,7 +64,7 @@ class EventController extends Controller
                 'start_time',
                 'venue',
                 'is_active',
-                'created_at'
+                'created_at',
             ];
 
             // Apply pagination and sorting (default: 25 per page, sorted by event_date asc)
@@ -80,17 +81,17 @@ class EventController extends Controller
                     'last_page' => $events->lastPage(),
                     'from' => $events->firstItem(),
                     'to' => $events->lastItem(),
-                    'has_more_pages' => $events->hasMorePages()
-                ]
+                    'has_more_pages' => $events->hasMorePages(),
+                ],
             ]);
 
         } catch (\Exception $e) {
             Log::error('Get events error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch events',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -112,14 +113,18 @@ class EventController extends Controller
                 'end_time' => 'nullable|date_format:H:i|after:start_time',
                 'venue' => 'nullable|string|max:255',
                 'organizer' => 'nullable|string|max:255',
-                'is_active' => 'boolean'
+                'is_active' => 'boolean',
             ]);
 
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
+            }
+
+            if (! $this->canManageBranch($request, (int) $request->branch_id)) {
+                return $this->forbiddenResponse('You do not have access to this branch');
             }
 
             $branch = \App\Models\Branch::find($request->branch_id);
@@ -135,7 +140,7 @@ class EventController extends Controller
                 'venue' => strip_tags($request->venue ?? ''),
                 'organizer' => strip_tags($request->organizer ?? ''),
                 'is_active' => $request->is_active ?? true,
-                'created_by' => $request->user()->id
+                'created_by' => $request->user()->id,
             ]);
 
             DB::commit();
@@ -145,17 +150,17 @@ class EventController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Event created successfully',
-                'data' => $event->load(['branch', 'creator'])
+                'data' => $event->load(['branch', 'creator']),
             ], 201);
 
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Create event error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create event',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -170,13 +175,13 @@ class EventController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data' => $event
+                'data' => $event,
             ]);
 
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Event not found'
+                'message' => 'Event not found',
             ], 404);
         }
     }
@@ -189,6 +194,9 @@ class EventController extends Controller
         DB::beginTransaction();
         try {
             $event = Event::findOrFail($id);
+            if (! $this->canManageBranch($request, (int) $event->branch_id)) {
+                return $this->forbiddenResponse('You do not have access to this branch');
+            }
 
             $validator = Validator::make($request->all(), [
                 'title' => 'string|max:255',
@@ -199,27 +207,45 @@ class EventController extends Controller
                 'end_time' => 'nullable|date_format:H:i',
                 'venue' => 'nullable|string|max:255',
                 'organizer' => 'nullable|string|max:255',
-                'is_active' => 'boolean'
+                'is_active' => 'boolean',
             ]);
 
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
             $updateData = [];
-            if ($request->has('title')) $updateData['title'] = strip_tags($request->title);
-            if ($request->has('description')) $updateData['description'] = strip_tags($request->description);
-            if ($request->has('event_type')) $updateData['event_type'] = $request->event_type;
-            if ($request->has('event_date')) $updateData['event_date'] = $request->event_date;
-            if ($request->has('start_time')) $updateData['start_time'] = $request->start_time;
-            if ($request->has('end_time')) $updateData['end_time'] = $request->end_time;
-            if ($request->has('venue')) $updateData['venue'] = strip_tags($request->venue);
-            if ($request->has('organizer')) $updateData['organizer'] = strip_tags($request->organizer);
-            if ($request->has('is_active')) $updateData['is_active'] = $request->is_active;
-            
+            if ($request->has('title')) {
+                $updateData['title'] = strip_tags($request->title);
+            }
+            if ($request->has('description')) {
+                $updateData['description'] = strip_tags($request->description);
+            }
+            if ($request->has('event_type')) {
+                $updateData['event_type'] = $request->event_type;
+            }
+            if ($request->has('event_date')) {
+                $updateData['event_date'] = $request->event_date;
+            }
+            if ($request->has('start_time')) {
+                $updateData['start_time'] = $request->start_time;
+            }
+            if ($request->has('end_time')) {
+                $updateData['end_time'] = $request->end_time;
+            }
+            if ($request->has('venue')) {
+                $updateData['venue'] = strip_tags($request->venue);
+            }
+            if ($request->has('organizer')) {
+                $updateData['organizer'] = strip_tags($request->organizer);
+            }
+            if ($request->has('is_active')) {
+                $updateData['is_active'] = $request->is_active;
+            }
+
             $updateData['updated_by'] = $request->user()->id;
 
             $event->update($updateData);
@@ -231,17 +257,17 @@ class EventController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Event updated successfully',
-                'data' => $event->load(['branch', 'creator'])
+                'data' => $event->load(['branch', 'creator']),
             ]);
 
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Update event error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update event',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -249,11 +275,14 @@ class EventController extends Controller
     /**
      * Delete event
      */
-    public function destroy(string $id)
+    public function destroy(Request $request, string $id)
     {
         DB::beginTransaction();
         try {
             $event = Event::findOrFail($id);
+            if (! $this->canManageBranch($request, (int) $event->branch_id)) {
+                return $this->forbiddenResponse('You do not have access to this branch');
+            }
             $event->delete();
             DB::commit();
 
@@ -261,17 +290,17 @@ class EventController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Event deleted successfully'
+                'message' => 'Event deleted successfully',
             ]);
 
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Delete event error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to delete event',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -291,16 +320,16 @@ class EventController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data' => $events
+                'data' => $events,
             ]);
 
         } catch (\Exception $e) {
             Log::error('Get upcoming events error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch upcoming events',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -312,20 +341,20 @@ class EventController extends Controller
     {
         try {
             $query = Event::select([
-                'id', 'branch_id', 'title', 'description', 'event_type', 
+                'id', 'branch_id', 'title', 'description', 'event_type',
                 'event_date', 'start_time', 'end_time', 'venue', 'organizer',
-                'is_active', 'created_by', 'created_at', 'updated_at'
+                'is_active', 'created_by', 'created_at', 'updated_at',
             ])
-            ->with(['branch:id,name,code', 'creator:id,first_name,last_name'])
+                ->with(['branch:id,name,code', 'creator:id,first_name,last_name'])
                 ->where('event_type', $type)
                 ->where('is_active', true);
 
             // OPTIMIZED Search filter - prefix search for better index usage
-            if ($request->has('search') && !empty($request->search)) {
+            if ($request->has('search') && ! empty($request->search)) {
                 $search = strip_tags($request->search);
-                $query->where(function($q) use ($search) {
+                $query->where(function ($q) use ($search) {
                     $q->where('title', 'like', "{$search}%")
-                      ->orWhere('venue', 'like', "{$search}%");
+                        ->orWhere('venue', 'like', "{$search}%");
                 });
             }
 
@@ -336,7 +365,7 @@ class EventController extends Controller
                 'event_date',
                 'start_time',
                 'venue',
-                'created_at'
+                'created_at',
             ];
 
             // Apply pagination and sorting (default: 25 per page, sorted by event_date desc)
@@ -352,17 +381,17 @@ class EventController extends Controller
                     'last_page' => $events->lastPage(),
                     'from' => $events->firstItem(),
                     'to' => $events->lastItem(),
-                    'has_more_pages' => $events->hasMorePages()
-                ]
+                    'has_more_pages' => $events->hasMorePages(),
+                ],
             ]);
 
         } catch (\Exception $e) {
             Log::error('Get events by type error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch events',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -382,16 +411,16 @@ class EventController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data' => $holidays
+                'data' => $holidays,
             ]);
 
         } catch (\Exception $e) {
             Log::error('Get holidays error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch holidays',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }

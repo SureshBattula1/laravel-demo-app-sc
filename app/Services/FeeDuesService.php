@@ -36,7 +36,18 @@ class FeeDuesService
             $query->where('fee_type', $filters['fee_type']);
         }
 
-        if (isset($filters['academic_year'])) {
+        if (! empty($filters['academic_year_id'])) {
+            $ayId = (int) $filters['academic_year_id'];
+            $ayName = $filters['academic_year'] ?? \App\Models\AcademicYear::find($ayId)?->name;
+            $query->where(function ($q) use ($ayId, $ayName) {
+                $q->where('academic_year_id', $ayId);
+                if ($ayName) {
+                    $q->orWhere(function ($legacy) use ($ayName) {
+                        $legacy->whereNull('academic_year_id')->where('academic_year', $ayName);
+                    });
+                }
+            });
+        } elseif (isset($filters['academic_year'])) {
             $query->where('academic_year', $filters['academic_year']);
         }
 
@@ -288,7 +299,18 @@ class FeeDuesService
             $query->where('status', $filters['status']);
         }
 
-        if (isset($filters['academic_year'])) {
+        if (! empty($filters['academic_year_id'])) {
+            $ayId = (int) $filters['academic_year_id'];
+            $ayName = $filters['academic_year'] ?? \App\Models\AcademicYear::find($ayId)?->name;
+            $query->where(function ($q) use ($ayId, $ayName) {
+                $q->where('academic_year_id', $ayId);
+                if ($ayName) {
+                    $q->orWhere(function ($legacy) use ($ayName) {
+                        $legacy->whereNull('academic_year_id')->where('academic_year', $ayName);
+                    });
+                }
+            });
+        } elseif (isset($filters['academic_year'])) {
             $query->where('academic_year', $filters['academic_year']);
         }
 

@@ -33,6 +33,13 @@ class ImportHistory extends Model
         'reverted_at',
         'error_message',
         'error_report_path',
+        'revert_approval_status',
+        'revert_requested_by',
+        'revert_requested_at',
+        'revert_reason',
+        'revert_approved_by',
+        'revert_approved_at',
+        'revert_rejection_reason',
     ];
 
     protected $casts = [
@@ -43,7 +50,38 @@ class ImportHistory extends Model
         'import_started_at' => 'datetime',
         'import_completed_at' => 'datetime',
         'reverted_at' => 'datetime',
+        'revert_requested_at' => 'datetime',
+        'revert_approved_at' => 'datetime',
     ];
+
+    /**
+     * Check if batch was completed within 30 days
+     */
+    public function isWithin30Days(): bool
+    {
+        $completedDate = $this->import_completed_at ?? $this->created_at;
+        if (! $completedDate) {
+            return true;
+        }
+
+        return $completedDate->diffInDays(now()) <= 30;
+    }
+
+    /**
+     * Get user who requested revert
+     */
+    public function revertRequester(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'revert_requested_by');
+    }
+
+    /**
+     * Get user who approved revert
+     */
+    public function revertApprover(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'revert_approved_by');
+    }
 
     /**
      * Get the user who uploaded this import

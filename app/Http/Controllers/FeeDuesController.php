@@ -55,8 +55,12 @@ class FeeDuesController extends Controller
                 $query->where('current_grade', $request->grade);
             }
 
-            if ($request->has('academic_year')) {
-                $query->where('academic_year', $request->academic_year);
+            if ($request->filled('academic_year') || $request->filled('academic_year_id')) {
+                [$academicYearId, $academicYearName] = $this->resolveAcademicYearFromRequest($request);
+                $this->applyAcademicYearScope($query, $academicYearId, $academicYearName);
+            } elseif ($request->attributes->get('academic_year_id')) {
+                [$academicYearId, $academicYearName] = $this->resolveAcademicYearFromRequest($request);
+                $this->applyAcademicYearScope($query, $academicYearId, $academicYearName);
             }
 
             // Sorting

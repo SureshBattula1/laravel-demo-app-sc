@@ -38,7 +38,7 @@ class FeeStructure extends Model
         'sports_fee',
         'lab_fee',
         'other_fees',
-        'total_amount'
+        'total_amount',
     ];
 
     protected $casts = [
@@ -55,10 +55,11 @@ class FeeStructure extends Model
         'sports_fee' => 'decimal:2',
         'lab_fee' => 'decimal:2',
         'other_fees' => 'array', // JSON field
-        'total_amount' => 'decimal:2'
+        'total_amount' => 'decimal:2',
     ];
 
     protected $keyType = 'string';
+
     public $incrementing = false;
 
     protected static function boot()
@@ -97,9 +98,23 @@ class FeeStructure extends Model
         return $this->belongsTo(User::class, 'updated_by');
     }
 
+    public function academicYear()
+    {
+        return $this->belongsTo(AcademicYear::class, 'academic_year_id');
+    }
+
     // Scopes
     public function scopeForSchool($query, int $schoolId)
     {
         return $query->where('school_id', $schoolId);
+    }
+
+    public function scopeForAcademicYear($query, $yearOrId)
+    {
+        if (is_numeric($yearOrId)) {
+            return $query->where('academic_year_id', (int) $yearOrId);
+        }
+
+        return $query->where('academic_year', $yearOrId);
     }
 }

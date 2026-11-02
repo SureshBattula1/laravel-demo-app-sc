@@ -27,7 +27,7 @@ class Holiday extends Model
         'academic_year',
         'academic_year_id',
         'is_active',
-        'created_by'
+        'created_by',
     ];
 
     protected $appends = ['branch_name', 'duration'];
@@ -72,6 +72,7 @@ class Holiday extends Model
     public function isOngoing(): bool
     {
         $now = now();
+
         return $this->start_date->lte($now) && $this->end_date->gte($now);
     }
 
@@ -84,6 +85,20 @@ class Holiday extends Model
     public function createdBy()
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    public function academicYear()
+    {
+        return $this->belongsTo(AcademicYear::class, 'academic_year_id');
+    }
+
+    public function scopeForAcademicYear($query, $yearOrId)
+    {
+        if (is_numeric($yearOrId)) {
+            return $query->where('academic_year_id', (int) $yearOrId);
+        }
+
+        return $query->where('academic_year', $yearOrId);
     }
 
     // Scopes
@@ -100,7 +115,7 @@ class Holiday extends Model
     public function scopeOngoing($query)
     {
         return $query->where('start_date', '<=', now())
-                     ->where('end_date', '>=', now());
+            ->where('end_date', '>=', now());
     }
 
     public function scopeByType($query, $type)
@@ -110,13 +125,13 @@ class Holiday extends Model
 
     public function scopeInDateRange($query, $start, $end)
     {
-        return $query->where(function($q) use ($start, $end) {
+        return $query->where(function ($q) use ($start, $end) {
             $q->whereBetween('start_date', [$start, $end])
-              ->orWhereBetween('end_date', [$start, $end])
-              ->orWhere(function($q2) use ($start, $end) {
-                  $q2->where('start_date', '<=', $start)
-                     ->where('end_date', '>=', $end);
-              });
+                ->orWhereBetween('end_date', [$start, $end])
+                ->orWhere(function ($q2) use ($start, $end) {
+                    $q2->where('start_date', '<=', $start)
+                        ->where('end_date', '>=', $end);
+                });
         });
     }
 }

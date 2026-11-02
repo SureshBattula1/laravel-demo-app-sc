@@ -2,15 +2,15 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\BranchTransfer;
 use App\Models\Branch;
+use App\Models\BranchTransfer;
 use App\Models\User;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Auth;
-use Carbon\Carbon;
+use Illuminate\Support\Facades\Validator;
 
 class BranchTransferController extends Controller
 {
@@ -25,7 +25,7 @@ class BranchTransferController extends Controller
                 'fromBranch:id,name,code',
                 'toBranch:id,name,code',
                 'requester:id,first_name,last_name',
-                'approver:id,first_name,last_name'
+                'approver:id,first_name,last_name',
             ]);
 
             $user = Auth::user();
@@ -34,10 +34,10 @@ class BranchTransferController extends Controller
             if ($user->role === 'BranchAdmin') {
                 $branch = Branch::find($user->branch_id);
                 $branchIds = $branch ? $branch->getDescendantIds() : [$user->branch_id];
-                
-                $query->where(function($q) use ($branchIds) {
+
+                $query->where(function ($q) use ($branchIds) {
                     $q->whereIn('from_branch_id', $branchIds)
-                      ->orWhereIn('to_branch_id', $branchIds);
+                        ->orWhereIn('to_branch_id', $branchIds);
                 });
             }
 
@@ -76,15 +76,15 @@ class BranchTransferController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data' => $transfers
+                'data' => $transfers,
             ]);
 
         } catch (\Exception $e) {
             Log::error('Get branch transfers error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to fetch branch transfers'
+                'message' => 'Failed to fetch branch transfers',
             ], 500);
         }
     }
@@ -104,13 +104,13 @@ class BranchTransferController extends Controller
                 'effective_date' => 'nullable|date|after_or_equal:transfer_date',
                 'reason' => 'required|string|max:1000',
                 'remarks' => 'nullable|string|max:500',
-                'metadata' => 'nullable|array'
+                'metadata' => 'nullable|array',
             ]);
 
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
@@ -119,7 +119,7 @@ class BranchTransferController extends Controller
             if ($user->branch_id != $request->from_branch_id) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'User does not belong to the source branch'
+                    'message' => 'User does not belong to the source branch',
                 ], 400);
             }
 
@@ -127,7 +127,7 @@ class BranchTransferController extends Controller
             if ($request->transfer_type === 'Student' && $user->role !== 'Student') {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Transfer type does not match user role'
+                    'message' => 'Transfer type does not match user role',
                 ], 400);
             }
 
@@ -139,7 +139,7 @@ class BranchTransferController extends Controller
             if ($existingTransfer) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'User already has a pending or approved transfer request'
+                    'message' => 'User already has a pending or approved transfer request',
                 ], 400);
             }
 
@@ -149,7 +149,7 @@ class BranchTransferController extends Controller
                 if ($toBranch->current_enrollment >= $toBranch->total_capacity) {
                     return response()->json([
                         'success' => false,
-                        'message' => 'Target branch has reached maximum capacity'
+                        'message' => 'Target branch has reached maximum capacity',
                     ], 400);
                 }
             }
@@ -167,7 +167,7 @@ class BranchTransferController extends Controller
                 'remarks' => $request->remarks ? strip_tags($request->remarks) : null,
                 'metadata' => $request->metadata,
                 'status' => 'Pending',
-                'requested_by' => Auth::id()
+                'requested_by' => Auth::id(),
             ]);
 
             DB::commit();
@@ -175,23 +175,23 @@ class BranchTransferController extends Controller
             Log::info('Branch transfer requested', [
                 'transfer_id' => $transfer->id,
                 'user_id' => $request->user_id,
-                'requested_by' => Auth::id()
+                'requested_by' => Auth::id(),
             ]);
 
             return response()->json([
                 'success' => true,
                 'message' => 'Transfer request created successfully',
-                'data' => $transfer->load(['user', 'fromBranch', 'toBranch', 'requester'])
+                'data' => $transfer->load(['user', 'fromBranch', 'toBranch', 'requester']),
             ], 201);
 
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Create branch transfer error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create transfer request',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -207,21 +207,21 @@ class BranchTransferController extends Controller
                 'fromBranch',
                 'toBranch',
                 'requester',
-                'approver'
+                'approver',
             ])->findOrFail($id);
 
             // Tenant guard: BranchTransfer has no BelongsToTenant scope (it spans two
             // branches), so accessible-branch membership must be checked explicitly here.
-            if (!$this->canTransferBranch($request, $transfer)) {
+            if (! $this->canTransferBranch($request, $transfer)) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Transfer not found'
+                    'message' => 'Transfer not found',
                 ], 404);
             }
 
             return response()->json([
                 'success' => true,
-                'data' => $transfer
+                'data' => $transfer,
             ]);
 
         } catch (\Exception $e) {
@@ -229,7 +229,7 @@ class BranchTransferController extends Controller
 
             return response()->json([
                 'success' => false,
-                'message' => 'Transfer not found'
+                'message' => 'Transfer not found',
             ], 404);
         }
     }
@@ -251,39 +251,39 @@ class BranchTransferController extends Controller
     {
         try {
             $validator = Validator::make($request->all(), [
-                'remarks' => 'nullable|string|max:500'
+                'remarks' => 'nullable|string|max:500',
             ]);
 
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
             $transfer = BranchTransfer::findOrFail($id);
 
-            if (!$this->canTransferBranch($request, $transfer)) {
+            if (! $this->canTransferBranch($request, $transfer)) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Transfer not found'
+                    'message' => 'Transfer not found',
                 ], 404);
             }
 
-            if (!$transfer->canBeApproved()) {
+            if (! $transfer->canBeApproved()) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Transfer request cannot be approved'
+                    'message' => 'Transfer request cannot be approved',
                 ], 400);
             }
 
             $user = Auth::user();
 
             // Check authorization
-            if (!in_array($user->role, ['SuperAdmin', 'BranchAdmin'])) {
+            if (! in_array($user->role, ['SuperAdmin', 'BranchAdmin'])) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'You are not authorized to approve transfers'
+                    'message' => 'You are not authorized to approve transfers',
                 ], 403);
             }
 
@@ -292,29 +292,29 @@ class BranchTransferController extends Controller
             $transfer->update([
                 'status' => 'Approved',
                 'approved_by' => $user->id,
-                'remarks' => $request->remarks
+                'remarks' => $request->remarks,
             ]);
 
             DB::commit();
 
             Log::info('Branch transfer approved', [
                 'transfer_id' => $id,
-                'approved_by' => $user->id
+                'approved_by' => $user->id,
             ]);
 
             return response()->json([
                 'success' => true,
                 'message' => 'Transfer request approved successfully',
-                'data' => $transfer->fresh(['user', 'fromBranch', 'toBranch', 'approver'])
+                'data' => $transfer->fresh(['user', 'fromBranch', 'toBranch', 'approver']),
             ]);
 
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Approve transfer error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to approve transfer request'
+                'message' => 'Failed to approve transfer request',
             ], 500);
         }
     }
@@ -326,39 +326,39 @@ class BranchTransferController extends Controller
     {
         try {
             $validator = Validator::make($request->all(), [
-                'remarks' => 'required|string|max:500'
+                'remarks' => 'required|string|max:500',
             ]);
 
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
             $transfer = BranchTransfer::findOrFail($id);
 
-            if (!$this->canTransferBranch($request, $transfer)) {
+            if (! $this->canTransferBranch($request, $transfer)) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Transfer not found'
+                    'message' => 'Transfer not found',
                 ], 404);
             }
 
-            if (!$transfer->canBeApproved()) {
+            if (! $transfer->canBeApproved()) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Transfer request cannot be rejected'
+                    'message' => 'Transfer request cannot be rejected',
                 ], 400);
             }
 
             $user = Auth::user();
 
             // Check authorization
-            if (!in_array($user->role, ['SuperAdmin', 'BranchAdmin'])) {
+            if (! in_array($user->role, ['SuperAdmin', 'BranchAdmin'])) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'You are not authorized to reject transfers'
+                    'message' => 'You are not authorized to reject transfers',
                 ], 403);
             }
 
@@ -367,29 +367,29 @@ class BranchTransferController extends Controller
             $transfer->update([
                 'status' => 'Rejected',
                 'approved_by' => $user->id,
-                'remarks' => strip_tags($request->remarks)
+                'remarks' => strip_tags($request->remarks),
             ]);
 
             DB::commit();
 
             Log::info('Branch transfer rejected', [
                 'transfer_id' => $id,
-                'rejected_by' => $user->id
+                'rejected_by' => $user->id,
             ]);
 
             return response()->json([
                 'success' => true,
                 'message' => 'Transfer request rejected',
-                'data' => $transfer->fresh(['user', 'fromBranch', 'toBranch', 'approver'])
+                'data' => $transfer->fresh(['user', 'fromBranch', 'toBranch', 'approver']),
             ]);
 
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Reject transfer error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to reject transfer request'
+                'message' => 'Failed to reject transfer request',
             ], 500);
         }
     }
@@ -402,17 +402,17 @@ class BranchTransferController extends Controller
         try {
             $transfer = BranchTransfer::with(['user', 'fromBranch', 'toBranch'])->findOrFail($id);
 
-            if (!$this->canTransferBranch($request, $transfer)) {
+            if (! $this->canTransferBranch($request, $transfer)) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Transfer not found'
+                    'message' => 'Transfer not found',
                 ], 404);
             }
 
             if ($transfer->status !== 'Approved') {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Only approved transfers can be completed'
+                    'message' => 'Only approved transfers can be completed',
                 ], 400);
             }
 
@@ -420,26 +420,52 @@ class BranchTransferController extends Controller
             if ($transfer->effective_date && Carbon::parse($transfer->effective_date)->isFuture()) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Transfer effective date has not arrived yet'
+                    'message' => 'Transfer effective date has not arrived yet',
                 ], 400);
             }
 
             DB::beginTransaction();
 
             // Update user's branch
+            $toSchoolId = $transfer->toBranch?->school_id;
             $transfer->user->update([
-                'branch_id' => $transfer->to_branch_id
+                'branch_id' => $transfer->to_branch_id,
             ]);
 
-            // Update branch enrollments for students
+            // Update domain tables and branch enrollments
             if ($transfer->transfer_type === 'Student') {
+                $studentRecord = DB::table('students')->where('user_id', $transfer->user_id)->first(['id']);
+                if ($studentRecord) {
+                    $studentUpdate = ['branch_id' => $transfer->to_branch_id, 'updated_at' => now()];
+                    if ($toSchoolId) {
+                        $studentUpdate['school_id'] = $toSchoolId;
+                    }
+                    DB::table('students')->where('id', $studentRecord->id)->update($studentUpdate);
+
+                    if (\Illuminate\Support\Facades\Schema::hasTable('student_enrollments')) {
+                        $enrollmentUpdate = ['branch_id' => $transfer->to_branch_id, 'updated_at' => now()];
+                        if ($toSchoolId) {
+                            $enrollmentUpdate['school_id'] = $toSchoolId;
+                        }
+                        DB::table('student_enrollments')
+                            ->where('student_id', $studentRecord->id)
+                            ->where('status', 'Active')
+                            ->update($enrollmentUpdate);
+                    }
+                }
                 $transfer->fromBranch->decrement('current_enrollment');
                 $transfer->toBranch->increment('current_enrollment');
+            } elseif ($transfer->transfer_type === 'Teacher') {
+                $teacherUpdate = ['branch_id' => $transfer->to_branch_id, 'updated_at' => now()];
+                if ($toSchoolId) {
+                    $teacherUpdate['school_id'] = $toSchoolId;
+                }
+                DB::table('teachers')->where('user_id', $transfer->user_id)->update($teacherUpdate);
             }
 
             // Mark transfer as completed
             $transfer->update([
-                'status' => 'Completed'
+                'status' => 'Completed',
             ]);
 
             DB::commit();
@@ -447,22 +473,22 @@ class BranchTransferController extends Controller
             Log::info('Branch transfer completed', [
                 'transfer_id' => $id,
                 'user_id' => $transfer->user_id,
-                'completed_by' => Auth::id()
+                'completed_by' => Auth::id(),
             ]);
 
             return response()->json([
                 'success' => true,
                 'message' => 'Transfer completed successfully',
-                'data' => $transfer->fresh(['user', 'fromBranch', 'toBranch'])
+                'data' => $transfer->fresh(['user', 'fromBranch', 'toBranch']),
             ]);
 
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Complete transfer error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to complete transfer'
+                'message' => 'Failed to complete transfer',
             ], 500);
         }
     }
@@ -475,27 +501,27 @@ class BranchTransferController extends Controller
         try {
             $transfer = BranchTransfer::findOrFail($id);
 
-            if (!$this->canTransferBranch($request, $transfer)) {
+            if (! $this->canTransferBranch($request, $transfer)) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Transfer not found'
+                    'message' => 'Transfer not found',
                 ], 404);
             }
 
-            if (!$transfer->canBeCancelled()) {
+            if (! $transfer->canBeCancelled()) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Transfer cannot be cancelled'
+                    'message' => 'Transfer cannot be cancelled',
                 ], 400);
             }
 
             $user = Auth::user();
 
             // Only requester or admin can cancel
-            if ($transfer->requested_by !== $user->id && !in_array($user->role, ['SuperAdmin', 'BranchAdmin'])) {
+            if ($transfer->requested_by !== $user->id && ! in_array($user->role, ['SuperAdmin', 'BranchAdmin'])) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'You are not authorized to cancel this transfer'
+                    'message' => 'You are not authorized to cancel this transfer',
                 ], 403);
             }
 
@@ -507,21 +533,21 @@ class BranchTransferController extends Controller
 
             Log::info('Branch transfer cancelled', [
                 'transfer_id' => $id,
-                'cancelled_by' => $user->id
+                'cancelled_by' => $user->id,
             ]);
 
             return response()->json([
                 'success' => true,
-                'message' => 'Transfer request cancelled'
+                'message' => 'Transfer request cancelled',
             ]);
 
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Cancel transfer error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to cancel transfer'
+                'message' => 'Failed to cancel transfer',
             ], 500);
         }
     }
@@ -539,9 +565,9 @@ class BranchTransferController extends Controller
             $query = BranchTransfer::whereBetween('transfer_date', [$dateFrom, $dateTo]);
 
             if ($branchId) {
-                $query->where(function($q) use ($branchId) {
+                $query->where(function ($q) use ($branchId) {
                     $q->where('from_branch_id', $branchId)
-                      ->orWhere('to_branch_id', $branchId);
+                        ->orWhere('to_branch_id', $branchId);
                 });
             }
 
@@ -552,13 +578,13 @@ class BranchTransferController extends Controller
                     'approved' => (clone $query)->where('status', 'Approved')->count(),
                     'rejected' => (clone $query)->where('status', 'Rejected')->count(),
                     'completed' => (clone $query)->where('status', 'Completed')->count(),
-                    'cancelled' => (clone $query)->where('status', 'Cancelled')->count()
+                    'cancelled' => (clone $query)->where('status', 'Cancelled')->count(),
                 ],
                 'by_type' => [
                     'students' => (clone $query)->where('transfer_type', 'Student')->count(),
                     'teachers' => (clone $query)->where('transfer_type', 'Teacher')->count(),
-                    'staff' => (clone $query)->where('transfer_type', 'Staff')->count()
-                ]
+                    'staff' => (clone $query)->where('transfer_type', 'Staff')->count(),
+                ],
             ];
 
             if ($branchId) {
@@ -568,23 +594,22 @@ class BranchTransferController extends Controller
                         ->count(),
                     'outgoing' => BranchTransfer::where('from_branch_id', $branchId)
                         ->whereBetween('transfer_date', [$dateFrom, $dateTo])
-                        ->count()
+                        ->count(),
                 ];
             }
 
             return response()->json([
                 'success' => true,
-                'data' => $stats
+                'data' => $stats,
             ]);
 
         } catch (\Exception $e) {
             Log::error('Get transfer statistics error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to fetch transfer statistics'
+                'message' => 'Failed to fetch transfer statistics',
             ], 500);
         }
     }
 }
-

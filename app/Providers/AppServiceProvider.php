@@ -16,6 +16,7 @@ class AppServiceProvider extends ServiceProvider
     {
         // One tenant resolution per request (memoizes accessible branches/school).
         $this->app->scoped(TenantContext::class);
+        $this->app->scoped(\App\Services\SystemAuditLogger::class);
     }
 
     /**
@@ -28,6 +29,19 @@ class AppServiceProvider extends ServiceProvider
         \App\Models\Teacher::observe(\App\Observers\TeacherObserver::class);
 
         $this->registerTenantScopeMacro();
+        $this->registerGlobalEloquentAuditListeners();
+    }
+
+    protected function registerGlobalEloquentAuditListeners(): void
+    {
+        foreach (['created', 'updated', 'deleted', 'restored'] as $event) {
+            \Illuminate\Support\Facades\Event::listen("eloquent.{$event}: *", function (string $eventName, array $data) use ($event): void {
+                $model = $data[0] ?? null;
+                if ($model instanceof \Illuminate\Database\Eloquent\Model) {
+                    app(\App\Services\SystemAuditLogger::class)->bufferModelEvent($event, $model);
+                }
+            });
+        }
     }
 
     /**

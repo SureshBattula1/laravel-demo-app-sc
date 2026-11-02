@@ -8,9 +8,9 @@ use App\Models\InvoiceItem;
 use App\Models\Transaction;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Validator;
 
 class InvoiceController extends Controller
 {
@@ -23,21 +23,21 @@ class InvoiceController extends Controller
     {
         try {
             $user = Auth::user();
-            
+
             // 🚀 OPTIMIZED: Select only needed columns and limit eager loading
             $query = Invoice::select([
                 'id', 'invoice_number', 'branch_id', 'student_id', 'customer_name',
                 'customer_email', 'customer_phone', 'invoice_date', 'due_date',
                 'invoice_type', 'subtotal', 'tax_amount', 'discount_amount',
                 'total_amount', 'paid_amount', 'balance_amount', 'status',
-                'payment_status', 'payment_method', 'payment_date', 'created_by',
-                'created_at', 'updated_at'
+                'payment_status', 'payment_method', 'payment_date', 'academic_year', 'academic_year_id', 'created_by',
+                'created_at', 'updated_at',
             ])
-            ->with([
-                'branch:id,name,code',
-                'createdBy:id,first_name,last_name,email',
-                'items:id,invoice_id,description,quantity,unit_price,amount'
-            ]);
+                ->with([
+                    'branch:id,name,code',
+                    'createdBy:id,first_name,last_name,email',
+                    'items:id,invoice_id,description,quantity,unit_price,amount',
+                ]);
 
             // 🔥 APPLY SCHOOL FILTERING - School-level isolation
             $schoolId = $this->getCurrentSchoolId($request);
@@ -48,7 +48,7 @@ class InvoiceController extends Controller
             // 🔥 APPLY BRANCH FILTERING - Restrict to accessible branches
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
             if ($accessibleBranchIds !== 'all') {
-                if (!empty($accessibleBranchIds)) {
+                if (! empty($accessibleBranchIds)) {
                     $query->whereIn('branch_id', $accessibleBranchIds);
                 } else {
                     $query->whereRaw('1 = 0');
@@ -76,12 +76,17 @@ class InvoiceController extends Controller
                 $query->overdue();
             }
 
+            if ($request->filled('academic_year') || $request->filled('academic_year_id') || $request->attributes->get('academic_year_id')) {
+                [$academicYearId, $academicYearName] = $this->resolveAcademicYearFromRequest($request);
+                $this->applyAcademicYearScope($query, $academicYearId, $academicYearName);
+            }
+
             // OPTIMIZED Search filter - prefix search for better index usage
-            if ($request->has('search') && !empty($request->search)) {
+            if ($request->has('search') && ! empty($request->search)) {
                 $search = strip_tags($request->search);
-                $query->where(function($q) use ($search) {
+                $query->where(function ($q) use ($search) {
                     $q->where('invoice_number', 'like', "{$search}%")
-                      ->orWhere('customer_name', 'like', "{$search}%");
+                        ->orWhere('customer_name', 'like', "{$search}%");
                 });
             }
 
@@ -95,7 +100,7 @@ class InvoiceController extends Controller
                 'total_amount',
                 'status',
                 'payment_status',
-                'created_at'
+                'created_at',
             ];
 
             // Apply pagination and sorting (default: 25 per page, sorted by invoice_date desc)
@@ -112,17 +117,17 @@ class InvoiceController extends Controller
                     'last_page' => $invoices->lastPage(),
                     'from' => $invoices->firstItem(),
                     'to' => $invoices->lastItem(),
-                    'has_more_pages' => $invoices->hasMorePages()
-                ]
+                    'has_more_pages' => $invoices->hasMorePages(),
+                ],
             ]);
 
         } catch (\Exception $e) {
             Log::error('Get invoices error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch invoices',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -153,44 +158,44 @@ class InvoiceController extends Controller
             // Use prefix search where possible for better index usage
             if ($request->has('search_term')) {
                 $searchTerm = strip_tags($request->search_term);
-                
-                $query->where(function($q) use ($searchTerm) {
+
+                $query->where(function ($q) use ($searchTerm) {
                     // Search by party name - prefix search when possible
-                    $q->where('party_name', 'like', $searchTerm . '%')
-                      ->orWhere('description', 'like', $searchTerm . '%');
-                    
+                    $q->where('party_name', 'like', $searchTerm.'%')
+                        ->orWhere('description', 'like', $searchTerm.'%');
+
                     // Search by student roll number or name - prefix search for roll_number and admission_number
-                    $q->orWhereExists(function($subQ) use ($searchTerm) {
+                    $q->orWhereExists(function ($subQ) use ($searchTerm) {
                         $subQ->select(DB::raw(1))
-                             ->from('students')
-                             ->whereColumn('students.id', 'transactions.party_id')
-                             ->where('transactions.party_type', 'Student')
-                             ->where(function($studentQ) use ($searchTerm) {
-                                 $studentQ->where('roll_number', 'like', $searchTerm . '%')
-                                          ->orWhere('admission_number', 'like', $searchTerm . '%')
-                                          ->orWhere('first_name', 'like', $searchTerm . '%')
-                                          ->orWhere('last_name', 'like', $searchTerm . '%');
-                             });
+                            ->from('students')
+                            ->whereColumn('students.id', 'transactions.party_id')
+                            ->where('transactions.party_type', 'Student')
+                            ->where(function ($studentQ) use ($searchTerm) {
+                                $studentQ->where('roll_number', 'like', $searchTerm.'%')
+                                    ->orWhere('admission_number', 'like', $searchTerm.'%')
+                                    ->orWhere('first_name', 'like', $searchTerm.'%')
+                                    ->orWhere('last_name', 'like', $searchTerm.'%');
+                            });
                     });
-                    
+
                     // Search by teacher name - prefix search
-                    $q->orWhereExists(function($subQ) use ($searchTerm) {
+                    $q->orWhereExists(function ($subQ) use ($searchTerm) {
                         $subQ->select(DB::raw(1))
-                             ->from('users')
-                             ->whereColumn('users.id', 'transactions.party_id')
-                             ->where('transactions.party_type', 'Teacher')
-                             ->where('role', 'Teacher')
-                             ->where(function($teacherQ) use ($searchTerm) {
-                                 $teacherQ->where('first_name', 'like', $searchTerm . '%')
-                                          ->orWhere('last_name', 'like', $searchTerm . '%');
-                             });
+                            ->from('users')
+                            ->whereColumn('users.id', 'transactions.party_id')
+                            ->where('transactions.party_type', 'Teacher')
+                            ->where('role', 'Teacher')
+                            ->where(function ($teacherQ) use ($searchTerm) {
+                                $teacherQ->where('first_name', 'like', $searchTerm.'%')
+                                    ->orWhere('last_name', 'like', $searchTerm.'%');
+                            });
                     });
                 });
             }
 
             // Legacy party_name filter (for backward compatibility) - OPTIMIZED to prefix search
             if ($request->has('party_name')) {
-                $query->where('party_name', 'like', $request->party_name . '%');
+                $query->where('party_name', 'like', $request->party_name.'%');
             }
 
             if ($request->has('category_id')) {
@@ -207,20 +212,20 @@ class InvoiceController extends Controller
             }
 
             // Exclude transactions already invoiced (unless explicitly requested)
-            if (!$request->has('include_invoiced') || !$request->boolean('include_invoiced')) {
+            if (! $request->has('include_invoiced') || ! $request->boolean('include_invoiced')) {
                 $query->whereDoesntHave('invoices');
             }
 
             $transactions = $query->orderBy('transaction_date', 'desc')
-                                  ->limit($request->get('limit', 100))
-                                  ->get();
+                ->limit($request->get('limit', 100))
+                ->get();
 
             // OPTIMIZED: Batch load students and teachers to avoid N+1 queries
-            $studentIds = $transactions->filter(function($t) {
+            $studentIds = $transactions->filter(function ($t) {
                 return $t->party_type === 'Student' && $t->party_id;
             })->pluck('party_id')->unique()->filter();
 
-            $teacherIds = $transactions->filter(function($t) {
+            $teacherIds = $transactions->filter(function ($t) {
                 return $t->party_type === 'Teacher' && $t->party_id;
             })->pluck('party_id')->unique()->filter();
 
@@ -237,24 +242,24 @@ class InvoiceController extends Controller
                 ->keyBy('id');
 
             // Map to transactions (0 queries in loop)
-            $transactions->each(function($transaction) use ($students, $teachers) {
+            $transactions->each(function ($transaction) use ($students, $teachers) {
                 if ($transaction->party_type === 'Student') {
                     $student = $students->get($transaction->party_id);
                     if ($student) {
                         $transaction->student_details = [
-                            'name' => $student->first_name . ' ' . $student->last_name,
+                            'name' => $student->first_name.' '.$student->last_name,
                             'roll_number' => $student->roll_number,
-                            'admission_number' => $student->admission_number
+                            'admission_number' => $student->admission_number,
                         ];
                     }
                 }
-                
+
                 if ($transaction->party_type === 'Teacher') {
                     $teacher = $teachers->get($transaction->party_id);
                     if ($teacher) {
                         $transaction->teacher_details = [
-                            'name' => $teacher->first_name . ' ' . $teacher->last_name,
-                            'email' => $teacher->email
+                            'name' => $teacher->first_name.' '.$teacher->last_name,
+                            'email' => $teacher->email,
                         ];
                     }
                 }
@@ -263,16 +268,16 @@ class InvoiceController extends Controller
             return response()->json([
                 'success' => true,
                 'data' => $transactions,
-                'count' => $transactions->count()
+                'count' => $transactions->count(),
             ]);
 
         } catch (\Exception $e) {
             Log::error('Search transactions error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to search transactions',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -290,24 +295,24 @@ class InvoiceController extends Controller
                 'due_date' => 'required|date|after_or_equal:invoice_date',
                 'customer_name' => 'required|string',
                 'tax_percentage' => 'nullable|numeric|min:0|max:100',
-                'discount_percentage' => 'nullable|numeric|min:0|max:100'
+                'discount_percentage' => 'nullable|numeric|min:0|max:100',
             ]);
 
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
             DB::beginTransaction();
 
             $transactions = Transaction::with('category')->whereIn('id', $request->transaction_ids)->get();
-            
+
             if ($transactions->isEmpty()) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'No valid transactions found'
+                    'message' => 'No valid transactions found',
                 ], 404);
             }
 
@@ -315,10 +320,12 @@ class InvoiceController extends Controller
             $subtotal = $transactions->sum('amount');
             $taxPercentage = $request->tax_percentage ?? 0;
             $discountPercentage = $request->discount_percentage ?? 0;
-            
+
             $taxAmount = ($subtotal * $taxPercentage) / 100;
             $discountAmount = ($subtotal * $discountPercentage) / 100;
             $totalAmount = $subtotal + $taxAmount - $discountAmount;
+
+            [$academicYearId, $academicYearName] = $this->resolveAcademicYearFromRequest($request);
 
             // Create invoice
             $invoice = Invoice::create([
@@ -344,8 +351,9 @@ class InvoiceController extends Controller
                 'payment_status' => 'Unpaid',
                 'notes' => $request->notes,
                 'terms_conditions' => $request->terms_conditions ?? 'Payment due within 30 days',
-                'academic_year' => date('Y') . '-' . (date('Y') + 1),
-                'created_by' => auth()->id()
+                'academic_year' => $academicYearName ?? date('Y').'-'.(date('Y') + 1),
+                'academic_year_id' => $academicYearId,
+                'created_by' => auth()->id(),
             ]);
 
             // Create invoice items from transactions
@@ -357,7 +365,7 @@ class InvoiceController extends Controller
                     'description' => $transaction->description ?? $transaction->category->name,
                     'quantity' => 1,
                     'unit_price' => $transaction->amount,
-                    'amount' => $transaction->amount
+                    'amount' => $transaction->amount,
                 ]);
 
                 // Link transaction to invoice
@@ -366,7 +374,7 @@ class InvoiceController extends Controller
                     'transaction_id' => $transaction->id,
                     'amount' => $transaction->amount,
                     'created_at' => now(),
-                    'updated_at' => now()
+                    'updated_at' => now(),
                 ]);
             }
 
@@ -374,31 +382,35 @@ class InvoiceController extends Controller
 
             // Manually load student data if needed
             if ($invoice->student_id) {
-                $student = DB::table('students')->find($invoice->student_id);
+                $student = DB::table('students')
+                    ->leftJoin('users', 'students.user_id', '=', 'users.id')
+                    ->where('students.id', $invoice->student_id)
+                    ->select('students.id', 'students.admission_number', 'users.first_name', 'users.last_name', 'users.email', 'users.phone')
+                    ->first();
                 if ($student) {
                     $invoice->student = [
                         'id' => $student->id,
                         'first_name' => $student->first_name,
                         'last_name' => $student->last_name,
-                        'admission_number' => $student->admission_number ?? null
+                        'admission_number' => $student->admission_number ?? null,
                     ];
                 }
             }
 
             return response()->json([
                 'success' => true,
-                'message' => 'Invoice generated successfully from ' . count($transactions) . ' transaction(s)',
-                'data' => $invoice->load(['items', 'transactions'])
+                'message' => 'Invoice generated successfully from '.count($transactions).' transaction(s)',
+                'data' => $invoice->load(['items', 'transactions']),
             ], 201);
 
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Generate invoice error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to generate invoice',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -411,10 +423,10 @@ class InvoiceController extends Controller
         try {
             $user = Auth::user();
 
-            if (!in_array($user->role, ['SuperAdmin', 'BranchAdmin', 'Accountant'])) {
+            if (! in_array($user->role, ['SuperAdmin', 'BranchAdmin', 'Accountant'])) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Access denied'
+                    'message' => 'Access denied',
                 ], 403);
             }
 
@@ -427,13 +439,13 @@ class InvoiceController extends Controller
                 'items' => 'required|array|min:1',
                 'items.*.description' => 'required|string',
                 'items.*.quantity' => 'required|integer|min:1',
-                'items.*.unit_price' => 'required|numeric|min:0'
+                'items.*.unit_price' => 'required|numeric|min:0',
             ]);
 
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
@@ -447,12 +459,13 @@ class InvoiceController extends Controller
 
             $taxPercentage = $request->tax_percentage ?? 0;
             $discountPercentage = $request->discount_percentage ?? 0;
-            
+
             $taxAmount = ($subtotal * $taxPercentage) / 100;
             $discountAmount = ($subtotal * $discountPercentage) / 100;
             $totalAmount = $subtotal + $taxAmount - $discountAmount;
 
             $branchId = $user->role === 'BranchAdmin' ? $user->branch_id : $request->branch_id;
+            [$academicYearId, $academicYearName] = $this->resolveAcademicYearFromRequest($request);
 
             $invoice = Invoice::create([
                 'invoice_number' => Invoice::generateInvoiceNumber(),
@@ -477,8 +490,9 @@ class InvoiceController extends Controller
                 'payment_status' => 'Unpaid',
                 'notes' => $request->notes,
                 'terms_conditions' => $request->terms_conditions ?? 'Payment due within 30 days',
-                'academic_year' => date('Y') . '-' . (date('Y') + 1),
-                'created_by' => $user->id
+                'academic_year' => $academicYearName ?? date('Y').'-'.(date('Y') + 1),
+                'academic_year_id' => $academicYearId,
+                'created_by' => $user->id,
             ]);
 
             // Create items
@@ -489,7 +503,7 @@ class InvoiceController extends Controller
                     'description' => strip_tags($itemData['description']),
                     'quantity' => $itemData['quantity'],
                     'unit_price' => $itemData['unit_price'],
-                    'amount' => $itemData['quantity'] * $itemData['unit_price']
+                    'amount' => $itemData['quantity'] * $itemData['unit_price'],
                 ]);
             }
 
@@ -497,13 +511,17 @@ class InvoiceController extends Controller
 
             // Manually load student data if needed
             if ($invoice->student_id) {
-                $student = DB::table('students')->find($invoice->student_id);
+                $student = DB::table('students')
+                    ->leftJoin('users', 'students.user_id', '=', 'users.id')
+                    ->where('students.id', $invoice->student_id)
+                    ->select('students.id', 'students.admission_number', 'users.first_name', 'users.last_name', 'users.email', 'users.phone')
+                    ->first();
                 if ($student) {
                     $invoice->student = [
                         'id' => $student->id,
                         'first_name' => $student->first_name,
                         'last_name' => $student->last_name,
-                        'admission_number' => $student->admission_number ?? null
+                        'admission_number' => $student->admission_number ?? null,
                     ];
                 }
             }
@@ -511,16 +529,16 @@ class InvoiceController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Invoice created successfully',
-                'data' => $invoice->load(['items', 'branch'])
+                'data' => $invoice->load(['items', 'branch']),
             ], 201);
 
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Create invoice error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to create invoice'
+                'message' => 'Failed to create invoice',
             ], 500);
         }
     }
@@ -532,10 +550,14 @@ class InvoiceController extends Controller
     {
         try {
             $invoice = Invoice::with(['branch', 'createdBy', 'items', 'transactions'])->findOrFail($id);
-            
+
             // Manually load student data if student_id exists
             if ($invoice->student_id) {
-                $student = DB::table('students')->find($invoice->student_id);
+                $student = DB::table('students')
+                    ->leftJoin('users', 'students.user_id', '=', 'users.id')
+                    ->where('students.id', $invoice->student_id)
+                    ->select('students.id', 'students.admission_number', 'users.first_name', 'users.last_name', 'users.email', 'users.phone')
+                    ->first();
                 if ($student) {
                     $invoice->student = [
                         'id' => $student->id,
@@ -543,23 +565,23 @@ class InvoiceController extends Controller
                         'last_name' => $student->last_name,
                         'admission_number' => $student->admission_number ?? null,
                         'email' => $student->email ?? null,
-                        'phone' => $student->phone ?? null
+                        'phone' => $student->phone ?? null,
                     ];
                 }
             }
 
             return response()->json([
                 'success' => true,
-                'data' => $invoice
+                'data' => $invoice,
             ]);
 
         } catch (\Exception $e) {
             Log::error('Get invoice error', ['error' => $e->getMessage(), 'line' => $e->getLine()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Invoice not found',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -575,7 +597,7 @@ class InvoiceController extends Controller
             if ($invoice->status === 'Paid') {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Cannot edit paid invoice'
+                    'message' => 'Cannot edit paid invoice',
                 ], 403);
             }
 
@@ -583,31 +605,31 @@ class InvoiceController extends Controller
 
             $updateData = $request->only([
                 'customer_name', 'customer_email', 'customer_phone', 'customer_address',
-                'due_date', 'notes', 'terms_conditions', 'status'
+                'due_date', 'notes', 'terms_conditions', 'status',
             ]);
 
             // Update items if provided
             if ($request->has('items')) {
                 $invoice->items()->delete();
-                
+
                 $subtotal = 0;
                 foreach ($request->items as $itemData) {
                     $amount = $itemData['quantity'] * $itemData['unit_price'];
                     $subtotal += $amount;
-                    
+
                     InvoiceItem::create([
                         'invoice_id' => $invoice->id,
                         'description' => strip_tags($itemData['description']),
                         'quantity' => $itemData['quantity'],
                         'unit_price' => $itemData['unit_price'],
-                        'amount' => $amount
+                        'amount' => $amount,
                     ]);
                 }
-                
+
                 $taxAmount = ($subtotal * $invoice->tax_percentage) / 100;
                 $discountAmount = ($subtotal * $invoice->discount_percentage) / 100;
                 $totalAmount = $subtotal + $taxAmount - $discountAmount;
-                
+
                 $updateData['subtotal'] = $subtotal;
                 $updateData['tax_amount'] = $taxAmount;
                 $updateData['discount_amount'] = $discountAmount;
@@ -620,16 +642,20 @@ class InvoiceController extends Controller
             DB::commit();
 
             $invoice = $invoice->fresh(['items', 'branch']);
-            
+
             // Manually load student data if needed
             if ($invoice->student_id) {
-                $student = DB::table('students')->find($invoice->student_id);
+                $student = DB::table('students')
+                    ->leftJoin('users', 'students.user_id', '=', 'users.id')
+                    ->where('students.id', $invoice->student_id)
+                    ->select('students.id', 'students.admission_number', 'users.first_name', 'users.last_name', 'users.email', 'users.phone')
+                    ->first();
                 if ($student) {
                     $invoice->student = [
                         'id' => $student->id,
                         'first_name' => $student->first_name,
                         'last_name' => $student->last_name,
-                        'admission_number' => $student->admission_number ?? null
+                        'admission_number' => $student->admission_number ?? null,
                     ];
                 }
             }
@@ -637,14 +663,15 @@ class InvoiceController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Invoice updated successfully',
-                'data' => $invoice
+                'data' => $invoice,
             ]);
 
         } catch (\Exception $e) {
             DB::rollBack();
+
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to update invoice'
+                'message' => 'Failed to update invoice',
             ], 500);
         }
     }
@@ -657,19 +684,19 @@ class InvoiceController extends Controller
         try {
             $user = Auth::user();
 
-            if (!in_array($user->role, ['SuperAdmin', 'BranchAdmin'])) {
+            if (! in_array($user->role, ['SuperAdmin', 'BranchAdmin'])) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Access denied'
+                    'message' => 'Access denied',
                 ], 403);
             }
 
             $invoice = Invoice::findOrFail($id);
-            
+
             if ($invoice->status === 'Paid') {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Cannot delete paid invoice'
+                    'message' => 'Cannot delete paid invoice',
                 ], 403);
             }
 
@@ -677,13 +704,13 @@ class InvoiceController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Invoice deleted successfully'
+                'message' => 'Invoice deleted successfully',
             ]);
 
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to delete invoice'
+                'message' => 'Failed to delete invoice',
             ], 500);
         }
     }
@@ -700,13 +727,13 @@ class InvoiceController extends Controller
                 'amount' => 'required|numeric|min:0',
                 'payment_method' => 'required|string',
                 'payment_date' => 'required|date',
-                'payment_reference' => 'nullable|string'
+                'payment_reference' => 'nullable|string',
             ]);
 
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
@@ -717,7 +744,7 @@ class InvoiceController extends Controller
 
             $paymentStatus = 'Unpaid';
             $status = $invoice->status;
-            
+
             if ($newPaidAmount >= $invoice->total_amount) {
                 $paymentStatus = 'Paid';
                 $status = 'Paid';
@@ -733,7 +760,7 @@ class InvoiceController extends Controller
                 'status' => $status,
                 'payment_method' => $request->payment_method,
                 'payment_reference' => $request->payment_reference,
-                'payment_date' => $request->payment_date
+                'payment_date' => $request->payment_date,
             ]);
 
             DB::commit();
@@ -741,14 +768,15 @@ class InvoiceController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Payment recorded successfully',
-                'data' => $invoice->fresh(['items'])
+                'data' => $invoice->fresh(['items']),
             ]);
 
         } catch (\Exception $e) {
             DB::rollBack();
+
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to record payment'
+                'message' => 'Failed to record payment',
             ], 500);
         }
     }
@@ -760,21 +788,21 @@ class InvoiceController extends Controller
     {
         try {
             $invoice = Invoice::findOrFail($id);
-            
+
             $invoice->update([
                 'status' => 'Sent',
-                'sent_at' => now()
+                'sent_at' => now(),
             ]);
 
             return response()->json([
                 'success' => true,
-                'message' => 'Invoice marked as sent'
+                'message' => 'Invoice marked as sent',
             ]);
 
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to send invoice'
+                'message' => 'Failed to send invoice',
             ], 500);
         }
     }
@@ -800,7 +828,7 @@ class InvoiceController extends Controller
             $totalAmount = $query->sum('total_amount');
             $paidAmount = $query->sum('paid_amount');
             $pendingAmount = $query->sum('balance_amount');
-            
+
             $overdueInvoices = (clone $query)->overdue()->count();
             $draftInvoices = (clone $query)->where('status', 'Draft')->count();
             $paidInvoices = (clone $query)->where('payment_status', 'Paid')->count();
@@ -810,22 +838,21 @@ class InvoiceController extends Controller
                 'success' => true,
                 'data' => [
                     'total_invoices' => $totalInvoices,
-                    'total_amount' => (float)$totalAmount,
-                    'paid_amount' => (float)$paidAmount,
-                    'pending_amount' => (float)$pendingAmount,
+                    'total_amount' => (float) $totalAmount,
+                    'paid_amount' => (float) $paidAmount,
+                    'pending_amount' => (float) $pendingAmount,
                     'overdue_invoices' => $overdueInvoices,
                     'draft_invoices' => $draftInvoices,
                     'paid_invoices' => $paidInvoices,
-                    'partial_invoices' => $partialInvoices
-                ]
+                    'partial_invoices' => $partialInvoices,
+                ],
             ]);
 
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to fetch statistics'
+                'message' => 'Failed to fetch statistics',
             ], 500);
         }
     }
 }
-

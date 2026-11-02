@@ -5,8 +5,6 @@ namespace App\Models;
 use App\Models\Concerns\BelongsToTenant;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use App\Models\Branch;
-use App\Models\User;
 
 class ClassModel extends Model
 {
@@ -22,12 +20,13 @@ class ClassModel extends Model
         'section',
         'class_name',
         'academic_year',
+        'academic_year_id',
         'class_teacher_id',
         'capacity',
         'current_strength',
         'room_number',
         'description',
-        'is_active'
+        'is_active',
     ];
 
     protected function casts(): array
@@ -48,6 +47,11 @@ class ClassModel extends Model
     public function school()
     {
         return $this->belongsTo(School::class);
+    }
+
+    public function academicYear()
+    {
+        return $this->belongsTo(AcademicYear::class, 'academic_year_id');
     }
 
     public function classTeacher()
@@ -76,5 +80,13 @@ class ClassModel extends Model
     {
         return $query->where('school_id', $schoolId);
     }
-}
 
+    public function scopeForAcademicYear($query, $yearOrId)
+    {
+        if (is_numeric($yearOrId)) {
+            return $query->where('academic_year_id', (int) $yearOrId);
+        }
+
+        return $query->where('academic_year', $yearOrId);
+    }
+}

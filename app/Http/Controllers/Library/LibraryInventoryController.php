@@ -219,6 +219,14 @@ class LibraryInventoryController extends Controller
         $query = LibraryStockVerification::with(['verifier:id,first_name,last_name,email'])->withCount('items');
         $this->applyBranchFilter($query, $request);
 
+        [$academicYearId] = $this->resolveAcademicYearFromRequest($request);
+        if ($academicYearId) {
+            $query->where(function ($q) use ($academicYearId) {
+                $q->where('academic_year_id', $academicYearId)
+                    ->orWhereNull('academic_year_id');
+            });
+        }
+
         $audits = $this->paginateAndSort($query, $request, ['session_title', 'started_at', 'status', 'total_copies_checked', 'missing_count'], 'started_at', 'desc');
 
         return response()->json(['success' => true, 'data' => $audits->items(), 'meta' => $this->formatMeta($audits)]);
@@ -232,9 +240,12 @@ class LibraryInventoryController extends Controller
             'notes' => 'nullable|string',
         ]);
 
+        [$academicYearId] = $this->resolveAcademicYearFromRequest($request);
+
         $audit = LibraryStockVerification::create([
             'school_id' => $this->getCurrentSchoolId($request),
             'branch_id' => (int) $validated['branch_id'],
+            'academic_year_id' => $academicYearId,
             'session_title' => $validated['session_title'],
             'verified_by' => $request->user()->id,
             'started_at' => now(),

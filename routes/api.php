@@ -5,6 +5,7 @@ use App\Http\Controllers\AccountController;
 use App\Http\Controllers\AdmissionController;
 use App\Http\Controllers\AssignmentController;
 use App\Http\Controllers\AttendanceController;
+use App\Http\Controllers\AuditLogController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BranchController;
 use App\Http\Controllers\BranchSmsGatewayConfigController;
@@ -233,6 +234,10 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
         ->whereNumber('studentUserId');
 
     // Promotion routes - MUST come before students/{id} to avoid route conflicts
+    Route::get('students/promotion-dashboard-stats', [StudentController::class, 'getPromotionDashboardStats']);
+    Route::get('students/promotion-batches', [StudentController::class, 'getPromotionBatches']);
+    Route::get('students/promotion-batches/{batchId}', [StudentController::class, 'getPromotionBatchDetails']);
+    Route::post('students/promotion-batches/{batchId}/revert', [StudentController::class, 'revertPromotionBatch']);
     Route::post('students/promote', [StudentController::class, 'promote']);
     Route::post('students/promote-with-fee-handling', [StudentController::class, 'promoteWithFeeHandling']);
     Route::post('students/preview-promotion', [StudentController::class, 'previewPromotion']);
@@ -704,6 +709,15 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
         Route::delete('/{id}', [AcademicYearController::class, 'destroy']);
     });
 
+    // Enterprise Audit Logs (SuperAdmin, BranchAdmin & audit_logs.view)
+    Route::prefix('audit-logs')->group(function () {
+        Route::get('/stats', [AuditLogController::class, 'stats']);
+        Route::get('/filters', [AuditLogController::class, 'filters']);
+        Route::get('/export', [AuditLogController::class, 'export']);
+        Route::get('/', [AuditLogController::class, 'index']);
+        Route::get('/{id}', [AuditLogController::class, 'show']);
+    });
+
     // Roles Management
     Route::prefix('roles')->group(function () {
         Route::get('/', [RoleController::class, 'index']);
@@ -722,7 +736,7 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
         Route::get('/', [PermissionManagementController::class, 'index']);
         Route::get('/all', [PermissionManagementController::class, 'all']);
         Route::get('/by-module', [PermissionManagementController::class, 'byModule']);
-        Route::post('/', [PermissionManagementController::class, 'store']);
+        Route::post('/', [PermissionManagementController::class, 'store'])->middleware('role:SuperAdmin,BranchAdmin');
 
         // Legacy permission controller endpoints - MUST be before /{id} routes
         Route::get('/roles', [App\Http\Controllers\PermissionController::class, 'getRoles']);
@@ -732,8 +746,8 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
 
         // Details endpoint for settings - MUST be after specific routes
         Route::get('/{id}', [PermissionManagementController::class, 'show']);
-        Route::put('/{id}', [PermissionManagementController::class, 'update']);
-        Route::delete('/{id}', [PermissionManagementController::class, 'destroy']);
+        Route::put('/{id}', [PermissionManagementController::class, 'update'])->middleware('role:SuperAdmin,BranchAdmin');
+        Route::delete('/{id}', [PermissionManagementController::class, 'destroy'])->middleware('role:SuperAdmin,BranchAdmin');
 
         // Admin-only permission management
         Route::middleware('role:SuperAdmin,BranchAdmin')->group(function () {
@@ -749,9 +763,9 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
     Route::prefix('modules')->group(function () {
         Route::get('/', [ModuleController::class, 'index']);
         Route::get('/{id}', [ModuleController::class, 'show']);
-        Route::post('/', [ModuleController::class, 'store']);
-        Route::put('/{id}', [ModuleController::class, 'update']);
-        Route::delete('/{id}', [ModuleController::class, 'destroy']);
+        Route::post('/', [ModuleController::class, 'store'])->middleware('role:SuperAdmin,BranchAdmin');
+        Route::put('/{id}', [ModuleController::class, 'update'])->middleware('role:SuperAdmin,BranchAdmin');
+        Route::delete('/{id}', [ModuleController::class, 'destroy'])->middleware('role:SuperAdmin,BranchAdmin');
     });
 
     // Import Module - Data Import System (Rate limited - 120 per minute)
@@ -767,8 +781,13 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
         Route::get('/{entity}/preview/{batchId}', [App\Http\Controllers\ImportController::class, 'preview']);
         Route::get('/{entity}/failed-export/{batchId}', [App\Http\Controllers\ImportController::class, 'exportFailedRows']);
         Route::patch('/{entity}/record/{id}', [App\Http\Controllers\ImportController::class, 'updateRecord']);
+        Route::post('/{entity}/batch/{batchId}/set-role', [App\Http\Controllers\ImportController::class, 'setBatchRole']);
         Route::post('/{entity}/commit/{batchId}', [App\Http\Controllers\ImportController::class, 'commit']);
         Route::post('/{entity}/revert/{batchId}', [App\Http\Controllers\ImportController::class, 'revert']);
+        Route::post('/revert-requests/{batchId}/request', [App\Http\Controllers\ImportController::class, 'requestRevert']);
+        Route::get('/revert-requests/pending', [App\Http\Controllers\ImportController::class, 'getPendingRevertRequests']);
+        Route::post('/revert-requests/{batchId}/approve', [App\Http\Controllers\ImportController::class, 'approveRevert']);
+        Route::post('/revert-requests/{batchId}/reject', [App\Http\Controllers\ImportController::class, 'rejectRevert']);
         Route::delete('/{entity}/cancel/{batchId}', [App\Http\Controllers\ImportController::class, 'cancel']);
     });
 
@@ -872,7 +891,9 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
     });
 
     // Message Sending Routes (WhatsApp & SMS)
-    Route::post('/send-whatsapp', [MessageController::class, 'sendWhatsApp']);
-    Route::post('/send-sms', [MessageController::class, 'sendSms']);
-    Route::post('/send-both', [MessageController::class, 'sendBoth']);
+    Route::middleware('permission:notifications.create')->group(function () {
+        Route::post('/send-whatsapp', [MessageController::class, 'sendWhatsApp']);
+        Route::post('/send-sms', [MessageController::class, 'sendSms']);
+        Route::post('/send-both', [MessageController::class, 'sendBoth']);
+    });
 });

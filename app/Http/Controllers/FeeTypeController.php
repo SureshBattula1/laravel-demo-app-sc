@@ -4,8 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Http\Traits\PaginatesAndSorts;
 use App\Models\FeeType;
-use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 
 class FeeTypeController extends Controller
@@ -29,7 +29,7 @@ class FeeTypeController extends Controller
             // Apply branch filtering - restrict to accessible branches
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
             if ($accessibleBranchIds !== 'all') {
-                if (!empty($accessibleBranchIds)) {
+                if (! empty($accessibleBranchIds)) {
                     $query->whereIn('branch_id', $accessibleBranchIds);
                 } else {
                     $query->whereRaw('1 = 0');
@@ -41,9 +41,15 @@ class FeeTypeController extends Controller
                 $query->where('branch_id', $request->branch_id);
             }
 
-            // Filter by academic year when provided
-            if ($request->has('academic_year_id') && $request->academic_year_id) {
-                $query->where('academic_year_id', $request->academic_year_id);
+            // Filter by academic year when provided or from context
+            $academicYearId = $request->filled('academic_year_id')
+                ? (int) $request->academic_year_id
+                : $request->attributes->get('academic_year_id');
+            if ($academicYearId) {
+                $query->where(function ($q) use ($academicYearId) {
+                    $q->where('academic_year_id', (int) $academicYearId)
+                        ->orWhereNull('academic_year_id');
+                });
             }
 
             // Filter by active status
@@ -52,12 +58,12 @@ class FeeTypeController extends Controller
             }
 
             // OPTIMIZED Search filter - prefix search for better index usage
-            if ($request->has('search') && !empty($request->search)) {
+            if ($request->has('search') && ! empty($request->search)) {
                 $search = strip_tags($request->search);
                 $query->where(function ($q) use ($search) {
                     $q->where('name', 'like', "{$search}%")
-                      ->orWhere('code', 'like', "{$search}%")
-                      ->orWhere('description', 'like', "{$search}%");
+                        ->orWhere('code', 'like', "{$search}%")
+                        ->orWhere('description', 'like', "{$search}%");
                 });
             }
 
@@ -84,13 +90,13 @@ class FeeTypeController extends Controller
                     'last_page' => $feeTypes->lastPage(),
                     'from' => $feeTypes->firstItem(),
                     'to' => $feeTypes->lastItem(),
-                    'has_more_pages' => $feeTypes->hasMorePages()
-                ]
+                    'has_more_pages' => $feeTypes->hasMorePages(),
+                ],
             ]);
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to retrieve fee types: ' . $e->getMessage()
+                'message' => 'Failed to retrieve fee types: '.$e->getMessage(),
             ], 500);
         }
     }
@@ -110,14 +116,19 @@ class FeeTypeController extends Controller
                 ],
                 'description' => 'nullable|string',
                 'branch_id' => 'required|exists:branches,id',
-                'academic_year_id' => 'required|exists:academic_years,id',
+                'academic_year_id' => 'nullable|exists:academic_years,id',
                 'is_mandatory' => 'boolean',
                 'is_refundable' => 'boolean',
                 'is_active' => 'boolean',
             ]);
 
+            if (empty($validated['academic_year_id'])) {
+                [$resolvedYearId] = $this->resolveAcademicYearFromRequest($request);
+                $validated['academic_year_id'] = $resolvedYearId;
+            }
+
             // Tenant guard.
-            if (!$this->canManageBranch($request, (int) $validated['branch_id'])) {
+            if (! $this->canManageBranch($request, (int) $validated['branch_id'])) {
                 return response()->json(['success' => false, 'message' => 'You do not have access to this branch'], 403);
             }
 
@@ -129,18 +140,18 @@ class FeeTypeController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Fee type created successfully',
-                'data' => $feeType
+                'data' => $feeType,
             ], 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Validation failed',
-                'errors' => $e->errors()
+                'errors' => $e->errors(),
             ], 422);
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to create fee type: ' . $e->getMessage()
+                'message' => 'Failed to create fee type: '.$e->getMessage(),
             ], 500);
         }
     }
@@ -153,24 +164,24 @@ class FeeTypeController extends Controller
         try {
             $feeType = FeeType::with(['branch', 'academicYear'])->findOrFail($id);
 
-            if (!$this->canAccessBranch($request, (int) $feeType->branch_id)) {
+            if (! $this->canAccessBranch($request, (int) $feeType->branch_id)) {
                 return response()->json(['success' => false, 'message' => 'Fee type not found'], 404);
             }
 
             return response()->json([
                 'success' => true,
                 'message' => 'Fee type retrieved successfully',
-                'data' => $feeType
+                'data' => $feeType,
             ]);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Fee type not found'
+                'message' => 'Fee type not found',
             ], 404);
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to retrieve fee type: ' . $e->getMessage()
+                'message' => 'Failed to retrieve fee type: '.$e->getMessage(),
             ], 500);
         }
     }
@@ -184,7 +195,7 @@ class FeeTypeController extends Controller
             $feeType = FeeType::findOrFail($id);
 
             // Tenant guard.
-            if (!$this->canManageBranch($request, (int) $feeType->branch_id)) {
+            if (! $this->canManageBranch($request, (int) $feeType->branch_id)) {
                 return response()->json(['success' => false, 'message' => 'Fee type not found'], 404);
             }
 
@@ -213,23 +224,23 @@ class FeeTypeController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Fee type updated successfully',
-                'data' => $feeType
+                'data' => $feeType,
             ]);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Fee type not found'
+                'message' => 'Fee type not found',
             ], 404);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Validation failed',
-                'errors' => $e->errors()
+                'errors' => $e->errors(),
             ], 422);
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to update fee type: ' . $e->getMessage()
+                'message' => 'Failed to update fee type: '.$e->getMessage(),
             ], 500);
         }
     }
@@ -243,7 +254,7 @@ class FeeTypeController extends Controller
             $feeType = FeeType::findOrFail($id);
 
             // Tenant guard.
-            if (!$this->canManageBranch($request, (int) $feeType->branch_id)) {
+            if (! $this->canManageBranch($request, (int) $feeType->branch_id)) {
                 return response()->json(['success' => false, 'message' => 'Fee type not found'], 404);
             }
 
@@ -254,7 +265,7 @@ class FeeTypeController extends Controller
             if ($structureCount > 0) {
                 return response()->json([
                     'success' => false,
-                    'message' => "Cannot delete fee type. It is being used in {$structureCount} fee structure(s)."
+                    'message' => "Cannot delete fee type. It is being used in {$structureCount} fee structure(s).",
                 ], 422);
             }
 
@@ -262,17 +273,17 @@ class FeeTypeController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Fee type deleted successfully'
+                'message' => 'Fee type deleted successfully',
             ]);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Fee type not found'
+                'message' => 'Fee type not found',
             ], 404);
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to delete fee type: ' . $e->getMessage()
+                'message' => 'Failed to delete fee type: '.$e->getMessage(),
             ], 500);
         }
     }
@@ -286,7 +297,7 @@ class FeeTypeController extends Controller
             $feeType = FeeType::findOrFail($id);
 
             // Tenant guard.
-            if (!$this->canManageBranch($request, (int) $feeType->branch_id)) {
+            if (! $this->canManageBranch($request, (int) $feeType->branch_id)) {
                 return response()->json(['success' => false, 'message' => 'Fee type not found'], 404);
             }
             // Use deterministic 0/1 toggle to avoid truthy string edge-cases.
@@ -297,19 +308,18 @@ class FeeTypeController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Fee type status updated successfully',
-                'data' => $feeType
+                'data' => $feeType,
             ]);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Fee type not found'
+                'message' => 'Fee type not found',
             ], 404);
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to toggle status: ' . $e->getMessage()
+                'message' => 'Failed to toggle status: '.$e->getMessage(),
             ], 500);
         }
     }
 }
-

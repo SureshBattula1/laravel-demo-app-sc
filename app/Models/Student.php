@@ -306,9 +306,23 @@ class Student extends Model
         return $this->hasMany(StudentEnrollment::class);
     }
 
+    public function academicYear(): BelongsTo
+    {
+        return $this->belongsTo(AcademicYear::class, 'academic_year_id');
+    }
+
     // Scopes
     public function scopeForSchool($query, int $schoolId)
     {
         return $query->where('school_id', $schoolId);
+    }
+
+    public function scopeForAcademicYear($query, $yearOrId)
+    {
+        if (is_numeric($yearOrId)) {
+            return $query->where('academic_year_id', (int) $yearOrId);
+        }
+
+        return $query->where('academic_year', $yearOrId);
     }
 }

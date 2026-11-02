@@ -29,7 +29,7 @@ class Exam extends Model
         'description',
         'is_active',
         'created_by',
-        'updated_by'
+        'updated_by',
     ];
 
     protected $casts = [
@@ -37,11 +37,12 @@ class Exam extends Model
         'end_date' => 'date',
         'is_active' => 'boolean',
         'total_marks' => 'decimal:2',
-        'passing_marks' => 'decimal:2'
+        'passing_marks' => 'decimal:2',
     ];
 
     // Note: Currently using integer IDs instead of UUIDs
     protected $keyType = 'int';
+
     public $incrementing = true;
 
     // Removed UUID boot method since table uses integer IDs
@@ -91,9 +92,23 @@ class Exam extends Model
         return $this->belongsTo(User::class, 'updated_by');
     }
 
+    public function academicYear()
+    {
+        return $this->belongsTo(AcademicYear::class, 'academic_year_id');
+    }
+
     // Scopes
     public function scopeForSchool($query, int $schoolId)
     {
         return $query->where('school_id', $schoolId);
+    }
+
+    public function scopeForAcademicYear($query, $yearOrId)
+    {
+        if (is_numeric($yearOrId)) {
+            return $query->where('academic_year_id', (int) $yearOrId);
+        }
+
+        return $query->where('academic_year', $yearOrId);
     }
 }

@@ -64,6 +64,7 @@ class ImportService
             $importData['grade'] = $context['grade'] ?? null;
             $importData['section'] = $context['section'] ?? null;
             $importData['academic_year'] = $context['academic_year'] ?? null;
+            $importData['academic_year_id'] = $context['academic_year_id'] ?? null;
 
             // If Excel has override fields, use them to override context values
             if (isset($row['grade_override']) && ! empty($row['grade_override'])) {
@@ -342,6 +343,12 @@ class ImportService
     public function updateStudentRecord(int $recordId, array $data): StudentImport
     {
         $record = StudentImport::findOrFail($recordId);
+        if (isset($data['role_id']) && ! isset($data['role_name'])) {
+            $role = Role::find($data['role_id']);
+            if ($role) {
+                $data['role_name'] = $role->name;
+            }
+        }
         $record->fill($data);
         $record->save();
 
@@ -455,7 +462,17 @@ class ImportService
         $record = TeacherImport::findOrFail($recordId);
         if (isset($data['is_class_teacher'])) {
             $data['is_class_teacher'] = $this->convertToBoolean($data['is_class_teacher']);
+        } elseif (isset($data['class_teacher_of_section'])) {
+            $data['is_class_teacher'] = ! empty($data['class_teacher_of_section']);
         }
+
+        if (isset($data['role_id']) && ! isset($data['role_name'])) {
+            $role = Role::find($data['role_id']);
+            if ($role) {
+                $data['role_name'] = $role->name;
+            }
+        }
+
         $record->fill($data);
         $record->save();
 
@@ -523,7 +540,7 @@ class ImportService
     /**
      * Import validated students to production
      */
-    public function importStudentsToProduction(string $batchId, bool $skipInvalid = true, ?int $createdBy = null): array
+    public function importStudentsToProduction(string $batchId, bool $skipInvalid = true, ?int $createdBy = null, ?int $roleId = null): array
     {
         if (function_exists('set_time_limit')) {
             @set_time_limit(300);
@@ -539,12 +556,25 @@ class ImportService
         $importedCount = 0;
         $failedCount = 0;
 
+        // Resolve default Student role
+        $defaultStudentRole = null;
+        if ($roleId) {
+            $defaultStudentRole = Role::find($roleId);
+        }
+        if (! $defaultStudentRole) {
+            $defaultStudentRole = Role::where('slug', 'student')
+                ->orWhere('slug', 'like', 'student%')
+                ->orWhere('name', 'Student')
+                ->first();
+        }
+
         // Memoize default password hash so Bcrypt is only computed once for default passwords
         $defaultPasswordHash = Hash::make('Welcome@123');
 
         // Memoize branch->school_id and academic-year-name->id lookups so the loop
         // stays O(1) per row (no N+1) even for large batches.
         $schoolIdByBranch = [];
+        $companyIdBySchool = [];
         $academicYearIdByName = [];
         $hasEnrollments = Schema::hasTable('student_enrollments');
 
@@ -557,6 +587,24 @@ class ImportService
                     $password = $record->password ?? 'Welcome@123';
                     $passwordHash = ($password === 'Welcome@123') ? $defaultPasswordHash : Hash::make($password);
 
+                    // Dynamic role resolution per record
+                    $studentRole = $defaultStudentRole;
+                    if (! empty($record->role_id) && $record->role_id !== ($defaultStudentRole?->id)) {
+                        $studentRole = Role::find($record->role_id) ?? $defaultStudentRole;
+                    }
+                    $roleName = $studentRole ? $studentRole->name : 'Student';
+
+                    // Resolve school_id and company_id from branch
+                    $branchId = $record->branch_id;
+                    if (! array_key_exists($branchId, $schoolIdByBranch)) {
+                        $schoolIdByBranch[$branchId] = DB::table('branches')->where('id', $branchId)->value('school_id');
+                    }
+                    $schoolId = $schoolIdByBranch[$branchId];
+                    if (! array_key_exists($schoolId, $companyIdBySchool)) {
+                        $companyIdBySchool[$schoolId] = $schoolId ? DB::table('schools')->where('id', $schoolId)->value('company_id') : null;
+                    }
+                    $companyId = $companyIdBySchool[$schoolId];
+
                     // Create user account
                     $user = User::create([
                         'first_name' => $record->first_name,
@@ -564,37 +612,67 @@ class ImportService
                         'email' => $record->email,
                         'phone' => $record->phone,
                         'password' => $passwordHash,
-                        'role' => 'Student',
+                        'role' => $roleName,
                         'user_type' => 'Student',
-                        'branch_id' => $record->branch_id,
+                        'branch_id' => $branchId,
+                        'company_id' => $companyId,
                         'is_active' => true,
                     ]);
 
                     // Assign Student role via roles relationship
-                    $studentRole = Role::where('slug', 'student')->first();
                     if ($studentRole) {
                         $user->roles()->attach($studentRole->id, [
                             'is_primary' => true,
-                            'branch_id' => $record->branch_id,
+                            'branch_id' => $branchId,
                             'created_at' => now(),
                             'updated_at' => now(),
                         ]);
                     }
 
-                    // Resolve school_id (from branch) and academic_year_id (from name) the same
-                    // way StudentController::store does, so imported students are properly
-                    // school-scoped and tied to an academic year. Memoized to avoid N+1.
-                    $branchId = $record->branch_id;
-                    if (! array_key_exists($branchId, $schoolIdByBranch)) {
-                        $schoolIdByBranch[$branchId] = DB::table('branches')->where('id', $branchId)->value('school_id');
-                    }
-                    $schoolId = $schoolIdByBranch[$branchId];
-
+                    $academicYearId = $record->academic_year_id;
                     $ayName = $record->academic_year;
-                    if ($ayName !== null && ! array_key_exists($ayName, $academicYearIdByName)) {
-                        $academicYearIdByName[$ayName] = DB::table('academic_years')->where('name', $ayName)->value('id');
+
+                    if (! $academicYearId && $ayName !== null) {
+                        $cacheKey = ($schoolId ?? 'none').'_'.$ayName;
+                        if (! array_key_exists($cacheKey, $academicYearIdByName)) {
+                            $resolvedAy = null;
+                            if ($schoolId) {
+                                $resolvedAy = DB::table('academic_years')
+                                    ->where('name', $ayName)
+                                    ->where('school_id', $schoolId)
+                                    ->value('id');
+                            }
+                            if (! $resolvedAy) {
+                                $resolvedAy = DB::table('academic_years')
+                                    ->where('name', $ayName)
+                                    ->orderByRaw('school_id IS NOT NULL DESC')
+                                    ->value('id');
+                            }
+                            $academicYearIdByName[$cacheKey] = $resolvedAy;
+                        }
+                        $academicYearId = $academicYearIdByName[$cacheKey];
                     }
-                    $academicYearId = $record->academic_year_id ?? ($ayName !== null ? $academicYearIdByName[$ayName] : null);
+
+                    // Dynamic fallback: use current or active academic year of the school
+                    if (! $academicYearId && $schoolId) {
+                        $fallbackKey = 'school_'.$schoolId.'_current';
+                        if (! array_key_exists($fallbackKey, $academicYearIdByName)) {
+                            $academicYearIdByName[$fallbackKey] = DB::table('academic_years')
+                                ->where('school_id', $schoolId)
+                                ->where('is_current', true)
+                                ->value('id')
+                                ?? DB::table('academic_years')
+                                    ->where('school_id', $schoolId)
+                                    ->where('is_active', true)
+                                    ->value('id');
+                        }
+                        $academicYearId = $academicYearIdByName[$fallbackKey];
+                    }
+
+                    $finalAyName = $record->academic_year;
+                    if (empty($finalAyName) && $academicYearId) {
+                        $finalAyName = DB::table('academic_years')->where('id', $academicYearId)->value('name');
+                    }
 
                     // Create student record
                     // ✅ Only include columns that exist in the students table
@@ -609,7 +687,7 @@ class ImportService
                         'registration_number' => $record->registration_number,
                         'grade' => $record->grade,
                         'section' => $record->section,
-                        'academic_year' => $record->academic_year,
+                        'academic_year' => $finalAyName ?? $record->academic_year,
                         'stream' => $record->stream,
                         'date_of_birth' => $record->date_of_birth,
                         'gender' => $record->gender,
@@ -734,7 +812,7 @@ class ImportService
     /**
      * Import validated teachers to production
      */
-    public function importTeachersToProduction(string $batchId, bool $skipInvalid = true): array
+    public function importTeachersToProduction(string $batchId, bool $skipInvalid = true, ?int $defaultRoleId = null): array
     {
         if (function_exists('set_time_limit')) {
             @set_time_limit(300);
@@ -750,6 +828,19 @@ class ImportService
         $importedCount = 0;
         $failedCount = 0;
 
+        // Memoize default teacher role
+        $systemTeacherRole = null;
+        if ($defaultRoleId) {
+            $systemTeacherRole = Role::find($defaultRoleId);
+        }
+        if (! $systemTeacherRole) {
+            $systemTeacherRole = Role::where('slug', 'teacher')
+                ->orWhere('slug', 'like', 'teacher%')
+                ->orWhere('name', 'Teacher')
+                ->first();
+        }
+        $roleCache = [];
+
         // Memoize default password hash
         $defaultPasswordHash = Hash::make('Welcome@123');
 
@@ -764,6 +855,30 @@ class ImportService
                     $password = $record->password ?? 'Welcome@123';
                     $passwordHash = ($password === 'Welcome@123') ? $defaultPasswordHash : Hash::make($password);
 
+                    // Determine role dynamically per row
+                    $targetRole = null;
+                    if (! empty($record->role_id)) {
+                        if (! array_key_exists($record->role_id, $roleCache)) {
+                            $roleCache[$record->role_id] = Role::find($record->role_id);
+                        }
+                        $targetRole = $roleCache[$record->role_id];
+                    }
+                    if (! $targetRole && ! empty($record->role_name)) {
+                        if (! array_key_exists($record->role_name, $roleCache)) {
+                            $roleCache[$record->role_name] = Role::where('name', $record->role_name)
+                                ->orWhere('slug', Str::slug($record->role_name))
+                                ->first();
+                        }
+                        $targetRole = $roleCache[$record->role_name];
+                    }
+                    if (! $targetRole) {
+                        $targetRole = $systemTeacherRole;
+                    }
+
+                    $assignedRoleName = $targetRole ? $targetRole->name : 'Teacher';
+                    $userRole = in_array($assignedRoleName, ['Teacher', 'Staff', 'Accountant', 'Driver']) ? $assignedRoleName : 'Teacher';
+                    $userType = ($userRole === 'Teacher') ? 'Teacher' : 'Staff';
+
                     // Create user account
                     $user = User::create([
                         'first_name' => $record->first_name,
@@ -771,16 +886,15 @@ class ImportService
                         'email' => $record->email,
                         'phone' => $record->phone,
                         'password' => $passwordHash,
-                        'role' => 'Teacher',
-                        'user_type' => 'Teacher',
+                        'role' => $userRole,
+                        'user_type' => $userType,
                         'branch_id' => $record->branch_id,
                         'is_active' => true,
                     ]);
 
-                    // Assign Teacher role via roles relationship
-                    $teacherRole = Role::where('slug', 'teacher')->first();
-                    if ($teacherRole) {
-                        $user->roles()->attach($teacherRole->id, [
+                    // Assign role via user_roles relationship
+                    if ($targetRole) {
+                        $user->roles()->attach($targetRole->id, [
                             'is_primary' => true,
                             'branch_id' => $record->branch_id,
                             'created_at' => now(),
@@ -796,6 +910,8 @@ class ImportService
                         if (! array_key_exists($branchId, $schoolIdByBranch)) {
                             $schoolIdByBranch[$branchId] = DB::table('branches')->where('id', $branchId)->value('school_id');
                         }
+
+                        $isClassTeacher = $record->is_class_teacher || ! empty($record->class_teacher_of_section);
 
                         $teacherId = DB::table('teachers')->insertGetId([
                             'user_id' => $user->id,
@@ -814,7 +930,7 @@ class ImportService
                             'registration_number' => $record->registration_number,
                             'subjects' => json_encode($this->toList($record->subjects)),
                             'classes_assigned' => json_encode($this->toList($record->classes_assigned)),
-                            'is_class_teacher' => $record->is_class_teacher ?? false,
+                            'is_class_teacher' => $isClassTeacher,
                             'class_teacher_of_grade' => $record->class_teacher_of_grade,
                             'class_teacher_of_section' => $record->class_teacher_of_section,
                             'date_of_birth' => $record->date_of_birth,
@@ -900,9 +1016,43 @@ class ImportService
     }
 
     /**
-     * Revert an import batch from production back to staging
+     * Submit a request for revert approval (for batches older than 30 days)
      */
-    public function revertImport(string $entity, string $batchId, int $userId): array
+    public function requestRevertApproval(string $batchId, int $userId, string $reason): array
+    {
+        $batch = ImportHistory::where('batch_id', $batchId)->first();
+        if (! $batch) {
+            throw new \Exception("Batch not found: {$batchId}");
+        }
+
+        if ($batch->status !== 'completed') {
+            throw new \Exception("Only completed batches can be requested for revert. Current status: {$batch->status}");
+        }
+
+        if ($batch->revert_approval_status === 'pending') {
+            throw new \Exception('A revert approval request is already pending for this batch.');
+        }
+
+        $batch->update([
+            'revert_approval_status' => 'pending',
+            'revert_requested_by' => $userId,
+            'revert_requested_at' => now(),
+            'revert_reason' => $reason,
+            'revert_rejection_reason' => null,
+        ]);
+
+        return [
+            'batch_id' => $batchId,
+            'status' => $batch->status,
+            'revert_approval_status' => 'pending',
+            'message' => 'Revert approval request submitted successfully to Super Admin.',
+        ];
+    }
+
+    /**
+     * Approve a revert request and perform the revert
+     */
+    public function approveRevertRequest(string $batchId, int $adminId, ?string $remarks = null): array
     {
         $batch = ImportHistory::where('batch_id', $batchId)->first();
         if (! $batch) {
@@ -911,6 +1061,69 @@ class ImportService
 
         if ($batch->status !== 'completed') {
             throw new \Exception("Only completed batches can be reverted. Current status: {$batch->status}");
+        }
+
+        $result = $this->revertImport($batch->entity_type, $batchId, $adminId, true);
+
+        $batch->refresh();
+        $batch->update([
+            'revert_approval_status' => 'approved',
+            'revert_approved_by' => $adminId,
+            'revert_approved_at' => now(),
+            'error_message' => ($remarks ? "Approved with remarks: {$remarks}. " : '').($batch->error_message ?? ''),
+        ]);
+
+        $result['revert_approval_status'] = 'approved';
+        $result['message'] = 'Revert approval granted and batch reverted successfully.';
+
+        return $result;
+    }
+
+    /**
+     * Reject a revert request
+     */
+    public function rejectRevertRequest(string $batchId, int $adminId, string $rejectionReason): array
+    {
+        $batch = ImportHistory::where('batch_id', $batchId)->first();
+        if (! $batch) {
+            throw new \Exception("Batch not found: {$batchId}");
+        }
+
+        if ($batch->revert_approval_status !== 'pending') {
+            throw new \Exception('This batch does not have a pending revert approval request.');
+        }
+
+        $batch->update([
+            'revert_approval_status' => 'rejected',
+            'revert_approved_by' => $adminId,
+            'revert_approved_at' => now(),
+            'revert_rejection_reason' => $rejectionReason,
+        ]);
+
+        return [
+            'batch_id' => $batchId,
+            'revert_approval_status' => 'rejected',
+            'message' => 'Revert request rejected successfully.',
+        ];
+    }
+
+    /**
+     * Revert an import batch from production back to staging
+     */
+    public function revertImport(string $entity, string $batchId, int $userId, bool $bypassTimeLimit = false): array
+    {
+        $batch = ImportHistory::where('batch_id', $batchId)->first();
+        if (! $batch) {
+            throw new \Exception("Batch not found: {$batchId}");
+        }
+
+        if ($batch->status !== 'completed') {
+            throw new \Exception("Only completed batches can be reverted. Current status: {$batch->status}");
+        }
+
+        // 30-Day Restriction Check
+        if (! $bypassTimeLimit && ! $batch->isWithin30Days()) {
+            throw new \Exception('This import was completed more than 30 days ago. Reverting requires Super Admin approval.');
         }
 
         if ($entity === 'student') {

@@ -3,8 +3,8 @@
 namespace App\Services;
 
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 
 class GlobalUploadService
 {
@@ -16,22 +16,26 @@ class GlobalUploadService
     public function uploadFile(Request $request, string $uploadPath): array
     {
         $file = $request->file('file');
-        
-        if (!$file) {
+
+        if (! $file) {
             throw new \Exception('File is required');
         }
 
         // Security: Clean the path to prevent directory traversal
         $cleanPath = $this->sanitizePath($uploadPath);
-        
+        $extension = strtolower($file->getClientOriginalExtension());
+        $baseName = pathinfo(basename($cleanPath), PATHINFO_FILENAME);
+        $safeBase = preg_replace('/[^A-Za-z0-9._-]/', '_', $baseName) ?: (time().'_'.uniqid());
+        $safeFilename = $safeBase.'.'.$extension;
+
         // Ensure directory exists
         $this->ensureDirectoryExists($cleanPath);
-        
+
         // Store file
         $filePath = Storage::disk($this->storageDisk)->putFileAs(
             dirname($cleanPath),
             $file,
-            basename($cleanPath)
+            $safeFilename
         );
 
         return [
@@ -50,28 +54,28 @@ class GlobalUploadService
     public function uploadMultipleFiles(Request $request, string $uploadPath): array
     {
         $files = $request->file('files');
-        
-        if (!$files || !is_array($files)) {
+
+        if (! $files || ! is_array($files)) {
             throw new \Exception('Files array is required');
         }
 
         $results = [];
         $cleanPath = $this->sanitizePath($uploadPath);
         $this->ensureDirectoryExists($cleanPath);
-        
+
         foreach ($files as $file) {
             try {
                 // Generate unique filename for each file
                 $extension = strtolower($file->getClientOriginalExtension());
-                $uniqueFilename = time() . '_' . uniqid() . '.' . $extension;
-                $fullCleanPath = dirname($cleanPath) . '/' . $uniqueFilename;
-                
+                $uniqueFilename = time().'_'.uniqid().'.'.$extension;
+                $fullCleanPath = dirname($cleanPath).'/'.$uniqueFilename;
+
                 $filePath = Storage::disk($this->storageDisk)->putFileAs(
                     dirname($fullCleanPath),
                     $file,
                     basename($fullCleanPath)
                 );
-                
+
                 $results[] = [
                     'file_path' => $filePath,
                     'file_url' => Storage::disk($this->storageDisk)->url($filePath),
@@ -83,15 +87,15 @@ class GlobalUploadService
             } catch (\Exception $e) {
                 Log::error('Multiple file upload error', [
                     'error' => $e->getMessage(),
-                    'file' => $file->getClientOriginalName()
+                    'file' => $file->getClientOriginalName(),
                 ]);
                 $results[] = [
                     'error' => $e->getMessage(),
-                    'file_name' => $file->getClientOriginalName()
+                    'file_name' => $file->getClientOriginalName(),
                 ];
             }
         }
-        
+
         return $results;
     }
 
@@ -102,18 +106,18 @@ class GlobalUploadService
     {
         // Remove any ".." to prevent directory traversal
         $path = str_replace('..', '', $path);
-        
+
         // Remove leading slashes
         $path = ltrim($path, '/');
-        
+
         // Ensure it doesn't go outside uploads directory
-        if (!str_starts_with($path, 'uploads/')) {
-            $path = 'uploads/' . $path;
+        if (! str_starts_with($path, 'uploads/')) {
+            $path = 'uploads/'.$path;
         }
-        
+
         // Remove any double slashes
         $path = preg_replace('#/+#', '/', $path);
-        
+
         return $path;
     }
 
@@ -124,8 +128,8 @@ class GlobalUploadService
     {
         $directory = dirname($filePath);
         $fullDirectory = Storage::disk($this->storageDisk)->path($directory);
-        
-        if (!is_dir($fullDirectory)) {
+
+        if (! is_dir($fullDirectory)) {
             mkdir($fullDirectory, 0755, true);
         }
     }
@@ -138,13 +142,15 @@ class GlobalUploadService
         try {
             // Sanitize path
             $cleanPath = $this->sanitizePath($filePath);
-            
+
             if (Storage::disk($this->storageDisk)->exists($cleanPath)) {
                 return Storage::disk($this->storageDisk)->delete($cleanPath);
             }
+
             return false;
         } catch (\Exception $e) {
             Log::error('File deletion error', ['error' => $e->getMessage(), 'path' => $filePath]);
+
             return false;
         }
     }
@@ -155,8 +161,8 @@ class GlobalUploadService
     public function getFileInfo(string $filePath): array
     {
         $cleanPath = $this->sanitizePath($filePath);
-        
-        if (!Storage::disk($this->storageDisk)->exists($cleanPath)) {
+
+        if (! Storage::disk($this->storageDisk)->exists($cleanPath)) {
             throw new \Exception('File not found');
         }
 
@@ -176,10 +182,10 @@ class GlobalUploadService
     {
         try {
             $cleanPath = $this->sanitizePath($filePath);
+
             return Storage::disk($this->storageDisk)->exists($cleanPath);
         } catch (\Exception $e) {
             return false;
         }
     }
 }
-

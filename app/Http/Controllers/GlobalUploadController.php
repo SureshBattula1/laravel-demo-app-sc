@@ -2,12 +2,12 @@
 
 namespace App\Http\Controllers;
 
-use App\Services\GlobalUploadService;
 use App\Models\UniversalAttachment;
+use App\Services\GlobalUploadService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Validator;
 
 class GlobalUploadController extends Controller
 {
@@ -29,32 +29,32 @@ class GlobalUploadController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Validation failed',
-                'errors' => $validator->errors()
+                'errors' => $validator->errors(),
             ], 422);
         }
 
         try {
             $result = $this->uploadService->uploadFile($request, $request->upload_path);
-            
+
             Log::info('File uploaded successfully', [
                 'file_path' => $result['file_path'],
-                'file_name' => $result['file_name']
+                'file_name' => $result['file_name'],
             ]);
 
             return response()->json([
                 'success' => true,
                 'message' => 'File uploaded successfully',
-                'data' => $result
+                'data' => $result,
             ]);
         } catch (\Exception $e) {
             Log::error('File upload failed', [
                 'error' => $e->getMessage(),
-                'upload_path' => $request->upload_path
+                'upload_path' => $request->upload_path,
             ]);
 
             return response()->json([
                 'success' => false,
-                'message' => $e->getMessage()
+                'message' => $e->getMessage(),
             ], 500);
         }
     }
@@ -74,29 +74,29 @@ class GlobalUploadController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Validation failed',
-                'errors' => $validator->errors()
+                'errors' => $validator->errors(),
             ], 422);
         }
 
         try {
             $results = $this->uploadService->uploadMultipleFiles($request, $request->upload_path);
-            
+
             Log::info('Multiple files uploaded', [
                 'count' => count($results),
-                'upload_path' => $request->upload_path
+                'upload_path' => $request->upload_path,
             ]);
 
             return response()->json([
                 'success' => true,
                 'message' => 'Files uploaded successfully',
-                'data' => $results
+                'data' => $results,
             ]);
         } catch (\Exception $e) {
             Log::error('Multiple file upload failed', ['error' => $e->getMessage()]);
 
             return response()->json([
                 'success' => false,
-                'message' => $e->getMessage()
+                'message' => $e->getMessage(),
             ], 500);
         }
     }
@@ -107,33 +107,47 @@ class GlobalUploadController extends Controller
     public function delete(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'file_path' => 'required|string'
+            'file_path' => 'required|string',
         ]);
 
         if ($validator->fails()) {
             return response()->json([
                 'success' => false,
                 'message' => 'Validation failed',
-                'errors' => $validator->errors()
+                'errors' => $validator->errors(),
             ], 422);
         }
 
         try {
+            $user = $request->user();
+            $isAdmin = $user && in_array($user->role, ['SuperAdmin', 'BranchAdmin'], true);
+            if (! $isAdmin) {
+                $ownsAttachment = UniversalAttachment::where('file_path', $request->file_path)
+                    ->where('uploaded_by', $user?->id)
+                    ->exists();
+                if (! $ownsAttachment) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'You do not have permission to delete this file',
+                    ], 403);
+                }
+            }
+
             $deleted = $this->uploadService->deleteFile($request->file_path);
 
             return response()->json([
                 'success' => $deleted,
-                'message' => $deleted ? 'File deleted successfully' : 'File not found'
+                'message' => $deleted ? 'File deleted successfully' : 'File not found',
             ]);
         } catch (\Exception $e) {
             Log::error('File deletion failed', [
                 'error' => $e->getMessage(),
-                'file_path' => $request->file_path
+                'file_path' => $request->file_path,
             ]);
 
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to delete file'
+                'message' => 'Failed to delete file',
             ], 500);
         }
     }
@@ -144,14 +158,14 @@ class GlobalUploadController extends Controller
     public function getFileInfo(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'file_path' => 'required|string'
+            'file_path' => 'required|string',
         ]);
 
         if ($validator->fails()) {
             return response()->json([
                 'success' => false,
                 'message' => 'Validation failed',
-                'errors' => $validator->errors()
+                'errors' => $validator->errors(),
             ], 422);
         }
 
@@ -160,12 +174,12 @@ class GlobalUploadController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data' => $info
+                'data' => $info,
             ]);
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => $e->getMessage()
+                'message' => $e->getMessage(),
             ], 404);
         }
     }
@@ -176,14 +190,14 @@ class GlobalUploadController extends Controller
     public function checkFileExists(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'file_path' => 'required|string'
+            'file_path' => 'required|string',
         ]);
 
         if ($validator->fails()) {
             return response()->json([
                 'success' => false,
                 'message' => 'Validation failed',
-                'errors' => $validator->errors()
+                'errors' => $validator->errors(),
             ], 422);
         }
 
@@ -191,7 +205,7 @@ class GlobalUploadController extends Controller
 
         return response()->json([
             'success' => true,
-            'exists' => $exists
+            'exists' => $exists,
         ]);
     }
 
@@ -213,7 +227,7 @@ class GlobalUploadController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Validation failed',
-                'errors' => $validator->errors()
+                'errors' => $validator->errors(),
             ], 422);
         }
 
@@ -229,23 +243,23 @@ class GlobalUploadController extends Controller
                 'original_name' => $request->original_name,
                 'description' => $request->description,
                 'is_active' => true,
-                'uploaded_by' => auth()->id()
+                'uploaded_by' => auth()->id(),
             ]);
 
             return response()->json([
                 'success' => true,
                 'message' => 'Attachment saved successfully',
-                'data' => $attachment
+                'data' => $attachment,
             ]);
         } catch (\Exception $e) {
             Log::error('Failed to save attachment', [
                 'error' => $e->getMessage(),
-                'request' => $request->all()
+                'request' => $request->all(),
             ]);
 
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to save attachment'
+                'message' => 'Failed to save attachment',
             ], 500);
         }
     }
@@ -264,18 +278,18 @@ class GlobalUploadController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data' => $attachments
+                'data' => $attachments,
             ]);
         } catch (\Exception $e) {
             Log::error('Failed to get attachments', [
                 'module' => $module,
                 'module_id' => $moduleId,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ]);
 
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to get attachments'
+                'message' => 'Failed to get attachments',
             ], 500);
         }
     }
@@ -291,10 +305,10 @@ class GlobalUploadController extends Controller
                 ->where('id', $attachmentId)
                 ->first();
 
-            if (!$attachment) {
+            if (! $attachment) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Attachment not found'
+                    'message' => 'Attachment not found',
                 ], 404);
             }
 
@@ -308,17 +322,17 @@ class GlobalUploadController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Attachment deleted successfully'
+                'message' => 'Attachment deleted successfully',
             ]);
         } catch (\Exception $e) {
             Log::error('Failed to delete attachment', [
                 'attachment_id' => $attachmentId,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ]);
 
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to delete attachment'
+                'message' => 'Failed to delete attachment',
             ], 500);
         }
     }
@@ -334,19 +348,19 @@ class GlobalUploadController extends Controller
                 ->where('id', $attachmentId)
                 ->first();
 
-            if (!$attachment) {
+            if (! $attachment) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Attachment not found'
+                    'message' => 'Attachment not found',
                 ], 404);
             }
 
-            $filePath = storage_path('app/public/' . $attachment->file_path);
+            $filePath = storage_path('app/public/'.$attachment->file_path);
 
-            if (!file_exists($filePath)) {
+            if (! file_exists($filePath)) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'File not found'
+                    'message' => 'File not found',
                 ], 404);
             }
 
@@ -354,14 +368,13 @@ class GlobalUploadController extends Controller
         } catch (\Exception $e) {
             Log::error('Failed to download attachment', [
                 'attachment_id' => $attachmentId,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ]);
 
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to download file'
+                'message' => 'Failed to download file',
             ], 500);
         }
     }
 }
-

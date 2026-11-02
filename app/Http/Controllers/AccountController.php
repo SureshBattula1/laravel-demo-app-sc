@@ -2,9 +2,9 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Transaction;
 use App\Models\AccountCategory;
 use App\Models\Branch;
+use App\Models\Transaction;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -26,7 +26,7 @@ class AccountController extends Controller
             $user = $request->user();
 
             // Super Admin with company_id: see all accounts/income/expense of that company only (all branches of company)
-            if ($accessibleBranchIds === 'all' && $user && $user->role === 'SuperAdmin' && !empty($user->company_id)) {
+            if ($accessibleBranchIds === 'all' && $user && $user->role === 'SuperAdmin' && ! empty($user->company_id)) {
                 $accessibleBranchIds = $this->getBranchIdsForCompany($user->company_id);
             }
 
@@ -41,8 +41,8 @@ class AccountController extends Controller
                         'income_by_category' => [],
                         'expense_by_category' => [],
                         'recent_transactions' => [],
-                        'monthly_trend' => []
-                    ]
+                        'monthly_trend' => [],
+                    ],
                 ]);
             }
 
@@ -84,27 +84,27 @@ class AccountController extends Controller
                 ->where('transactions.status', 'Approved')
                 ->where('transactions.financial_year', $financialYear)
                 ->whereNull('transactions.deleted_at')
-                ->when($schoolId, fn($q) => $q->where('transactions.school_id', $schoolId))
-                ->when($branchId, fn($q) => $q->where('transactions.branch_id', $branchId))
-                ->when(!$branchId && $accessibleBranchIds !== 'all', fn($q) => $q->whereIn('transactions.branch_id', $accessibleBranchIds))
-                ->when($fromDate, fn($q) => $q->where('transactions.transaction_date', '>=', $fromDate))
-                ->when($toDate, fn($q) => $q->where('transactions.transaction_date', '<=', $toDate))
+                ->when($schoolId, fn ($q) => $q->where('transactions.school_id', $schoolId))
+                ->when($branchId, fn ($q) => $q->where('transactions.branch_id', $branchId))
+                ->when(! $branchId && $accessibleBranchIds !== 'all', fn ($q) => $q->whereIn('transactions.branch_id', $accessibleBranchIds))
+                ->when($fromDate, fn ($q) => $q->where('transactions.transaction_date', '>=', $fromDate))
+                ->when($toDate, fn ($q) => $q->where('transactions.transaction_date', '<=', $toDate))
                 ->selectRaw('transactions.type, account_categories.name as category, SUM(transactions.amount) as amount')
                 ->groupBy('transactions.type', 'account_categories.name')
                 ->get();
 
-            $incomeByCategory = $categoryBreakdown->where('type', 'Income')->map(fn($i) => ['category' => $i->category, 'amount' => (float) $i->amount])->values();
-            $expenseByCategory = $categoryBreakdown->where('type', 'Expense')->map(fn($i) => ['category' => $i->category, 'amount' => (float) $i->amount])->values();
+            $incomeByCategory = $categoryBreakdown->where('type', 'Income')->map(fn ($i) => ['category' => $i->category, 'amount' => (float) $i->amount])->values();
+            $expenseByCategory = $categoryBreakdown->where('type', 'Expense')->map(fn ($i) => ['category' => $i->category, 'amount' => (float) $i->amount])->values();
 
             // Query 3: Recent transactions (same school/branch scope)
             $recentTransactions = Transaction::select('id', 'transaction_number', 'transaction_date', 'type', 'amount', 'status', 'category_id')
                 ->where('financial_year', $financialYear)
                 ->whereNull('deleted_at')
-                ->when($schoolId, fn($q) => $q->where('school_id', $schoolId))
-                ->when($branchId, fn($q) => $q->where('branch_id', $branchId))
-                ->when(!$branchId && $accessibleBranchIds !== 'all', fn($q) => $q->whereIn('branch_id', $accessibleBranchIds))
-                ->when($fromDate, fn($q) => $q->where('transaction_date', '>=', $fromDate))
-                ->when($toDate, fn($q) => $q->where('transaction_date', '<=', $toDate))
+                ->when($schoolId, fn ($q) => $q->where('school_id', $schoolId))
+                ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
+                ->when(! $branchId && $accessibleBranchIds !== 'all', fn ($q) => $q->whereIn('branch_id', $accessibleBranchIds))
+                ->when($fromDate, fn ($q) => $q->where('transaction_date', '>=', $fromDate))
+                ->when($toDate, fn ($q) => $q->where('transaction_date', '<=', $toDate))
                 ->with('category:id,name')
                 ->orderBy('transaction_date', 'desc')
                 ->limit(5)
@@ -115,11 +115,11 @@ class AccountController extends Controller
                 ->where('status', 'Approved')
                 ->where('transaction_date', '>=', now()->subMonths(6)->format('Y-m-d'))
                 ->whereNull('deleted_at')
-                ->when($schoolId, fn($q) => $q->where('school_id', $schoolId))
-                ->when($branchId, fn($q) => $q->where('branch_id', $branchId))
-                ->when(!$branchId && $accessibleBranchIds !== 'all', fn($q) => $q->whereIn('branch_id', $accessibleBranchIds))
-                ->when($fromDate, fn($q) => $q->where('transaction_date', '>=', $fromDate))
-                ->when($toDate, fn($q) => $q->where('transaction_date', '<=', $toDate))
+                ->when($schoolId, fn ($q) => $q->where('school_id', $schoolId))
+                ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
+                ->when(! $branchId && $accessibleBranchIds !== 'all', fn ($q) => $q->whereIn('branch_id', $accessibleBranchIds))
+                ->when($fromDate, fn ($q) => $q->where('transaction_date', '>=', $fromDate))
+                ->when($toDate, fn ($q) => $q->where('transaction_date', '<=', $toDate))
                 ->selectRaw('MONTH(transaction_date) as month, YEAR(transaction_date) as year, type, SUM(amount) as total')
                 ->groupBy(DB::raw('YEAR(transaction_date), MONTH(transaction_date), type'))
                 ->orderByRaw('year ASC, month ASC')
@@ -140,8 +140,7 @@ class AccountController extends Controller
             if ($branchId) {
                 $categoryCountQuery->where('branch_id', (int) $branchId);
             }
-            $academicYearId = $request->get('academic_year_id') ?: $request->header('X-Academic-Year-Id');
-            $academicYearId = ($academicYearId !== null && $academicYearId !== '') ? (int) $academicYearId : null;
+            [$academicYearId] = $this->resolveAcademicYearFromRequest($request);
             if ($academicYearId != null) {
                 $categoryCountQuery->where(function ($q) use ($academicYearId) {
                     $q->whereNull('academic_year_id')->orWhere('academic_year_id', $academicYearId);
@@ -157,22 +156,22 @@ class AccountController extends Controller
                         'total_expense' => round($totalExpense, 2),
                         'net_balance' => round($totalIncome - $totalExpense, 2),
                         'financial_year' => $financialYear,
-                        'category_count' => $categoryCount
+                        'category_count' => $categoryCount,
                     ],
                     'income_by_category' => $incomeByCategory,
                     'expense_by_category' => $expenseByCategory,
                     'recent_transactions' => $recentTransactions,
-                    'monthly_trend' => $monthlyTrend
-                ]
+                    'monthly_trend' => $monthlyTrend,
+                ],
             ]);
 
         } catch (\Exception $e) {
             Log::error('Get accounts dashboard error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to load dashboard',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -183,9 +182,7 @@ class AccountController extends Controller
     public function getCategories(Request $request)
     {
         try {
-            $academicYearId = $request->query('academic_year_id')
-                ?? $request->header('X-Academic-Year-Id');
-            $academicYearId = ($academicYearId !== null && $academicYearId !== '') ? (int) $academicYearId : null;
+            [$academicYearId] = $this->resolveAcademicYearFromRequest($request);
 
             $query = AccountCategory::select([
                 'id',
@@ -195,10 +192,10 @@ class AccountController extends Controller
                 'code',
                 'type',
                 'sub_type',
-                'is_active'
+                'is_active',
             ])->with([
                 'branch:id,name,code',
-                'academicYear:id,name'
+                'academicYear:id,name',
             ]);
 
             // Restrict to accessible branches: branch-wise for normal users, company's branches for Super Admin with company_id
@@ -239,16 +236,16 @@ class AccountController extends Controller
             return response()->json([
                 'success' => true,
                 'data' => $categories,
-                'count' => $categories->count()
+                'count' => $categories->count(),
             ]);
 
         } catch (\Exception $e) {
             Log::error('Get categories error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch categories',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -262,30 +259,30 @@ class AccountController extends Controller
             // OPTIMIZED: Load only necessary transaction fields
             $category = AccountCategory::select([
                 'id', 'branch_id', 'school_id', 'name', 'code', 'type', 'sub_type', 'academic_year_id',
-                'description', 'is_active', 'created_at', 'updated_at'
+                'description', 'is_active', 'created_at', 'updated_at',
             ])
-            ->with([
-                'branch:id,name,code',
-                'academicYear:id,name',
-                'transactions' => function ($query) {
-                    $query->select('id', 'transaction_number', 'transaction_date', 'type', 'amount', 'status', 'category_id')
-                        ->latest('transaction_date')
-                        ->limit(10);
-                },
-                'budgets' => function ($query) {
-                    $query->select('id', 'category_id', 'financial_year', 'allocated_amount', 'utilized_amount');
-                }
-            ])
-            ->findOrFail($id);
+                ->with([
+                    'branch:id,name,code',
+                    'academicYear:id,name',
+                    'transactions' => function ($query) {
+                        $query->select('id', 'transaction_number', 'transaction_date', 'type', 'amount', 'status', 'category_id')
+                            ->latest('transaction_date')
+                            ->limit(10);
+                    },
+                    'budgets' => function ($query) {
+                        $query->select('id', 'category_id', 'financial_year', 'allocated_amount', 'utilized_amount');
+                    },
+                ])
+                ->findOrFail($id);
 
             // Tenant guard.
-            if (!$this->canAccessCategory($request, $category)) {
+            if (! $this->canAccessCategory($request, $category)) {
                 return response()->json(['success' => false, 'message' => 'Category not found'], 404);
             }
 
             return response()->json([
                 'success' => true,
-                'data' => $category
+                'data' => $category,
             ]);
 
         } catch (\Exception $e) {
@@ -294,7 +291,7 @@ class AccountController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Category not found',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 404);
         }
     }
@@ -314,12 +311,10 @@ class AccountController extends Controller
                 'type' => 'required|in:Income,Expense',
                 'sub_type' => 'nullable|string|max:255',
                 'description' => 'nullable|string',
-                'is_active' => 'boolean'
+                'is_active' => 'boolean',
             ]);
 
-            $resolvedAcademicYearId = $request->query('academic_year_id')
-                ?? $request->header('X-Academic-Year-Id');
-            $resolvedAcademicYearId = ($resolvedAcademicYearId !== null && $resolvedAcademicYearId !== '') ? (int) $resolvedAcademicYearId : null;
+            [$resolvedAcademicYearId] = $this->resolveAcademicYearFromRequest($request);
 
             // Ensure branch_id and school_id are set: from request or current user's branch
             $branchId = $validated['branch_id'] ?? null;
@@ -330,10 +325,10 @@ class AccountController extends Controller
             $validated['branch_id'] = $branchId;
 
             // Tenant guard: when a branch is targeted, the user must be able to manage it.
-            if ($branchId && !$this->canManageBranch($request, (int) $branchId)) {
+            if ($branchId && ! $this->canManageBranch($request, (int) $branchId)) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'You do not have access to this branch'
+                    'message' => 'You do not have access to this branch',
                 ], 403);
             }
 
@@ -345,7 +340,7 @@ class AccountController extends Controller
             $validated['school_id'] = $schoolId;
 
             // Default academic year from current toolbar/header if not explicitly sent
-            if (!array_key_exists('academic_year_id', $validated) || $validated['academic_year_id'] === null) {
+            if (! array_key_exists('academic_year_id', $validated) || $validated['academic_year_id'] === null) {
                 $validated['academic_year_id'] = $resolvedAcademicYearId;
             }
 
@@ -360,7 +355,7 @@ class AccountController extends Controller
                 return response()->json([
                     'success' => false,
                     'message' => 'Validation failed',
-                    'errors' => ['name' => ['An account category with this name already exists for this branch.']]
+                    'errors' => ['name' => ['An account category with this name already exists for this branch.']],
                 ], 422);
             }
             $uniqueQuery = AccountCategory::where('code', $validated['code']);
@@ -373,13 +368,13 @@ class AccountController extends Controller
                 return response()->json([
                     'success' => false,
                     'message' => 'Validation failed',
-                    'errors' => ['code' => ['An account category with this code already exists for this branch.']]
+                    'errors' => ['code' => ['An account category with this code already exists for this branch.']],
                 ], 422);
             }
 
             // Convert empty strings to null for nullable fields
-            $validated['sub_type'] = !empty($validated['sub_type']) ? $validated['sub_type'] : null;
-            $validated['description'] = !empty($validated['description']) ? $validated['description'] : null;
+            $validated['sub_type'] = ! empty($validated['sub_type']) ? $validated['sub_type'] : null;
+            $validated['description'] = ! empty($validated['description']) ? $validated['description'] : null;
 
             $category = AccountCategory::create($validated);
 
@@ -388,24 +383,25 @@ class AccountController extends Controller
             return response()->json([
                 'success' => true,
                 'data' => $category,
-                'message' => 'Account category created successfully'
+                'message' => 'Account category created successfully',
             ], 201);
 
         } catch (\Illuminate\Validation\ValidationException $e) {
             DB::rollBack();
+
             return response()->json([
                 'success' => false,
                 'message' => 'Validation failed',
-                'errors' => $e->errors()
+                'errors' => $e->errors(),
             ], 422);
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Create category error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create category',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -420,7 +416,7 @@ class AccountController extends Controller
             $category = AccountCategory::findOrFail($id);
 
             // Tenant guard: can't edit a category outside the user's scope.
-            if (!$this->canAccessCategory($request, $category)) {
+            if (! $this->canAccessCategory($request, $category)) {
                 return response()->json(['success' => false, 'message' => 'Category not found'], 404);
             }
 
@@ -432,7 +428,7 @@ class AccountController extends Controller
                 'type' => 'required|in:Income,Expense',
                 'sub_type' => 'nullable|string|max:255',
                 'description' => 'nullable|string',
-                'is_active' => 'boolean'
+                'is_active' => 'boolean',
             ]);
 
             // Keep branch_id and set school_id from branch when branch_id is present
@@ -442,7 +438,7 @@ class AccountController extends Controller
                 $branch = Branch::find($branchId);
                 $validated['school_id'] = $branch ? $branch->school_id : null;
             }
-            if (!array_key_exists('branch_id', $validated)) {
+            if (! array_key_exists('branch_id', $validated)) {
                 $validated['branch_id'] = $branchId;
             }
 
@@ -455,7 +451,7 @@ class AccountController extends Controller
                 return response()->json([
                     'success' => false,
                     'message' => 'Validation failed',
-                    'errors' => ['name' => ['An account category with this name already exists for this branch.']]
+                    'errors' => ['name' => ['An account category with this name already exists for this branch.']],
                 ], 422);
             }
             $codeExists = AccountCategory::where('code', $validated['code'])
@@ -466,16 +462,16 @@ class AccountController extends Controller
                 return response()->json([
                     'success' => false,
                     'message' => 'Validation failed',
-                    'errors' => ['code' => ['An account category with this code already exists for this branch.']]
+                    'errors' => ['code' => ['An account category with this code already exists for this branch.']],
                 ], 422);
             }
 
             // Convert empty strings to null for nullable fields
             if (isset($validated['sub_type'])) {
-                $validated['sub_type'] = !empty($validated['sub_type']) ? $validated['sub_type'] : null;
+                $validated['sub_type'] = ! empty($validated['sub_type']) ? $validated['sub_type'] : null;
             }
             if (isset($validated['description'])) {
-                $validated['description'] = !empty($validated['description']) ? $validated['description'] : null;
+                $validated['description'] = ! empty($validated['description']) ? $validated['description'] : null;
             }
 
             $category->update($validated);
@@ -485,24 +481,25 @@ class AccountController extends Controller
             return response()->json([
                 'success' => true,
                 'data' => $category->fresh(),
-                'message' => 'Account category updated successfully'
+                'message' => 'Account category updated successfully',
             ]);
 
         } catch (\Illuminate\Validation\ValidationException $e) {
             DB::rollBack();
+
             return response()->json([
                 'success' => false,
                 'message' => 'Validation failed',
-                'errors' => $e->errors()
+                'errors' => $e->errors(),
             ], 422);
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Update category error', ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update category',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -517,7 +514,7 @@ class AccountController extends Controller
             $category = AccountCategory::findOrFail($id);
 
             // Tenant guard.
-            if (!$this->canAccessCategory($request, $category)) {
+            if (! $this->canAccessCategory($request, $category)) {
                 return response()->json(['success' => false, 'message' => 'Category not found'], 404);
             }
 
@@ -525,7 +522,7 @@ class AccountController extends Controller
             if ($category->transactions()->count() > 0) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Cannot delete category with existing transactions. Consider deactivating instead.'
+                    'message' => 'Cannot delete category with existing transactions. Consider deactivating instead.',
                 ], 422);
             }
 
@@ -535,17 +532,17 @@ class AccountController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Account category deleted successfully'
+                'message' => 'Account category deleted successfully',
             ]);
 
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Delete category error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to delete category',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -560,11 +557,11 @@ class AccountController extends Controller
             $category = AccountCategory::findOrFail($id);
 
             // Tenant guard.
-            if (!$this->canAccessCategory($request, $category)) {
+            if (! $this->canAccessCategory($request, $category)) {
                 return response()->json(['success' => false, 'message' => 'Category not found'], 404);
             }
 
-            $category->is_active = !$category->is_active;
+            $category->is_active = ! $category->is_active;
             $category->save();
 
             DB::commit();
@@ -572,17 +569,17 @@ class AccountController extends Controller
             return response()->json([
                 'success' => true,
                 'data' => $category,
-                'message' => 'Category status updated successfully'
+                'message' => 'Category status updated successfully',
             ]);
 
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Toggle category status error', ['error' => $e->getMessage()]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to toggle status',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -600,6 +597,7 @@ class AccountController extends Controller
         if ($schoolId && $category->school_id) {
             return (int) $category->school_id === (int) $schoolId;
         }
+
         return true;
     }
 
@@ -610,13 +608,12 @@ class AccountController extends Controller
     {
         $month = date('n');
         $year = date('Y');
-        
+
         // Financial year starts from April (month 4)
         if ($month < 4) {
-            return ($year - 1) . '-' . $year;
+            return ($year - 1).'-'.$year;
         } else {
-            return $year . '-' . ($year + 1);
+            return $year.'-'.($year + 1);
         }
     }
 }
-

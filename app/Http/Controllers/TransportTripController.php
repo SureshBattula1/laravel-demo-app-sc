@@ -34,9 +34,9 @@ class TransportTripController extends Controller
                     'transport_drivers.phone as driver_phone',
                     'branches.name as branch_name',
                     'branches.code as branch_code',
-                    DB::raw('(select count(*) from trip_boarding_logs where trip_boarding_logs.trip_id = transport_trips.id and trip_boarding_logs.boarding_status = "Boarded") as boarded_count'),
-                    DB::raw('(select count(*) from trip_boarding_logs where trip_boarding_logs.trip_id = transport_trips.id and trip_boarding_logs.drop_status = "Dropped") as dropped_count'),
-                    DB::raw('(select count(*) from student_transport where student_transport.route_id = transport_trips.route_id and student_transport.status = "Active") as total_riders')
+                    DB::raw("(select count(*) from trip_boarding_logs where trip_boarding_logs.trip_id = transport_trips.id and trip_boarding_logs.boarding_status = 'Boarded') as boarded_count"),
+                    DB::raw("(select count(*) from trip_boarding_logs where trip_boarding_logs.trip_id = transport_trips.id and trip_boarding_logs.drop_status = 'Dropped') as dropped_count"),
+                    DB::raw("(select count(*) from student_transport where student_transport.route_id = transport_trips.route_id and student_transport.status = 'Active') as total_riders")
                 );
 
             $this->scopeQuery($request, $query, 'transport_trips');

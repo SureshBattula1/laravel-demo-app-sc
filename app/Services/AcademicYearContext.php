@@ -3,9 +3,9 @@
 namespace App\Services;
 
 use App\Models\AcademicYear;
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Http\Exceptions\HttpResponseException;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -20,7 +20,11 @@ class AcademicYearContext
 
     public function __construct(
         protected Request $request
-    ) {
+    ) {}
+
+    protected function currentUser()
+    {
+        return $this->request->user() ?? auth()->user();
     }
 
     /**
@@ -41,13 +45,15 @@ class AcademicYearContext
             // middleware) or as a raw integer. Resolve either form to an int.
             $id = app(\App\Support\IdHasher::class)->decode($raw) ?? (is_numeric($raw) ? (int) $raw : null);
             $model = $id !== null ? AcademicYear::query()->where('id', $id)->first() : null;
-            $companyId = auth()->user()?->company_id ? (int) auth()->user()->company_id : null;
+            $user = $this->currentUser();
+            $companyId = $user?->company_id ? (int) $user->company_id : null;
             if ($model && $companyId && (int) $model->company_id !== $companyId) {
                 $model = null;
             }
             if ($model) {
                 $this->resolvedId = $id;
                 $this->resolvedModel = $model;
+
                 return $this->resolvedId;
             }
         }
@@ -56,6 +62,7 @@ class AcademicYearContext
         if ($current) {
             $this->resolvedId = $current->id;
             $this->resolvedModel = $current;
+
             return $this->resolvedId;
         }
 
@@ -75,6 +82,7 @@ class AcademicYearContext
             return $this->resolvedModel;
         }
         $this->id($required);
+
         return $this->resolvedModel;
     }
 
@@ -83,14 +91,65 @@ class AcademicYearContext
      */
     public function getCurrent(): ?AcademicYear
     {
-        $companyId = auth()->user()?->company_id ? (int) auth()->user()->company_id : null;
-        $cacheKey = 'academic_year_current_' . ($companyId ?? 'global');
+        $user = $this->currentUser();
+
+        // 1. If student, their academic year is strictly their active enrolled academic year
+        if ($user && ($user->role === 'Student' || $user->user_type === 'Student')) {
+            $student = \Illuminate\Support\Facades\DB::table('students')
+                ->where('user_id', $user->id)
+                ->first(['id', 'academic_year_id', 'branch_id', 'school_id']);
+            if ($student) {
+                $enrollmentAyId = \Illuminate\Support\Facades\DB::table('student_enrollments')
+                    ->where('student_id', $student->id)
+                    ->where('status', 'Active')
+                    ->orderByDesc('id')
+                    ->value('academic_year_id');
+                $ayId = $enrollmentAyId ?? $student->academic_year_id;
+                if ($ayId) {
+                    $ay = AcademicYear::find($ayId);
+                    if ($ay) {
+                        return $ay;
+                    }
+                }
+            }
+        }
+
+        // 2. If user is tied to a branch, resolve the active/current year for that branch's school
+        if ($user?->branch_id) {
+            $schoolId = \Illuminate\Support\Facades\DB::table('branches')->where('id', $user->branch_id)->value('school_id');
+            if ($schoolId) {
+                $schoolAy = AcademicYear::query()
+                    ->where('school_id', $schoolId)
+                    ->current()
+                    ->active()
+                    ->first()
+                    ?? AcademicYear::query()
+                        ->where('school_id', $schoolId)
+                        ->active()
+                        ->first();
+                if ($schoolAy) {
+                    return $schoolAy;
+                }
+            }
+        }
+
+        // 3. Fallback by company_id if available (or via school)
+        $companyId = $user?->company_id ? (int) $user->company_id : null;
+        if (! $companyId && $user?->branch_id) {
+            $companyId = \Illuminate\Support\Facades\DB::table('branches')
+                ->join('schools', 'branches.school_id', '=', 'schools.id')
+                ->where('branches.id', $user->branch_id)
+                ->value('schools.company_id');
+        }
+
+        $cacheKey = 'academic_year_current_'.($companyId ?? 'global');
 
         return Cache::remember($cacheKey, 60, function () use ($companyId) {
             $query = AcademicYear::query()->current()->active();
             if ($companyId) {
                 $query->where('company_id', $companyId);
             }
+
             return $query->first();
         });
     }
@@ -109,6 +168,7 @@ class AcademicYearContext
     public function isWithinYear($date): bool
     {
         $model = $this->model(false);
+
         return $model ? $model->containsDate($date) : false;
     }
 
@@ -118,6 +178,7 @@ class AcademicYearContext
     public function isPast(): bool
     {
         $model = $this->model(false);
+
         return $model ? $model->isPast() : false;
     }
 
@@ -170,7 +231,7 @@ class AcademicYearContext
     public static function clearCurrentCache(?int $companyId = null): void
     {
         if ($companyId) {
-            Cache::forget('academic_year_current_' . $companyId);
+            Cache::forget('academic_year_current_'.$companyId);
         }
         Cache::forget('academic_year_current_global');
         Cache::forget('academic_year_current'); // legacy key

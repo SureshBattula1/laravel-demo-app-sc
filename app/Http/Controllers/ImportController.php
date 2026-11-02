@@ -112,6 +112,7 @@ class ImportController extends Controller
                 'grade' => $request->input('grade'),
                 'section' => $request->input('section'),
                 'academic_year' => $request->input('academic_year'),
+                'academic_year_id' => $request->input('academic_year_id'),
                 'content_type' => $request->header('Content-Type'),
                 'all_inputs' => $request->except(['file']),
             ]);
@@ -122,6 +123,7 @@ class ImportController extends Controller
                 'grade' => $entity === 'student' ? 'required|string' : 'nullable|string',
                 'section' => 'nullable|string',
                 'academic_year' => $entity === 'student' ? 'required|string' : 'nullable|string',
+                'academic_year_id' => 'nullable|integer|exists:academic_years,id',
             ], [
                 'file.required' => 'Please select an Excel file to upload',
                 'file.mimes' => 'File must be Excel format (.xlsx, .xls) or CSV (.csv)',
@@ -166,11 +168,38 @@ class ImportController extends Controller
             }
 
             $file = $request->file('file');
+            $branchId = (int) $request->branch_id;
+            $academicYearId = $request->filled('academic_year_id') ? (int) $request->academic_year_id : null;
+            $academicYearName = $request->input('academic_year');
+
+            // If academic_year_id was passed but academic_year name was not, dynamically fetch name
+            if ($academicYearId && empty($academicYearName)) {
+                $academicYearName = \Illuminate\Support\Facades\DB::table('academic_years')->where('id', $academicYearId)->value('name');
+            }
+
+            // If academic_year_id was not passed, dynamically resolve it using branch's school
+            if (! $academicYearId && $academicYearName) {
+                $schoolId = \Illuminate\Support\Facades\DB::table('branches')->where('id', $branchId)->value('school_id');
+                if ($schoolId) {
+                    $academicYearId = \Illuminate\Support\Facades\DB::table('academic_years')
+                        ->where('school_id', $schoolId)
+                        ->where('name', $academicYearName)
+                        ->value('id');
+                }
+                if (! $academicYearId) {
+                    $academicYearId = \Illuminate\Support\Facades\DB::table('academic_years')
+                        ->where('name', $academicYearName)
+                        ->orderByRaw('school_id IS NOT NULL DESC')
+                        ->value('id');
+                }
+            }
+
             $context = [
-                'branch_id' => $request->branch_id,
+                'branch_id' => $branchId,
                 'grade' => $request->grade,
                 'section' => $request->section,
-                'academic_year' => $request->academic_year,
+                'academic_year' => $academicYearName,
+                'academic_year_id' => $academicYearId,
             ];
 
             // Create import history record
@@ -635,6 +664,67 @@ class ImportController extends Controller
     }
 
     /**
+     * Set role for an entire import batch (bulk role assignment)
+     */
+    public function setBatchRole(Request $request, string $entity, string $batchId)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'role_id' => 'required|exists:roles,id',
+                'role_name' => 'nullable|string',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'errors' => $validator->errors(),
+                ], 422);
+            }
+
+            $role = \App\Models\Role::findOrFail($request->role_id);
+            $roleName = $request->input('role_name', $role->name);
+
+            if ($entity === 'teacher') {
+                \App\Models\TeacherImport::where('batch_id', $batchId)->update([
+                    'role_id' => $role->id,
+                    'role_name' => $roleName,
+                ]);
+            } elseif ($entity === 'student') {
+                \App\Models\StudentImport::where('batch_id', $batchId)->update([
+                    'role_id' => $role->id,
+                    'role_name' => $roleName,
+                ]);
+            }
+
+            // Update batch context
+            $importHistory = ImportHistory::where('batch_id', $batchId)->first();
+            if ($importHistory) {
+                $context = $importHistory->import_context ?? [];
+                $context['default_role_id'] = $role->id;
+                $context['default_role_name'] = $roleName;
+                $importHistory->update(['import_context' => $context]);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => "Successfully assigned role {$roleName} to all records in batch",
+                'data' => [
+                    'role_id' => $role->id,
+                    'role_name' => $roleName,
+                    'batch_id' => $batchId,
+                ],
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Set batch role error', ['entity' => $entity, 'batch_id' => $batchId, 'error' => $e->getMessage()]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to assign role to batch: '.$e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
      * Commit import to production
      */
     public function commit(Request $request, string $entity, string $batchId)
@@ -644,6 +734,8 @@ class ImportController extends Controller
 
             $validator = Validator::make($request->all(), [
                 'skip_invalid' => 'boolean',
+                'role_id' => 'nullable|exists:roles,id',
+                'default_role_id' => 'nullable|exists:roles,id',
             ]);
 
             if ($validator->fails()) {
@@ -654,6 +746,7 @@ class ImportController extends Controller
             }
 
             $skipInvalid = $request->get('skip_invalid', true);
+            $roleId = $request->get('role_id') ?? $request->get('default_role_id');
 
             // Update status to importing
             $importHistory->update([
@@ -663,9 +756,9 @@ class ImportController extends Controller
 
             // Import to production
             if ($entity === 'student') {
-                $result = $this->importService->importStudentsToProduction($batchId, $skipInvalid, auth()->id());
+                $result = $this->importService->importStudentsToProduction($batchId, $skipInvalid, auth()->id(), $roleId);
             } elseif ($entity === 'teacher') {
-                $result = $this->importService->importTeachersToProduction($batchId, $skipInvalid);
+                $result = $this->importService->importTeachersToProduction($batchId, $skipInvalid, $roleId);
             }
 
             // Update import history
@@ -754,7 +847,21 @@ class ImportController extends Controller
                 ], 403);
             }
 
-            $result = $this->importService->revertImport($entity, $batchId, auth()->id());
+            $user = $request->user();
+            $isSuperAdmin = $user && $user->role === 'SuperAdmin';
+            $isWithin30Days = $batch->isWithin30Days();
+
+            // If over 30 days and not SuperAdmin, block direct revert and instruct to request approval
+            if (! $isWithin30Days && ! $isSuperAdmin) {
+                return response()->json([
+                    'success' => false,
+                    'requires_approval' => true,
+                    'message' => 'This import is older than 30 days. Super Admin approval is required to revert.',
+                ], 403);
+            }
+
+            // Direct revert allowed (either <= 30 days or SuperAdmin override)
+            $result = $this->importService->revertImport($entity, $batchId, auth()->id(), $isSuperAdmin);
 
             return response()->json([
                 'success' => true,
@@ -776,6 +883,188 @@ class ImportController extends Controller
     }
 
     /**
+     * Request approval to revert an import batch (for batches older than 30 days)
+     */
+    public function requestRevert(Request $request, string $batchId)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'reason' => 'required|string|min:5|max:1000',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'errors' => $validator->errors(),
+                ], 422);
+            }
+
+            $batch = ImportHistory::where('batch_id', $batchId)->first();
+            if (! $batch) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Import batch not found',
+                ], 404);
+            }
+
+            if ($batch->branch_id && ! $this->canAccessBranch($request, (int) $batch->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You do not have permission to request revert for this import batch.',
+                ], 403);
+            }
+
+            $result = $this->importService->requestRevertApproval(
+                $batchId,
+                auth()->id(),
+                $request->input('reason')
+            );
+
+            return response()->json([
+                'success' => true,
+                'message' => $result['message'],
+                'data' => $result,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Request revert approval error', ['batch_id' => $batchId, 'error' => $e->getMessage()]);
+
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage() ?: 'Failed to request revert approval',
+            ], 400);
+        }
+    }
+
+    /**
+     * Get pending revert approval requests (Super Admin only)
+     */
+    public function getPendingRevertRequests(Request $request)
+    {
+        try {
+            $user = $request->user();
+            if (! $user || $user->role !== 'SuperAdmin') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Only Super Admins can review revert approval requests.',
+                ], 403);
+            }
+
+            $pending = ImportHistory::with([
+                'uploader:id,first_name,last_name,email',
+                'revertRequester:id,first_name,last_name,email',
+                'branch:id,name,code,city',
+            ])
+                ->where('revert_approval_status', 'pending')
+                ->orderBy('revert_requested_at', 'desc')
+                ->get();
+
+            return response()->json([
+                'success' => true,
+                'data' => $pending,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Get pending revert requests error', ['error' => $e->getMessage()]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch pending revert requests',
+            ], 500);
+        }
+    }
+
+    /**
+     * Approve a revert request and perform revert (Super Admin only)
+     */
+    public function approveRevert(Request $request, string $batchId)
+    {
+        try {
+            $user = $request->user();
+            if (! $user || $user->role !== 'SuperAdmin') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Only Super Admins can approve revert requests.',
+                ], 403);
+            }
+
+            $validator = Validator::make($request->all(), [
+                'remarks' => 'nullable|string|max:1000',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'errors' => $validator->errors(),
+                ], 422);
+            }
+
+            $result = $this->importService->approveRevertRequest(
+                $batchId,
+                $user->id,
+                $request->input('remarks')
+            );
+
+            return response()->json([
+                'success' => true,
+                'message' => $result['message'],
+                'data' => $result,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Approve revert error', ['batch_id' => $batchId, 'error' => $e->getMessage()]);
+
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage() ?: 'Failed to approve revert request',
+            ], 400);
+        }
+    }
+
+    /**
+     * Reject a revert request (Super Admin only)
+     */
+    public function rejectRevert(Request $request, string $batchId)
+    {
+        try {
+            $user = $request->user();
+            if (! $user || $user->role !== 'SuperAdmin') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Only Super Admins can reject revert requests.',
+                ], 403);
+            }
+
+            $validator = Validator::make($request->all(), [
+                'reason' => 'required|string|min:3|max:1000',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'errors' => $validator->errors(),
+                ], 422);
+            }
+
+            $result = $this->importService->rejectRevertRequest(
+                $batchId,
+                $user->id,
+                $request->input('reason')
+            );
+
+            return response()->json([
+                'success' => true,
+                'message' => $result['message'],
+                'data' => $result,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Reject revert error', ['batch_id' => $batchId, 'error' => $e->getMessage()]);
+
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage() ?: 'Failed to reject revert request',
+            ], 400);
+        }
+    }
+
+    /**
      * Get single batch details
      */
     public function getBatchDetails(Request $request, string $batchId)
@@ -784,6 +1073,8 @@ class ImportController extends Controller
             $batch = ImportHistory::with([
                 'uploader:id,first_name,last_name,email',
                 'reverter:id,first_name,last_name,email',
+                'revertRequester:id,first_name,last_name,email',
+                'revertApprover:id,first_name,last_name,email',
                 'branch:id,name,code,city',
             ])->where('batch_id', $batchId)->first();
 
@@ -824,6 +1115,8 @@ class ImportController extends Controller
             $query = ImportHistory::with([
                 'uploader:id,first_name,last_name,email',
                 'reverter:id,first_name,last_name,email',
+                'revertRequester:id,first_name,last_name,email',
+                'revertApprover:id,first_name,last_name,email',
                 'branch:id,name,code',
             ])->orderBy('created_at', 'desc');
 
@@ -1462,6 +1755,8 @@ class ImportController extends Controller
                 // Other
                 'password' => ['password', 'pass'],
                 'remarks' => ['remarks', 'remark', 'notes', 'note'],
+                'role_name' => ['role', 'role_name', 'user_role', 'assigned_role'],
+                'role_id' => ['role_id'],
             ];
         }
     }

@@ -2,14 +2,13 @@
 
 namespace App\Services;
 
-use App\Models\FeeStructure;
-use App\Models\FeePayment;
 use App\Models\FeeDue;
+use App\Models\FeePayment;
+use App\Models\FeeStructure;
 use App\Models\Student;
-use App\Services\AuditService;
+use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Carbon\Carbon;
 
 class FeeCarryForwardService
 {
@@ -19,11 +18,11 @@ class FeeCarryForwardService
     public function identifyPendingFees($studentId, $grade = null, $academicYear = null): array
     {
         // Accept both user_id and student id
-        $student = is_numeric($studentId) 
+        $student = is_numeric($studentId)
             ? Student::where('user_id', $studentId)->orWhere('id', $studentId)->first()
             : Student::where('user_id', $studentId)->first();
-        
-        if (!$student) {
+
+        if (! $student) {
             return [];
         }
 
@@ -34,10 +33,10 @@ class FeeCarryForwardService
         // Get all fee structures for the student's grade and branch
         $feeStructures = FeeStructure::where('is_active', true)
             ->where('branch_id', $student->branch_id)
-            ->where(function($q) use ($grade) {
+            ->where(function ($q) use ($grade) {
                 $q->where('grade', $grade)
-                  ->orWhere('grade', 'Grade ' . $grade)
-                  ->orWhere('grade', str_replace('Grade ', '', $grade));
+                    ->orWhere('grade', 'Grade '.$grade)
+                    ->orWhere('grade', str_replace('Grade ', '', $grade));
             })
             ->where('academic_year', $academicYear)
             ->get();
@@ -87,8 +86,8 @@ class FeeCarryForwardService
 
             if ($balanceAmount > 0) {
                 $feeType = $feeStructure->fee_type ?? 'General Fee';
-                
-                if (!isset($pendingFees[$feeType])) {
+
+                if (! isset($pendingFees[$feeType])) {
                     $pendingFees[$feeType] = [];
                 }
 
@@ -98,9 +97,9 @@ class FeeCarryForwardService
                     'original_amount' => $feeStructure->amount,
                     'paid_amount' => $amountPaid,
                     'balance_amount' => $balanceAmount,
-                    'due_date' => $feeStructure->due_date,
+                    'due_date' => $feeStructure->due_date ? Carbon::parse($feeStructure->due_date)->toDateString() : now()->toDateString(),
                     'description' => $feeStructure->description,
-                    'status' => $amountPaid > 0 ? 'PartiallyPaid' : 'Unpaid'
+                    'status' => $amountPaid > 0 ? 'PartiallyPaid' : 'Unpaid',
                 ];
             }
         }
@@ -115,9 +114,9 @@ class FeeCarryForwardService
     {
         // identifyPendingFees handles both user_id and student id
         $pendingFees = $this->identifyPendingFees($studentId, $grade, $academicYear);
-        
+
         $breakdown = [];
-        
+
         foreach ($pendingFees as $feeType => $fees) {
             $totalOriginal = 0;
             $totalPaid = 0;
@@ -129,13 +128,13 @@ class FeeCarryForwardService
                 $totalOriginal += $fee['original_amount'];
                 $totalPaid += $fee['paid_amount'];
                 $totalBalance += $fee['balance_amount'];
-                
+
                 if ($fee['due_date']) {
                     $dueDate = Carbon::parse($fee['due_date']);
-                    if (!$minDueDate || $dueDate->lt($minDueDate)) {
+                    if (! $minDueDate || $dueDate->lt($minDueDate)) {
                         $minDueDate = $dueDate;
                     }
-                    
+
                     $overdueDays = max(0, now()->diffInDays($dueDate, false) * -1);
                     $maxOverdueDays = max($maxOverdueDays, $overdueDays);
                 }
@@ -150,7 +149,7 @@ class FeeCarryForwardService
                 'due_date' => $minDueDate ? $minDueDate->format('Y-m-d') : null,
                 'overdue_days' => $maxOverdueDays,
                 'status' => $maxOverdueDays > 0 ? 'Overdue' : ($totalPaid > 0 ? 'PartiallyPaid' : 'Pending'),
-                'fees' => $fees
+                'fees' => $fees,
             ];
         }
 
@@ -162,19 +161,20 @@ class FeeCarryForwardService
      */
     public function calculateOverdueDays($dueDate): int
     {
-        if (!$dueDate) {
+        if (! $dueDate) {
             return 0;
         }
 
         $due = Carbon::parse($dueDate);
         $days = now()->diffInDays($due, false);
-        
+
         return max(0, $days * -1); // Return positive number for overdue days
     }
 
     /**
      * Carry forward fees for a student
-     * @param bool $useOwnTransaction When false, assume caller has an open transaction (e.g. promotion flow)
+     *
+     * @param  bool  $useOwnTransaction  When false, assume caller has an open transaction (e.g. promotion flow)
      */
     public function carryForwardFees($studentId, $fromGrade, $toGrade, $fromAcademicYear, $toAcademicYear, $userId, bool $useOwnTransaction = true): array
     {
@@ -184,11 +184,11 @@ class FeeCarryForwardService
 
         try {
             // Accept both user_id and student id
-            $student = is_numeric($studentId) 
+            $student = is_numeric($studentId)
                 ? Student::where('user_id', $studentId)->orWhere('id', $studentId)->first()
                 : Student::where('user_id', $studentId)->first();
-            
-            if (!$student) {
+
+            if (! $student) {
                 throw new \Exception('Student not found');
             }
 
@@ -205,36 +205,50 @@ class FeeCarryForwardService
                 Log::info('Skipping fee carry forward - already done', [
                     'student_id' => $student->id,
                     'from_grade' => $fromGrade,
-                    'to_grade' => $toGrade
+                    'to_grade' => $toGrade,
                 ]);
+
                 return [
                     'success' => true,
                     'carried_fees' => [],
                     'total_amount' => 0,
-                    'fee_types_count' => 0
+                    'fee_types_count' => 0,
                 ];
             }
 
             $pendingFees = $this->identifyPendingFees($student->user_id, $fromGrade, $fromAcademicYear);
             $carriedFees = [];
             $totalCarried = 0;
-            $auditService = new AuditService();
+            $auditService = new AuditService;
+            $fromAcademicYearId = $fromAcademicYear
+                ? \App\Models\AcademicYear::query()
+                    ->when($student->school_id, function ($q) use ($student) {
+                        $companyId = DB::table('schools')->where('id', $student->school_id)->value('company_id');
+                        if ($companyId) {
+                            $q->where('company_id', $companyId);
+                        }
+                    })
+                    ->where('name', $fromAcademicYear)
+                    ->value('id')
+                : $student->academic_year_id;
 
             foreach ($pendingFees as $feeType => $fees) {
                 foreach ($fees as $fee) {
-                    $overdueDays = $this->calculateOverdueDays($fee['due_date']);
+                    $dueDate = ! empty($fee['due_date']) ? Carbon::parse($fee['due_date'])->toDateString() : now()->toDateString();
+                    $overdueDays = ! empty($fee['due_date']) ? $this->calculateOverdueDays($dueDate) : 0;
                     $status = $overdueDays > 0 ? 'Overdue' : ($fee['status'] === 'PartiallyPaid' ? 'PartiallyPaid' : 'Pending');
-                    
+
                     $feeDue = FeeDue::create([
                         'student_id' => $student->id,
                         'fee_structure_id' => $fee['fee_structure_id'],
                         'academic_year' => $fromAcademicYear,
+                        'academic_year_id' => $fromAcademicYearId ? (int) $fromAcademicYearId : null,
                         'original_grade' => $fromGrade,
                         'current_grade' => $toGrade,
                         'original_amount' => $fee['original_amount'],
                         'paid_amount' => $fee['paid_amount'],
                         'balance_amount' => $fee['balance_amount'],
-                        'due_date' => $fee['due_date'],
+                        'due_date' => $dueDate,
                         'overdue_days' => $overdueDays,
                         'status' => 'CarriedForward',
                         'carry_forward_date' => now(),
@@ -243,8 +257,8 @@ class FeeCarryForwardService
                         'metadata' => [
                             'promoted_from_grade' => $fromGrade,
                             'promoted_to_grade' => $toGrade,
-                            'original_academic_year' => $fromAcademicYear
-                        ]
+                            'original_academic_year' => $fromAcademicYear,
+                        ],
                     ]);
 
                     $carriedFees[] = $feeDue;
@@ -263,9 +277,9 @@ class FeeCarryForwardService
                                 'to_grade' => $toGrade,
                                 'fee_type' => $feeType,
                                 'academic_year_from' => $fromAcademicYear,
-                                'academic_year_to' => $toAcademicYear
+                                'academic_year_to' => $toAcademicYear,
                             ],
-                            'user_id' => $userId
+                            'user_id' => $userId,
                         ]);
                     } catch (\Exception $e) {
                         Log::warning('Failed to log audit for carry forward', ['error' => $e->getMessage()]);
@@ -282,14 +296,14 @@ class FeeCarryForwardService
                 'from_grade' => $fromGrade,
                 'to_grade' => $toGrade,
                 'total_carried' => $totalCarried,
-                'fees_count' => count($carriedFees)
+                'fees_count' => count($carriedFees),
             ]);
 
             return [
                 'success' => true,
                 'carried_fees' => $carriedFees,
                 'total_amount' => $totalCarried,
-                'fee_types_count' => count($pendingFees)
+                'fee_types_count' => count($pendingFees),
             ];
 
         } catch (\Exception $e) {
@@ -298,7 +312,7 @@ class FeeCarryForwardService
             }
             Log::error('Error carrying forward fees', [
                 'student_id' => $studentId,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ]);
             throw $e;
         }
@@ -310,11 +324,11 @@ class FeeCarryForwardService
     public function getCarryForwardSummary($studentId, $fromGrade, $toGrade, $fromAcademicYear): array
     {
         // Accept both user_id and student id
-        $student = is_numeric($studentId) 
+        $student = is_numeric($studentId)
             ? Student::where('user_id', $studentId)->orWhere('id', $studentId)->first()
             : Student::where('user_id', $studentId)->first();
-        
-        if (!$student) {
+
+        if (! $student) {
             return [
                 'student_id' => $studentId,
                 'from_grade' => $fromGrade,
@@ -322,14 +336,14 @@ class FeeCarryForwardService
                 'academic_year' => $fromAcademicYear,
                 'pending_fees_breakdown' => [],
                 'total_pending_amount' => 0,
-                'fee_types_count' => 0
+                'fee_types_count' => 0,
             ];
         }
-        
+
         $breakdown = $this->getPendingFeesBreakdown($student->user_id, $fromGrade, $fromAcademicYear);
-        
+
         $totalPending = array_sum(array_column($breakdown, 'total_balance_amount'));
-        
+
         return [
             'student_id' => $studentId,
             'from_grade' => $fromGrade,
@@ -337,8 +351,7 @@ class FeeCarryForwardService
             'academic_year' => $fromAcademicYear,
             'pending_fees_breakdown' => $breakdown,
             'total_pending_amount' => $totalPending,
-            'fee_types_count' => count($breakdown)
+            'fee_types_count' => count($breakdown),
         ];
     }
 }
-

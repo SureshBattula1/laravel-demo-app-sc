@@ -9,6 +9,7 @@ use App\Models\FeeStructure;
 use App\Models\StudentTransport;
 use App\Services\AcademicYearContext;
 use App\Services\StudentTransportFeeSyncService;
+use App\Support\StudentEnrollmentScope;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -444,12 +445,24 @@ class FeeController extends Controller
 
             // Filter by grade/class
             if ($request->has('grade') && $request->grade) {
-                $baseQuery->where('s.grade', $request->grade);
+                $baseQuery->where('fs.grade', $request->grade);
             }
 
             // Filter by section
             if ($request->has('section') && $request->section) {
-                $baseQuery->where('s.section', $request->section);
+                $section = $request->section;
+                $baseQuery->where(function ($q) use ($section) {
+                    $q->where('s.section', $section);
+                    if (\Illuminate\Support\Facades\Schema::hasTable('student_enrollments')) {
+                        $q->orWhereExists(function ($sub) use ($section) {
+                            $sub->select(DB::raw(1))
+                                ->from('student_enrollments as se_fee')
+                                ->whereColumn('se_fee.student_id', 's.id')
+                                ->whereColumn('se_fee.academic_year_id', 'fs.academic_year_id')
+                                ->where('se_fee.section', $section);
+                        });
+                    }
+                });
             }
 
             // Filter by payment method
@@ -1551,11 +1564,15 @@ class FeeController extends Controller
             $studentQuery = DB::table('students as s')
                 ->join('users as u', 's.user_id', '=', 'u.id')
                 ->whereNull('s.deleted_at')
-                ->where('s.branch_id', $branchId)
-                ->where('s.grade', $grade);
-            if ($section !== null) {
-                $studentQuery->where('s.section', $section);
-            }
+                ->where('s.student_status', 'Active')
+                ->where('s.branch_id', $branchId);
+            StudentEnrollmentScope::whereInClass(
+                $studentQuery,
+                's',
+                $academicYearId ? (int) $academicYearId : null,
+                $grade,
+                $section
+            );
             // Students' own users.phone/mobile is usually empty; the reachable number lives on
             // the students record (father/guardian/emergency). Fall back through them.
             $students = $studentQuery
