@@ -65,7 +65,7 @@ class DemoOneSchoolSeeder extends Seeder
             $this->command->info('  Branch Admin: branchadmin@greenvalley.demo / '.self::PASSWORD);
             $this->command->info('  Teachers/Staff/Accountants/Students password: '.self::PASSWORD);
             $this->command->info('  10 teachers, 10 non-teaching, 2 accountants, 150 students (G1–G2 × A/B/C × 25).');
-            $this->command->info('Next: php artisan db:seed --class=DemoSchoolOpsSeeder (subjects, exams, leaves, fees, holidays).');
+            $this->command->info('Tip: DemoSchoolDatasetSeeder also runs subjects, exams, fees, library, and transport.');
         });
     }
 

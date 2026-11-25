@@ -39,6 +39,30 @@ class TimetableController extends Controller
                 $query->where('teacher_id', $request->teacher_id);
             }
 
+            if ($request->has('subject_id')) {
+                $query->where('subject_id', $request->subject_id);
+            }
+
+            if ($request->has('is_active')) {
+                $query->where('is_active', filter_var($request->is_active, FILTER_VALIDATE_BOOLEAN));
+            } elseif (! $request->boolean('include_inactive')) {
+                $query->where('is_active', true);
+            }
+
+            if ($request->filled('q')) {
+                $needle = '%'.$request->q.'%';
+                $query->where(function ($qry) use ($needle) {
+                    $qry->where('room_number', 'like', $needle)
+                        ->orWhereHas('subject', function ($s) use ($needle) {
+                            $s->where('name', 'like', $needle);
+                        })
+                        ->orWhereHas('teacher', function ($t) use ($needle) {
+                            $t->where('first_name', 'like', $needle)
+                                ->orWhere('last_name', 'like', $needle);
+                        });
+                });
+            }
+
             if ($request->filled('academic_year') || $request->filled('academic_year_id')) {
                 [$academicYearId, $academicYearName] = $this->resolveAcademicYearFromRequest($request);
                 $this->applyAcademicYearScope($query, $academicYearId, $academicYearName);
@@ -119,6 +143,7 @@ class TimetableController extends Controller
                 return response()->json([
                     'success' => false,
                     'message' => 'Timetable conflict: This slot is already occupied',
+                    'conflict_type' => 'class_slot',
                 ], 422);
             }
 
@@ -133,6 +158,7 @@ class TimetableController extends Controller
                 return response()->json([
                     'success' => false,
                     'message' => 'Teacher is already assigned to another class at this time',
+                    'conflict_type' => 'teacher_slot',
                 ], 422);
             }
 
@@ -245,6 +271,7 @@ class TimetableController extends Controller
                     return response()->json([
                         'success' => false,
                         'message' => 'Timetable conflict: This slot is already occupied',
+                        'conflict_type' => 'class_slot',
                     ], 422);
                 }
             }
@@ -349,16 +376,21 @@ class TimetableController extends Controller
     /**
      * Get timetable by class
      */
-    public function getByClass(string $grade, string $section)
+    public function getByClass(Request $request, string $grade, string $section)
     {
         try {
-            $academicYear = request()->get('academic_year', date('Y'));
+            [$academicYearId, $academicYearName] = $this->resolveAcademicYearFromRequest($request);
+            $academicYear = $request->get('academic_year', $academicYearName ?? date('Y'));
 
             $timetables = Timetable::with(['subject', 'teacher'])
                 ->where('grade', $grade)
-                ->where('section', $section)
-                ->where('academic_year', $academicYear)
-                ->where('is_active', true)
+                ->where('section', $section);
+            $this->applyBranchFilter($timetables, $request);
+            if (! $request->boolean('include_inactive')) {
+                $timetables->where('is_active', true);
+            }
+            $this->applyAcademicYearScope($timetables, $academicYearId, $academicYear);
+            $timetables = $timetables
                 ->orderBy('day_order')
                 ->orderBy('period_number')
                 ->get();

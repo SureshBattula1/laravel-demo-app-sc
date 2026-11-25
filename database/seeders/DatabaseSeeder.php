@@ -15,59 +15,41 @@ class DatabaseSeeder extends Seeder
 {
     /**
      * Seed the application's database.
-     * This seeder creates:
-     * - 6 Roles (Super Admin, Branch Admin, Teacher, Staff, Accountant, Student)
-     * - Modules (for sidebar menus)
-     * - Permissions for each module
-     * - 2 Super Admin users with ALL permissions
-     * - NO other users (teachers/students will be created by application)
+     *
+     * Phase 1 — System: roles, modules, permissions, super admins, academic years, company portal.
+     * Phase 2 — Demo (optional): Green Valley demo school when SEED_DEMO_SCHOOL=true (default).
+     *
+     * @see database/seeders/README.md
      */
     public function run(): void
     {
         DB::beginTransaction();
 
         try {
-            $this->command->info('🌱 Seeding database...');
+            $this->command->info('🌱 Seeding database (system)…');
 
-            // Step 1: Create Roles
             $this->createRoles();
-
-            // Step 2: Create Modules and Permissions
             $this->createModulesAndPermissions();
-
-            // Step 3: Assign Permissions to Roles
             $this->assignRolePermissions();
-
-            // Ensure module/permissions exist on databases seeded before these modules were added
-            $this->call(AssignmentsModuleSeeder::class);
-            $this->call(NotificationsModuleSeeder::class);
-
-            // Step 4: Create Super Admin Users
             $this->createSuperAdmins();
-
-            // Step 5: Create Academic Years (global table shared across all tenants)
             $this->createAcademicYears();
-
-            // Step 6: Create Company Portal (Company and Company Admin)
             $this->call(CompanyPortalSeeder::class);
 
             DB::commit();
 
-            $this->command->info('✅ Database seeding completed successfully!');
             $this->command->info('');
-            $this->command->info('📋 Summary:');
-            $this->command->info('   - 6 Roles created');
-            $this->command->info('   - 24 Modules created');
-            $this->command->info('   - '.Permission::count().' Permissions created');
-            $this->command->info('   - Permissions assigned to all roles');
-            $this->command->info('   - 2 Super Admin users created');
-            $this->command->info('');
-            $this->command->info('🔑 Super Admin Credentials:');
-            $this->command->info('   Email: superadmin@school.com | Password: Admin@123');
-            $this->command->info('   Email: admin@school.com | Password: Admin@123');
-            $this->command->info('');
-            $this->command->info('💡 Note: Teacher and Student roles are automatically assigned');
-            $this->command->info('   when teachers/students are created via the application.');
+            $this->command->info('✅ System seeding completed.');
+            $this->command->info('   Roles: 6 | Modules: '.Module::count().' | Permissions: '.Permission::count());
+            $this->command->info('   Super admins: superadmin@school.com, admin@school.com (Admin@123)');
+
+            $seedDemo = filter_var(env('SEED_DEMO_SCHOOL', true), FILTER_VALIDATE_BOOLEAN);
+            if ($seedDemo) {
+                $this->call(DemoSchoolDatasetSeeder::class);
+            } else {
+                $this->command->info('');
+                $this->command->info('⊙ SEED_DEMO_SCHOOL=false — skipped demo school.');
+                $this->command->info('  Run: php artisan db:seed --class=DemoSchoolDatasetSeeder');
+            }
 
         } catch (\Exception $e) {
             DB::rollBack();

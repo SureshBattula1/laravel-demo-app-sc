@@ -37,7 +37,7 @@ return new class extends Migration
 
                 $table->index(['school_id', 'branch_id']);
                 $table->index('status');
-                $table->index(['from_academic_year_id', 'to_academic_year_id']);
+                $table->index(['from_academic_year_id', 'to_academic_year_id'], 'promo_batches_from_to_year_idx');
             });
         }
 

@@ -8,6 +8,19 @@ if [ ! -f .env ]; then
     cp .env.docker .env
 fi
 
+# Laravel reads .env; Compose injects DB_* — always mirror Docker DB settings into .env.
+if [ -n "${DB_HOST:-}" ]; then
+    for key in DB_CONNECTION DB_HOST DB_PORT DB_DATABASE DB_USERNAME DB_PASSWORD; do
+        eval "val=\${$key:-}"
+        [ -n "$val" ] || continue
+        if grep -q "^${key}=" .env 2>/dev/null; then
+            sed -i "s|^${key}=.*|${key}=${val}|" .env
+        else
+            echo "${key}=${val}" >> .env
+        fi
+    done
+fi
+
 # Ensure an application key exists.
 if ! grep -q "^APP_KEY=base64:" .env; then
     php artisan key:generate --force

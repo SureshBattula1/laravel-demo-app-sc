@@ -6,11 +6,8 @@ use App\Models\School;
 use Illuminate\Database\Seeder;
 
 /**
- * Next step after DemoOneSchoolSeeder.
- *
- * Seeds subjects, exams, leaves, fee management, and holidays for
- * Green Valley Demo School using the school/branch/student/teacher IDs
- * created by DemoOneSchoolSeeder.
+ * Academic & operations data for Green Valley Demo School (GV-DEMO).
+ * Normally invoked by DemoSchoolDatasetSeeder; safe to run alone if the school exists.
  *
  * php artisan db:seed --class=DemoSchoolOpsSeeder
  */
