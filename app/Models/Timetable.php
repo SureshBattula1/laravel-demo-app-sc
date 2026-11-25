@@ -24,7 +24,12 @@ class Timetable extends Model
         'period_number',
         'start_time',
         'end_time',
+        'duration_minutes',
         'room_number',
+        'schedule_mode',
+        'is_default_weekly',
+        'effective_date',
+        'active_days',
         'schedule',
         'academic_year',
         'academic_year_id',
@@ -36,9 +41,44 @@ class Timetable extends Model
     protected $casts = [
         'day_order' => 'integer',
         'period_number' => 'integer',
+        'duration_minutes' => 'integer',
+        'is_default_weekly' => 'boolean',
+        'effective_date' => 'date:Y-m-d',
+        'active_days' => 'array',
         'schedule' => 'array',
         'is_active' => 'boolean',
     ];
+
+    public static function calculateDurationMinutes(?string $startTime, ?string $endTime): ?int
+    {
+        if (! $startTime || ! $endTime) {
+            return null;
+        }
+        $startParts = explode(':', $startTime);
+        $endParts = explode(':', $endTime);
+        if (count($startParts) < 2 || count($endParts) < 2) {
+            return null;
+        }
+        $startMins = ((int) $startParts[0]) * 60 + ((int) $startParts[1]);
+        $endMins = ((int) $endParts[0]) * 60 + ((int) $endParts[1]);
+        $diff = $endMins - $startMins;
+
+        return $diff > 0 ? $diff : null;
+    }
+
+    public static function dayOrderForName(string $day): int
+    {
+        return match (strtolower(trim($day))) {
+            'monday' => 1,
+            'tuesday' => 2,
+            'wednesday' => 3,
+            'thursday' => 4,
+            'friday' => 5,
+            'saturday' => 6,
+            'sunday' => 7,
+            default => 1,
+        };
+    }
 
     public function branch(): BelongsTo
     {

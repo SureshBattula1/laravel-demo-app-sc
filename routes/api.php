@@ -621,8 +621,10 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
     // Route::get('holidays/year/{year}', [EventController::class, 'getHolidaysByYear']);
 
     // Timetable Routes
-    Route::apiResource('timetables', TimetableController::class);
+    Route::post('timetables/bulk-upsert', [TimetableController::class, 'bulkUpsert']);
     Route::get('timetables/class/{grade}/{section}', [TimetableController::class, 'getByClass']);
+    Route::delete('timetables/class/{grade}/{section}', [TimetableController::class, 'destroyClass']);
+    Route::apiResource('timetables', TimetableController::class);
 
     // Dashboard Routes (Secure - Role-Based Access)
     Route::get('dashboard', [DashboardController::class, 'getStats']); // Main dashboard endpoint
