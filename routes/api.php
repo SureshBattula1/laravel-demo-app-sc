@@ -675,7 +675,8 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
     // Route::apiResource('holidays', EventController::class);
     // Route::get('holidays/year/{year}', [EventController::class, 'getHolidaysByYear']);
 
-    // Timetable Routes. Literal paths stay before the resource so "class" and "bulk-upsert" are not read as ids.
+    // Timetable Routes. Literal paths stay before the resource so "class", "teacher-options", and "bulk-upsert" are not read as ids.
+    Route::get('timetables/teacher-options', [TimetableController::class, 'teacherOptions'])->middleware('permission:timetable.view');
     Route::post('timetables/bulk-upsert', [TimetableController::class, 'bulkUpsert'])->middleware('permission:timetable.edit');
     Route::get('timetables/class/{grade}/{section}', [TimetableController::class, 'getByClass'])->middleware('permission:timetable.view');
     Route::delete('timetables/class/{grade}/{section}', [TimetableController::class, 'destroyClass'])->middleware('permission:timetable.delete');

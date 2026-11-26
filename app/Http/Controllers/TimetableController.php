@@ -60,7 +60,11 @@ class TimetableController extends Controller
                 if ($request->teacher_id === 'unassigned' || $request->teacher_id === 'null') {
                     $query->whereNull('teacher_id');
                 } else {
-                    $query->where('teacher_id', $request->teacher_id);
+                    $filterBranchId = $request->filled('branch_id') && is_numeric($request->branch_id)
+                        ? (int) $request->branch_id
+                        : null;
+                    $resolvedFilterTeacherId = $this->resolveTeacherUserId($request->teacher_id, $filterBranchId);
+                    $query->where('teacher_id', $resolvedFilterTeacherId ?? $request->teacher_id);
                 }
             }
 
@@ -187,7 +191,94 @@ class TimetableController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch timetables',
+            ], 500);
+        }
+    }
 
+    /**
+     * Lightweight, non-PII branch-scoped teacher picker catalog for timetable creation/editing & filtering.
+     * Always returns `id` = `users.id` (matching `timetables.teacher_id` FK) plus `teacher_record_id` = `teachers.id`.
+     */
+    public function teacherOptions(Request $request)
+    {
+        try {
+            $query = \App\Models\Teacher::query()
+                ->select([
+                    'id',
+                    'user_id',
+                    'branch_id',
+                    'employee_id',
+                    'category_type',
+                    'designation',
+                    'teacher_status',
+                ])
+                ->whereNotNull('user_id')
+                ->whereHas('user', function ($uq) {
+                    $uq->where('is_active', true);
+                })
+                ->with([
+                    'user:id,first_name,last_name,is_active',
+                ]);
+
+            $schoolId = $this->getCurrentSchoolId($request);
+            if ($schoolId) {
+                $query->where('school_id', $schoolId);
+            }
+
+            $this->applyBranchFilter($query, $request);
+
+            if ($request->filled('branch_id')) {
+                $query->where('branch_id', (int) $request->branch_id);
+            }
+
+            $teachers = $query->get();
+
+            $options = $teachers
+                ->filter(fn (\App\Models\Teacher $t) => $t->user !== null && (int) $t->user_id > 0)
+                ->sort(function (\App\Models\Teacher $a, \App\Models\Teacher $b) {
+                    $aIsTeaching = strcasecmp((string) $a->category_type, 'Teaching') === 0 ? 0 : 1;
+                    $bIsTeaching = strcasecmp((string) $b->category_type, 'Teaching') === 0 ? 0 : 1;
+                    if ($aIsTeaching !== $bIsTeaching) {
+                        return $aIsTeaching <=> $bIsTeaching;
+                    }
+                    $aName = trim(($a->user->first_name ?? '').' '.($a->user->last_name ?? ''));
+                    $bName = trim(($b->user->first_name ?? '').' '.($b->user->last_name ?? ''));
+
+                    return strcasecmp($aName, $bName);
+                })
+                ->values()
+                ->map(function (\App\Models\Teacher $t) {
+                    $firstName = trim((string) ($t->user->first_name ?? ''));
+                    $lastName = trim((string) ($t->user->last_name ?? ''));
+                    $fullName = trim($firstName.' '.$lastName) ?: 'Teacher';
+                    $empSuffix = $t->employee_id ? " ({$t->employee_id})" : '';
+
+                    return [
+                        'id' => (int) $t->user_id,
+                        'user_id' => (int) $t->user_id,
+                        'teacher_record_id' => (int) $t->id,
+                        'first_name' => $firstName,
+                        'last_name' => $lastName,
+                        'full_name' => $fullName,
+                        'employee_id' => $t->employee_id,
+                        'category_type' => $t->category_type,
+                        'designation' => $t->designation,
+                        'label' => $fullName.$empSuffix,
+                    ];
+                })
+                ->all();
+
+            return response()->json([
+                'success' => true,
+                'data' => $options,
+                'message' => 'Timetable teacher options retrieved successfully',
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Get timetable teacher options error', ['error' => $e->getMessage()]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch teacher options',
             ], 500);
         }
     }
@@ -303,7 +394,6 @@ class TimetableController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create timetable',
-
             ], 500);
         }
     }
@@ -668,6 +758,7 @@ class TimetableController extends Controller
             // Allow explicit clearing of optional fields when key is present in request
             if ($request->exists('teacher_id') && ($request->input('teacher_id') === '' || $request->input('teacher_id') === null)) {
                 $mergedInput['teacher_id'] = null;
+                $mergedInput['teacher_record_id'] = null;
             }
             if ($request->exists('room_number') && ($request->input('room_number') === '' || $request->input('room_number') === null)) {
                 $mergedInput['room_number'] = null;
@@ -778,7 +869,6 @@ class TimetableController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update timetable',
-
             ], 500);
         }
     }
@@ -810,7 +900,6 @@ class TimetableController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to delete timetable',
-
             ], 500);
         }
     }
@@ -923,7 +1012,6 @@ class TimetableController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch class timetable',
-
             ], 500);
         }
     }
@@ -1110,6 +1198,10 @@ class TimetableController extends Controller
             $activeDays = self::DEFAULT_ACTIVE_DAYS;
         }
 
+        $branchId = isset($input['branch_id']) && is_numeric($input['branch_id'])
+            ? (int) $input['branch_id']
+            : null;
+
         return array_merge($input, [
             'schedule_mode' => $scheduleMode,
             'is_default_weekly' => $isDefaultWeekly,
@@ -1120,7 +1212,7 @@ class TimetableController extends Controller
             'start_time' => $startTime,
             'end_time' => $endTime,
             'duration_minutes' => $durationMinutes,
-            'teacher_id' => $this->resolveTeacherUserId($input['teacher_id'] ?? null),
+            'teacher_id' => $this->resolveTeacherFromInput($input, $branchId),
             'room_number' => isset($input['room_number']) && trim((string) $input['room_number']) !== ''
                 ? trim((string) $input['room_number'])
                 : null,
@@ -1128,9 +1220,38 @@ class TimetableController extends Controller
     }
 
     /**
-     * Resolve teacher selection to a valid users.id (accepts users.id or teachers.id; returns null if blank/unmatched).
+     * Resolve teacher payload fields (`teacher_record_id` and/or `teacher_id`) to `users.id` (`timetables.teacher_id`).
      */
-    private function resolveTeacherUserId(mixed $rawTeacherId): ?int
+    private function resolveTeacherFromInput(array $input, ?int $branchId = null): ?int
+    {
+        $rawTeacherId = $input['teacher_id'] ?? null;
+        $rawRecordId = $input['teacher_record_id'] ?? null;
+
+        if (($rawTeacherId === null || $rawTeacherId === '') && ($rawRecordId === null || $rawRecordId === '')) {
+            return null;
+        }
+
+        // If explicit `teachers.id` (`teacher_record_id`) was sent, resolve its `user_id` unambiguously
+        if ($rawRecordId !== null && $rawRecordId !== '' && is_numeric($rawRecordId) && (int) $rawRecordId > 0) {
+            $recordId = (int) $rawRecordId;
+            $fromRecord = ($branchId
+                ? \App\Models\Teacher::withTrashed()->where('branch_id', $branchId)->where('id', $recordId)->value('user_id')
+                : null)
+                ?? \App\Models\Teacher::withTrashed()->where('id', $recordId)->value('user_id');
+
+            if ($fromRecord) {
+                return (int) $fromRecord;
+            }
+        }
+
+        return $this->resolveTeacherUserId($rawTeacherId, $branchId);
+    }
+
+    /**
+     * Resolve teacher selection to a valid employee `users.id`
+     * (prefers `teachers.user_id`, then `teachers.id -> user_id`, never matching SuperAdmin/Student/Parent `users.id` by accident).
+     */
+    private function resolveTeacherUserId(mixed $rawTeacherId, ?int $branchId = null): ?int
     {
         if ($rawTeacherId === null || $rawTeacherId === '' || ! is_numeric($rawTeacherId)) {
             return null;
@@ -1139,12 +1260,30 @@ class TimetableController extends Controller
         if ($id <= 0) {
             return null;
         }
-        if (\App\Models\User::where('id', $id)->exists()) {
+
+        // 1. Check if `$id` is already an employee/teacher's `user_id`
+        $matchesTeacherUserInBranch = $branchId
+            ? \App\Models\Teacher::withTrashed()->where('branch_id', $branchId)->where('user_id', $id)->exists()
+            : false;
+        if ($matchesTeacherUserInBranch || \App\Models\Teacher::withTrashed()->where('user_id', $id)->exists()) {
             return $id;
         }
-        $teacherUserId = \App\Models\Teacher::withTrashed()->where('id', $id)->value('user_id');
 
-        return $teacherUserId ? (int) $teacherUserId : null;
+        // 2. Fallback: caller passed `teachers.id` instead of `users.id` (e.g. id=1 Suresh -> user_id=6, not SuperAdmin id=1)
+        $teacherUserId = ($branchId
+            ? \App\Models\Teacher::withTrashed()->where('branch_id', $branchId)->where('id', $id)->value('user_id')
+            : null)
+            ?? \App\Models\Teacher::withTrashed()->where('id', $id)->value('user_id');
+        if ($teacherUserId) {
+            return (int) $teacherUserId;
+        }
+
+        // 3. Final fallback: valid staff/teacher User account without a Teacher profile row
+        $isStaffUser = \App\Models\User::where('id', $id)
+            ->whereIn('role', ['Teacher', 'Staff', 'Accountant', 'BranchAdmin'])
+            ->exists();
+
+        return $isStaffUser ? $id : null;
     }
 
     private function normalizeTime(?string $time): ?string
