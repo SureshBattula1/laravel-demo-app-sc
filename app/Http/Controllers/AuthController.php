@@ -6,6 +6,7 @@ use App\Models\Student;
 use App\Models\User;
 use App\Services\SchoolAccountAccessService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
@@ -22,7 +23,13 @@ class AuthController extends Controller
     public function register(Request $request)
     {
         $actor = $request->user('sanctum');
-        $isAdminActor = $actor && in_array($actor->role, ['SuperAdmin', 'BranchAdmin'], true);
+        if (! $actor) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Registration is closed. Ask a school administrator to create your account.',
+            ], 403);
+        }
+        $isAdminActor = in_array($actor->role, ['SuperAdmin', 'BranchAdmin'], true);
         $allowedRoles = $isAdminActor
             ? 'SuperAdmin,BranchAdmin,Teacher,Student,Parent,Staff,Driver'
             : 'Student,Parent';
@@ -38,7 +45,7 @@ class AuthController extends Controller
                     'string',
                     'min:8',
                     'confirmed',
-                    'regex:/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/',
+                    'regex:/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]+$/',
                 ],
                 'role' => 'required|in:'.$allowedRoles,
                 'branch_id' => 'required|exists:branches,id',
@@ -53,6 +60,28 @@ class AuthController extends Controller
                 ], 422);
             }
 
+            $ranks = [
+                'SuperAdmin' => 1,
+                'BranchAdmin' => 2,
+                'Teacher' => 3,
+                'Staff' => 3,
+                'Driver' => 3,
+                'Parent' => 4,
+                'Student' => 4,
+            ];
+            $actorRank = $ranks[$actor->role] ?? 99;
+            $requestedRank = $ranks[(string) $request->role] ?? 99;
+            if ($requestedRank < $actorRank) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You cannot assign a role above your own level',
+                ], 403);
+            }
+
+            if (! $this->canAccessBranch($request, (int) $request->branch_id)) {
+                return $this->forbiddenResponse('You do not have access to this branch');
+            }
+
             DB::beginTransaction();
 
             $companyId = DB::table('branches')
@@ -61,7 +90,7 @@ class AuthController extends Controller
                 ->value('schools.company_id');
 
             // Sanitize inputs
-            $user = User::create([
+            $user = User::createExplicit([
                 'first_name' => strip_tags($request->first_name),
                 'last_name' => strip_tags($request->last_name),
                 'email' => filter_var($request->email, FILTER_SANITIZE_EMAIL),
@@ -95,7 +124,7 @@ class AuthController extends Controller
                 ]);
             }
 
-            $token = $user->createToken('auth_token', ['*'], now()->addDays(30))->plainTextToken;
+            $token = $user->createToken('auth_token', ['school-api'], now()->addHours(12))->plainTextToken;
 
             DB::commit();
 
@@ -110,7 +139,7 @@ class AuthController extends Controller
                 'user' => $user,
                 'access_token' => $token,
                 'token_type' => 'Bearer',
-                'expires_in' => '30 days',
+                'expires_in' => '12 hours',
             ], 201);
 
         } catch (\Exception $e) {
@@ -120,7 +149,6 @@ class AuthController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Registration failed. Please try again.',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -131,19 +159,16 @@ class AuthController extends Controller
     public function login(Request $request)
     {
         try {
-            // Rate limiting
-            $key = 'login:'.$request->ip();
+            $loginInput = $request->input('email') ?? $request->input('login');
+            $key = 'login:'.Str::lower((string) $loginInput).'|'.$request->ip();
             if (RateLimiter::tooManyAttempts($key, 5)) {
                 $seconds = RateLimiter::availableIn($key);
 
                 return response()->json([
                     'success' => false,
                     'message' => "Too many login attempts. Please try again in {$seconds} seconds.",
-                ], 429);
+                ], 429)->header('Retry-After', (string) $seconds);
             }
-
-            // Accept both 'email' and 'login' fields for compatibility
-            $loginInput = $request->input('email') ?? $request->input('login');
 
             $validator = Validator::make([
                 'login' => $loginInput,
@@ -190,13 +215,17 @@ class AuthController extends Controller
                 return $accountAccess->deniedResponse();
             }
 
+            if (Hash::needsRehash($user->password)) {
+                $user->forceFill(['password' => $request->password])->save();
+            }
+
             DB::beginTransaction();
 
             // OPTIMIZED: Update last_login without loading full model again
             DB::table('users')->where('id', $user->id)->update(['last_login' => now()]);
 
             // Create token
-            $token = $user->createToken('auth_token', ['*'], now()->addDays(30))->plainTextToken;
+            $token = $user->createToken('auth_token', ['school-api'], now()->addHours(12))->plainTextToken;
 
             DB::commit();
 
@@ -216,14 +245,16 @@ class AuthController extends Controller
 
             $this->attachStudentProfileAvatar($user);
 
-            return response()->json([
+            $response = response()->json([
                 'success' => true,
                 'message' => 'Login successful',
                 'user' => $user,
                 'access_token' => $token,
                 'token_type' => 'Bearer',
-                'expires_in' => '30 days',
+                'expires_in' => '12 hours',
             ]);
+
+            return \App\Support\SessionCookie::attach($response, $request, \App\Support\SessionCookie::SCHOOL, $token, 60 * 12);
 
         } catch (\Exception $e) {
             DB::rollBack();
@@ -232,7 +263,6 @@ class AuthController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Login failed. Please try again.',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -243,14 +273,16 @@ class AuthController extends Controller
     public function logout(Request $request)
     {
         try {
-            $request->user()->currentAccessToken()->delete();
+            $request->user()->tokens()->delete();
 
             Log::info('User logged out', ['user_id' => $request->user()->id]);
 
-            return response()->json([
+            $response = response()->json([
                 'success' => true,
                 'message' => 'Logged out successfully',
             ]);
+
+            return \App\Support\SessionCookie::clear($response, \App\Support\SessionCookie::SCHOOL);
 
         } catch (\Exception $e) {
             Log::error('Logout error', ['error' => $e->getMessage()]);
@@ -258,19 +290,23 @@ class AuthController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Logout failed',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
 
     /**
-     * Forgot password - send reset token
+     * Forgot password. Always returns the same message so the endpoint cannot be used to enumerate accounts.
      */
     public function forgotPassword(Request $request)
     {
+        $generic = [
+            'success' => true,
+            'message' => 'If the account exists, a reset link was sent.',
+        ];
+
         try {
             $validator = Validator::make($request->all(), [
-                'email' => 'required|email|exists:users,email',
+                'email' => 'required|email',
             ]);
 
             if ($validator->fails()) {
@@ -280,82 +316,32 @@ class AuthController extends Controller
                 ], 422);
             }
 
-            DB::beginTransaction();
-
-            $email = filter_var($request->email, FILTER_SANITIZE_EMAIL);
+            $email = Str::lower((string) filter_var($request->email, FILTER_SANITIZE_EMAIL));
             $user = User::where('email', $email)->first();
-            $resetToken = Str::random(60);
-
-            $user->update(['remember_token' => $resetToken]);
-
-            DB::commit();
-
-            // Verify token was saved
-            $user->refresh();
-            Log::info('Reset token saved', [
-                'user_id' => $user->id,
-                'token_length' => strlen($resetToken),
-                'token_saved' => $user->remember_token === $resetToken ? 'YES' : 'NO',
-                'token_in_db' => substr($user->remember_token, 0, 10).'...',
-            ]);
-
-            // Send password reset email
-            try {
-                \Mail::to($user->email)->send(new \App\Mail\ResetPasswordMail($user, $resetToken));
-                Log::info('Password reset email sent successfully', [
-                    'user_id' => $user->id,
-                    'email' => $user->email,
-                    'mail_driver' => config('mail.default'),
-                ]);
-            } catch (\Exception $mailError) {
-                Log::error('Failed to send password reset email', [
-                    'user_id' => $user->id,
-                    'email' => $user->email,
-                    'error' => $mailError->getMessage(),
-                    'trace' => $mailError->getTraceAsString(),
-                    'mail_config' => [
-                        'driver' => config('mail.default'),
-                        'host' => config('mail.mailers.smtp.host'),
-                        'port' => config('mail.mailers.smtp.port'),
-                        'username' => config('mail.mailers.smtp.username') ? 'SET' : 'NOT SET',
-                        'from' => config('mail.from.address'),
-                    ],
-                ]);
-
-                // Return error if in local environment so user knows
-                if (app()->environment('local')) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'Failed to send email: '.$mailError->getMessage(),
-                        'reset_token' => $resetToken, // Provide token for manual testing
-                    ], 500);
+            if ($user) {
+                $resetToken = Str::random(64);
+                Cache::put($this->passwordResetCacheKey($resetToken), $user->id, now()->addMinutes(60));
+                try {
+                    \Mail::to($user->email)->send(new \App\Mail\ResetPasswordMail($user, $resetToken));
+                } catch (\Exception $mailError) {
+                    Log::error('Failed to send password reset email', [
+                        'user_id' => $user->id,
+                        'error' => $mailError->getMessage(),
+                    ]);
                 }
-
-                // In production, don't reveal email errors but user still has token
+                Log::info('Password reset requested', ['user_id' => $user->id]);
             }
 
-            Log::info('Password reset requested', ['user_id' => $user->id]);
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Password reset link sent to your email',
-                'reset_token' => app()->environment('local') ? $resetToken : null, // Only show token in development
-            ]);
-
+            return response()->json($generic);
         } catch (\Exception $e) {
-            DB::rollBack();
             Log::error('Forgot password error', ['error' => $e->getMessage()]);
 
-            return response()->json([
-                'success' => false,
-                'message' => 'Request failed. Please try again.',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
-            ], 500);
+            return response()->json($generic);
         }
     }
 
     /**
-     * Reset password with token
+     * Reset password with a single-use token that expires after 60 minutes.
      */
     public function resetPassword(Request $request)
     {
@@ -367,7 +353,7 @@ class AuthController extends Controller
                     'string',
                     'min:8',
                     'confirmed',
-                    'regex:/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/',
+                    'regex:/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]+$/',
                 ],
             ]);
 
@@ -378,36 +364,23 @@ class AuthController extends Controller
                 ], 422);
             }
 
-            $user = User::where('remember_token', $request->token)->first();
+            $cacheKey = $this->passwordResetCacheKey((string) $request->token);
+            $userId = Cache::pull($cacheKey);
+            $user = $userId ? User::find($userId) : null;
 
             if (! $user) {
-                // Debug: Check if token exists at all
-                $tokenExists = User::whereNotNull('remember_token')->count();
-                Log::warning('Reset token not found', [
-                    'token' => $request->token,
-                    'token_length' => strlen($request->token),
-                    'users_with_tokens' => $tokenExists,
-                ]);
-
                 return response()->json([
                     'success' => false,
                     'message' => 'Invalid or expired reset token',
-                    'debug' => app()->environment('local') ? [
-                        'token_received' => $request->token,
-                        'token_length' => strlen($request->token),
-                        'users_with_reset_tokens' => $tokenExists,
-                    ] : null,
                 ], 400);
             }
 
             DB::beginTransaction();
 
-            $user->update([
+            $user->forceFill([
                 'password' => Hash::make($request->password),
                 'remember_token' => null,
-            ]);
-
-            // Revoke all existing tokens for security
+            ])->save();
             $user->tokens()->delete();
 
             DB::commit();
@@ -418,7 +391,6 @@ class AuthController extends Controller
                 'success' => true,
                 'message' => 'Password reset successfully',
             ]);
-
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Reset password error', ['error' => $e->getMessage()]);
@@ -426,9 +398,13 @@ class AuthController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Password reset failed',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
+    }
+
+    private function passwordResetCacheKey(string $token): string
+    {
+        return 'password-reset:'.hash('sha256', $token);
     }
 
     /**
@@ -464,6 +440,17 @@ class AuthController extends Controller
     {
         try {
             $user = $request->user();
+
+            $blocked = array_intersect(
+                ['role', 'is_active', 'password', 'branch_id', 'company_id', 'user_type', 'email'],
+                array_keys($request->all())
+            );
+            if ($blocked !== []) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Validation failed',
+                ], 422);
+            }
 
             $validator = Validator::make($request->all(), [
                 'first_name' => 'sometimes|string|max:255|regex:/^[a-zA-Z\s]+$/',
@@ -521,7 +508,6 @@ class AuthController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Profile update failed',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -540,7 +526,7 @@ class AuthController extends Controller
                     'min:8',
                     'confirmed',
                     'different:current_password',
-                    'regex:/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/',
+                    'regex:/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]+$/',
                 ],
             ]);
 
@@ -562,7 +548,7 @@ class AuthController extends Controller
 
             DB::beginTransaction();
 
-            $user->update(['password' => Hash::make($request->password)]);
+            $user->forceFill(['password' => Hash::make($request->password)])->save();
 
             // Revoke all other tokens for security
             $user->tokens()->where('id', '!=', $user->currentAccessToken()->id)->delete();
@@ -583,7 +569,6 @@ class AuthController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Password change failed',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }

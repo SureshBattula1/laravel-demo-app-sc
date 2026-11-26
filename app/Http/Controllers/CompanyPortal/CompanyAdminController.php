@@ -114,7 +114,7 @@ class CompanyAdminController extends Controller
 
             DB::beginTransaction();
 
-            $admin = User::create([
+            $admin = User::createExplicit([
                 'first_name' => $request->first_name,
                 'last_name' => $request->last_name,
                 'email' => $request->email,

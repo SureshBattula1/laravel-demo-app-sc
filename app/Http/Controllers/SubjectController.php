@@ -150,7 +150,7 @@ class SubjectController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch subjects',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }
@@ -226,7 +226,7 @@ class SubjectController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create subject',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }
@@ -267,7 +267,7 @@ class SubjectController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch subject',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }
@@ -360,7 +360,7 @@ class SubjectController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update subject',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }
@@ -420,7 +420,7 @@ class SubjectController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to delete subject',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }
@@ -479,7 +479,7 @@ class SubjectController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch subjects',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }

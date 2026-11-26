@@ -253,7 +253,7 @@ class GradeController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch grades',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -313,7 +313,7 @@ class GradeController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch grade',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -397,7 +397,7 @@ class GradeController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create grade',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -487,7 +487,7 @@ class GradeController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update grade',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -541,7 +541,7 @@ class GradeController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to delete grade',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -620,7 +620,7 @@ class GradeController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to export grades',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }

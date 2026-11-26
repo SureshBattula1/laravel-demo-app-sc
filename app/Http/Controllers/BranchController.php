@@ -209,7 +209,7 @@ class BranchController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch branches',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -365,6 +365,26 @@ class BranchController extends Controller
                 $branchData['logo'] = $logoPath;
             }
 
+            $actor = $request->user();
+            $schoolId = $branchData['school_id'] ?? null;
+            if ($actor && ! $actor->isSuperAdmin()) {
+                $companyId = $this->getCurrentCompanyId($request);
+                $schoolCompanyId = $schoolId
+                    ? \App\Models\School::where('id', $schoolId)->value('company_id')
+                    : null;
+                if (! $companyId || ! $schoolCompanyId || (int) $schoolCompanyId !== (int) $companyId) {
+                    DB::rollBack();
+
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'You can only create a branch in your own company',
+                    ], 403);
+                }
+            }
+            if ($branchAdminPassword && ! $actor?->hasPermission('users.create')) {
+                $branchAdminPassword = null;
+            }
+
             $branch = Branch::create($branchData);
 
             // Ensure branch default grades exist (idempotent).
@@ -380,7 +400,7 @@ class BranchController extends Controller
                 $parts = preg_split('/\s+/', trim($branch->principal_name), 2);
                 $firstName = $parts[0] ?? $branch->principal_name;
                 $lastName = $parts[1] ?? '';
-                $adminUser = User::create([
+                $adminUser = User::createExplicit([
                     'first_name' => $firstName,
                     'last_name' => $lastName,
                     'email' => $branch->principal_email,
@@ -446,7 +466,7 @@ class BranchController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create branch',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -493,7 +513,7 @@ class BranchController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch branch',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -509,6 +529,13 @@ class BranchController extends Controller
             }
 
             $branch = Branch::findOrFail($id);
+
+            if ($request->all() === []) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Validation failed',
+                ], 422);
+            }
 
             $validator = Validator::make($request->all(), [
                 // Basic Information
@@ -667,7 +694,7 @@ class BranchController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update branch',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -733,7 +760,7 @@ class BranchController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to delete branch',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -805,7 +832,7 @@ class BranchController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to restore branch',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -848,7 +875,7 @@ class BranchController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch deleted branches',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -920,7 +947,7 @@ class BranchController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Bulk delete failed',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -1001,7 +1028,7 @@ class BranchController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Bulk restore failed',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -1165,7 +1192,7 @@ class BranchController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch branches',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -1268,7 +1295,7 @@ class BranchController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to export branches',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }

@@ -78,7 +78,7 @@ class StudentService
         DB::beginTransaction();
         try {
             // Create user
-            $user = User::create([
+            $user = User::createExplicit([
                 'first_name' => $data['first_name'],
                 'last_name' => $data['last_name'],
                 'email' => $data['email'],

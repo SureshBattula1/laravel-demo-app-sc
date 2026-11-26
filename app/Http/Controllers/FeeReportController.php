@@ -33,7 +33,7 @@ class FeeReportController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error generating dues report',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }
@@ -56,7 +56,7 @@ class FeeReportController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error generating promotion dues report',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }
@@ -79,7 +79,7 @@ class FeeReportController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error generating collection report',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }
@@ -102,7 +102,7 @@ class FeeReportController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error generating overdue report',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }
@@ -125,7 +125,7 @@ class FeeReportController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error generating student statement',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }
@@ -148,7 +148,7 @@ class FeeReportController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error generating aging analysis',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }

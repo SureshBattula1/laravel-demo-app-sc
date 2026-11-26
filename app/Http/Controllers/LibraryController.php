@@ -724,7 +724,7 @@ class LibraryController extends Controller
         return response()->json([
             'success' => false,
             'message' => $message,
-            'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
         ], 500);
     }
 }

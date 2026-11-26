@@ -91,7 +91,7 @@ class EventController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch events',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -160,7 +160,7 @@ class EventController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create event',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -267,7 +267,7 @@ class EventController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update event',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -300,7 +300,7 @@ class EventController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to delete event',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -329,7 +329,7 @@ class EventController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch upcoming events',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -391,7 +391,7 @@ class EventController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch events',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -420,7 +420,7 @@ class EventController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch holidays',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }

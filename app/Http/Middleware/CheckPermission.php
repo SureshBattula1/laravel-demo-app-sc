@@ -23,21 +23,12 @@ class CheckPermission
             ], 401);
         }
 
-        $rawBranchId = $request->input('branch_id')
-            ?? $request->route('branch_id')
-            ?? $request->query('branch_id');
-        $branchId = ($rawBranchId !== null && $rawBranchId !== '')
-            ? (int) $rawBranchId
-            : null;
-        if ($branchId === 0) {
-            $branchId = null;
-        }
-
-        if (! $request->user()->hasPermission($permission, $branchId)) {
+        // Branch scope comes from the record in the controller. A client-supplied
+        // branch_id must not satisfy this check for a different record.
+        if (! $request->user()->hasPermission($permission)) {
             return response()->json([
                 'success' => false,
                 'message' => 'You do not have permission to perform this action',
-                'required_permission' => $permission,
             ], 403);
         }
 

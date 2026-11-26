@@ -3,6 +3,10 @@
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Auth\AuthenticationException;
+use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
+use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -28,6 +32,13 @@ return Application::configure(basePath: dirname(__DIR__))
             'school.account.active' => \App\Http\Middleware\EnsureSchoolAccountActive::class,
         ]);
 
+        $trustedProxies = env('TRUSTED_PROXIES');
+        if (is_string($trustedProxies) && $trustedProxies !== '') {
+            $middleware->trustProxies(at: array_map('trim', explode(',', $trustedProxies)));
+        }
+
+        $middleware->append(\App\Http\Middleware\SecurityHeaders::class);
+
         // Enable CORS for API routes; attach academic year context for scoping.
         // EncodeHashids is prepended (outermost) so it transforms the final JSON
         // response; DecodeHashids is appended (innermost) so it rewrites incoming
@@ -35,6 +46,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->api(
             prepend: [
                 \Illuminate\Http\Middleware\HandleCors::class,
+                \App\Http\Middleware\AttachSessionCookie::class,
                 \App\Http\Middleware\EncodeHashids::class,
             ],
             append: [
@@ -52,5 +64,21 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        //
+        $exceptions->shouldRenderJsonWhen(function (Request $request) {
+            return $request->is('api/*') || $request->expectsJson();
+        });
+
+        $exceptions->render(function (Throwable $e, Request $request) {
+            if (! $request->is('api/*')) {
+                return null;
+            }
+            if ($e instanceof ValidationException || $e instanceof AuthenticationException || $e instanceof HttpExceptionInterface) {
+                return null;
+            }
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Server error occurred',
+            ], 500);
+        });
     })->create();

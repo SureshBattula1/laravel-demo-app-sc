@@ -114,7 +114,7 @@ class CommunicationController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch notifications',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -153,7 +153,7 @@ class CommunicationController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to load notification',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -174,7 +174,7 @@ class CommunicationController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to load unread count',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -563,7 +563,7 @@ class CommunicationController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create notification',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -612,7 +612,7 @@ class CommunicationController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to mark notification as read',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -654,7 +654,7 @@ class CommunicationController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to mark notifications as read',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -725,7 +725,7 @@ class CommunicationController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch announcements',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -755,6 +755,13 @@ class CommunicationController extends Controller
                 ], 422);
             }
 
+            if ($request->filled('branch_id') && ! $this->canAccessBranch($request, (int) $request->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You do not have access to the selected branch',
+                ], 403);
+            }
+
             $announcement = Announcement::create([
                 'branch_id' => $request->branch_id,
                 'title' => strip_tags($request->title),
@@ -782,7 +789,7 @@ class CommunicationController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create announcement',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -815,6 +822,13 @@ class CommunicationController extends Controller
     {
         try {
             $announcement = Announcement::findOrFail($id);
+
+            if ($announcement->branch_id && ! $this->canAccessBranch($request, (int) $announcement->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You do not have access to the selected branch',
+                ], 403);
+            }
 
             $validator = Validator::make($request->all(), [
                 'title' => 'sometimes|required|string|max:255',
@@ -854,7 +868,7 @@ class CommunicationController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update announcement',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -862,10 +876,16 @@ class CommunicationController extends Controller
     /**
      * Delete announcement
      */
-    public function deleteAnnouncement($id)
+    public function deleteAnnouncement(Request $request, $id)
     {
         try {
             $announcement = Announcement::findOrFail($id);
+            if ($announcement->branch_id && ! $this->canAccessBranch($request, (int) $announcement->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You do not have access to the selected branch',
+                ], 403);
+            }
             $announcement->delete();
 
             return response()->json([
@@ -879,7 +899,7 @@ class CommunicationController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to delete announcement',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -951,7 +971,7 @@ class CommunicationController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch circulars',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -980,6 +1000,13 @@ class CommunicationController extends Controller
                     'success' => false,
                     'errors' => $validator->errors(),
                 ], 422);
+            }
+
+            if ($request->filled('branch_id') && ! $this->canAccessBranch($request, (int) $request->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You do not have access to the selected branch',
+                ], 403);
             }
 
             // Generate circular number
@@ -1022,7 +1049,7 @@ class CommunicationController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create circular',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -1034,6 +1061,12 @@ class CommunicationController extends Controller
     {
         try {
             $circular = Circular::with(['branch', 'createdBy', 'updatedBy'])->findOrFail($id);
+            if ($circular->branch_id && ! $this->canAccessBranch(request(), (int) $circular->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You do not have access to the selected branch',
+                ], 403);
+            }
 
             return response()->json([
                 'success' => true,
@@ -1055,6 +1088,13 @@ class CommunicationController extends Controller
     {
         try {
             $circular = Circular::findOrFail($id);
+
+            if ($circular->branch_id && ! $this->canAccessBranch($request, (int) $circular->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You do not have access to the selected branch',
+                ], 403);
+            }
 
             $validator = Validator::make($request->all(), [
                 'title' => 'sometimes|required|string|max:255',
@@ -1095,7 +1135,7 @@ class CommunicationController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update circular',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -1103,10 +1143,16 @@ class CommunicationController extends Controller
     /**
      * Delete circular
      */
-    public function deleteCircular($id)
+    public function deleteCircular(Request $request, $id)
     {
         try {
             $circular = Circular::findOrFail($id);
+            if ($circular->branch_id && ! $this->canAccessBranch($request, (int) $circular->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You do not have access to the selected branch',
+                ], 403);
+            }
             $circular->delete();
 
             return response()->json([
@@ -1120,7 +1166,7 @@ class CommunicationController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to delete circular',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -1131,8 +1177,22 @@ class CommunicationController extends Controller
     public function acknowledgeCircular(Request $request, $id)
     {
         try {
-            $circular = Circular::findOrFail($id);
+            $circular = Circular::find($id);
+            if (! $circular) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Circular not found',
+                ], 404);
+            }
+            if ($circular->branch_id && ! $this->canAccessBranch($request, (int) $circular->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You do not have access to the selected branch',
+                ], 403);
+            }
+
             $user = $request->user();
+            $remarks = $request->filled('remarks') ? mb_substr(strip_tags((string) $request->remarks), 0, 500) : null;
 
             DB::table('circular_acknowledgments')->updateOrInsert(
                 [
@@ -1141,7 +1201,7 @@ class CommunicationController extends Controller
                 ],
                 [
                     'acknowledged_at' => now(),
-                    'remarks' => $request->remarks,
+                    'remarks' => $remarks,
                     'created_at' => now(),
                     'updated_at' => now(),
                 ]
@@ -1155,11 +1215,12 @@ class CommunicationController extends Controller
         } catch (\Exception $e) {
             Log::error('Acknowledge circular error', ['error' => $e->getMessage()]);
 
+            $status = $e instanceof \Illuminate\Database\Eloquent\ModelNotFoundException ? 404 : 500;
+
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to acknowledge circular',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
-            ], 500);
+                'message' => $status === 404 ? 'Circular not found' : 'Failed to acknowledge circular',
+            ], $status);
         }
     }
 }

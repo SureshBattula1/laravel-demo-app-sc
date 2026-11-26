@@ -64,7 +64,7 @@ class ClassSectionController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch classes',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }

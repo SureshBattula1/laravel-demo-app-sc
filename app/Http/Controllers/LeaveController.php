@@ -234,7 +234,7 @@ class LeaveController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error fetching leaves',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -384,7 +384,7 @@ class LeaveController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error creating leave',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -509,7 +509,7 @@ class LeaveController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error fetching leave record',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -608,7 +608,7 @@ class LeaveController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error updating leave',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -652,7 +652,7 @@ class LeaveController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error deleting leave',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -726,7 +726,7 @@ class LeaveController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error fetching student leaves',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -801,7 +801,7 @@ class LeaveController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error fetching teacher leaves',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }

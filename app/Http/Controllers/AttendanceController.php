@@ -196,7 +196,7 @@ class AttendanceController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error fetching attendance',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -234,6 +234,20 @@ class AttendanceController extends Controller
                         'success' => false,
                         'errors' => $validator->errors(),
                     ], 422);
+                }
+
+                if ($request->user()?->role === 'Student' || ! $request->user()?->hasPermission('student_attendance.mark')) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'You do not have permission to perform this action',
+                    ], 403);
+                }
+
+                if (! $this->canAccessBranch($request, (int) $request->branch_id)) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'You do not have access to the selected branch',
+                    ], 403);
                 }
 
                 // Check if already marked
@@ -283,6 +297,20 @@ class AttendanceController extends Controller
                     ], 422);
                 }
 
+                if ($request->user()?->role === 'Student' || ! $request->user()?->hasPermission('teacher_attendance.mark')) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'You do not have permission to perform this action',
+                    ], 403);
+                }
+
+                if (! $this->canAccessBranch($request, (int) $request->branch_id)) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'You do not have access to the selected branch',
+                    ], 403);
+                }
+
                 $existing = DB::table('teacher_attendance')
                     ->where('teacher_id', $request->teacher_id)
                     ->whereDate('date', $request->date)
@@ -325,7 +353,6 @@ class AttendanceController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error marking attendance',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -352,6 +379,21 @@ class AttendanceController extends Controller
                     'success' => false,
                     'errors' => $validator->errors(),
                 ], 422);
+            }
+
+            $markPermission = $request->type === 'teacher' ? 'teacher_attendance.mark' : 'student_attendance.mark';
+            if ($request->user()?->role === 'Student' || ! $request->user()?->hasPermission($markPermission)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You do not have permission to perform this action',
+                ], 403);
+            }
+
+            if (! $this->canAccessBranch($request, (int) $request->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You do not have access to the selected branch',
+                ], 403);
             }
 
             $type = $request->type;
@@ -451,7 +493,7 @@ class AttendanceController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error marking bulk attendance',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -539,7 +581,7 @@ class AttendanceController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error fetching teacher attendance',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -643,7 +685,7 @@ class AttendanceController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error fetching student attendance',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -699,7 +741,7 @@ class AttendanceController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error fetching student attendance overview',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -1174,7 +1216,7 @@ class AttendanceController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error fetching class attendance',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -1273,7 +1315,7 @@ class AttendanceController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error generating report',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -1338,7 +1380,7 @@ class AttendanceController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error generating report',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -1386,7 +1428,7 @@ class AttendanceController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error fetching attendance record',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -1484,7 +1526,7 @@ class AttendanceController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error updating attendance',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -1538,7 +1580,7 @@ class AttendanceController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to export attendance',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -1730,7 +1772,7 @@ class AttendanceController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error fetching attendance dashboard',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }

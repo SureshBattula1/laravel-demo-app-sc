@@ -99,7 +99,7 @@ class FeeDuesController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error fetching dues',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -132,7 +132,7 @@ class FeeDuesController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error fetching student dues',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -165,7 +165,7 @@ class FeeDuesController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error fetching dues by fee type',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -206,7 +206,7 @@ class FeeDuesController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error applying payment to dues',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -272,7 +272,7 @@ class FeeDuesController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error waiving due',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -331,7 +331,7 @@ class FeeDuesController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error reverting fee due',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -394,7 +394,7 @@ class FeeDuesController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error updating fee due',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -420,7 +420,7 @@ class FeeDuesController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error exporting dues report',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -444,7 +444,7 @@ class FeeDuesController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error getting aging analysis',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -468,7 +468,7 @@ class FeeDuesController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error getting overdue fees',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }

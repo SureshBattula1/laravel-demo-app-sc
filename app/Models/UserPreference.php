@@ -11,7 +11,6 @@ class UserPreference extends Model
     use HasFactory;
 
     protected $fillable = [
-        'user_id',
         'theme',
         'dark_mode',
         'language',
@@ -78,12 +77,18 @@ class UserPreference extends Model
     /**
      * Create default preferences for a user
      */
+    public static function forUser(int $userId): self
+    {
+        return self::where('user_id', $userId)->first() ?? self::createDefaultForUser($userId);
+    }
+
     public static function createDefaultForUser(int $userId): self
     {
-        return self::create(array_merge(
-            self::getDefaults(),
-            ['user_id' => $userId]
-        ));
+        $preference = new self(self::getDefaults());
+        $preference->user_id = $userId;
+        $preference->save();
+
+        return $preference;
     }
 
     /**

@@ -96,7 +96,7 @@ class ClassController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch classes',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -125,6 +125,13 @@ class ClassController extends Controller
                     'success' => false,
                     'errors' => $validator->errors(),
                 ], 422);
+            }
+
+            if (! $this->canAccessBranch($request, (int) $request->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You do not have access to the selected branch',
+                ], 403);
             }
 
             DB::beginTransaction();
@@ -186,7 +193,7 @@ class ClassController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create class',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -219,7 +226,7 @@ class ClassController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch class',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -231,6 +238,13 @@ class ClassController extends Controller
     {
         try {
             $class = ClassModel::findOrFail($id);
+
+            if (! $this->canAccessBranch($request, (int) $class->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You do not have access to the selected branch',
+                ], 403);
+            }
 
             $validator = Validator::make($request->all(), [
                 'grade' => 'sometimes|string|max:20',
@@ -313,12 +327,19 @@ class ClassController extends Controller
     /**
      * Delete class
      */
-    public function destroy($id)
+    public function destroy(Request $request, $id)
     {
         try {
             DB::beginTransaction();
 
             $class = ClassModel::findOrFail($id);
+
+            if (! $this->canAccessBranch($request, (int) $class->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You do not have access to the selected branch',
+                ], 403);
+            }
 
             // Check if class has students
             if ($class->current_strength > 0) {
@@ -530,7 +551,7 @@ class ClassController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch grades',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -596,7 +617,7 @@ class ClassController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch grade statistics',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -683,7 +704,7 @@ class ClassController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch sections',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }

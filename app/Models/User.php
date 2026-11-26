@@ -21,15 +21,11 @@ class User extends Authenticatable
         'email',
         'phone',
         'mobile',
-        'password',
-        'remember_token',
-        'role',
         'user_type',
         'user_type_id',
         'branch_id',
         'company_id',
         'avatar',
-        'is_active',
         'last_login',
     ];
 
@@ -37,6 +33,45 @@ class User extends Authenticatable
         'password',
         'remember_token',
     ];
+
+    /**
+     * Create a user with credentials set explicitly. Password, role, and
+     * is_active are not mass-assignable.
+     */
+    public static function createExplicit(array $attributes): self
+    {
+        $user = new static();
+        $user->forceFill($attributes);
+        $user->save();
+
+        return $user;
+    }
+
+    /**
+     * Seeders pass credentials by name. Request payloads must not.
+     */
+    public static function updateOrCreate(array $attributes, array $values = [])
+    {
+        $user = static::query()->where($attributes)->first();
+        if ($user) {
+            $user->forceFill($values);
+            $user->save();
+
+            return $user;
+        }
+
+        return static::createExplicit(array_merge($attributes, $values));
+    }
+
+    public static function firstOrCreate(array $attributes, array $values = [])
+    {
+        $existing = static::query()->where($attributes)->first();
+        if ($existing) {
+            return $existing;
+        }
+
+        return static::createExplicit(array_merge($attributes, $values));
+    }
 
     protected function casts(): array
     {

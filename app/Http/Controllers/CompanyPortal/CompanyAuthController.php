@@ -78,7 +78,7 @@ class CompanyAuthController extends Controller
             DB::table('users')->where('id', $user->id)->update(['last_login' => now()]);
             
             // Create token with company portal scope
-            $token = $user->createToken('company_portal_token', ['company-portal'], now()->addDays(30))->plainTextToken;
+            $token = $user->createToken('company_portal_token', ['company-portal'], now()->addHours(12))->plainTextToken;
 
             DB::commit();
 
@@ -89,15 +89,17 @@ class CompanyAuthController extends Controller
 
             Log::info('Company admin logged in successfully', ['user_id' => $user->id, 'company_id' => $user->company_id]);
 
-            return response()->json([
+            $response = response()->json([
                 'success' => true,
                 'message' => 'Login successful',
                 'user' => $user,
                 'company' => $user->company,
                 'access_token' => $token,
                 'token_type' => 'Bearer',
-                'expires_in' => '30 days'
+                'expires_in' => '12 hours'
             ]);
+
+            return \App\Support\SessionCookie::attach($response, $request, \App\Support\SessionCookie::COMPANY, $token, 60 * 12);
 
         } catch (\Exception $e) {
             DB::rollBack();
@@ -105,8 +107,7 @@ class CompanyAuthController extends Controller
             
             return response()->json([
                 'success' => false,
-                'message' => 'Login failed. Please try again.',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+                'message' => 'Login failed. Please try again.'
             ], 500);
         }
     }
@@ -144,10 +145,12 @@ class CompanyAuthController extends Controller
 
             Log::info('Company admin logged out', ['user_id' => $request->user()->id]);
 
-            return response()->json([
+            $response = response()->json([
                 'success' => true,
                 'message' => 'Logged out successfully'
             ]);
+
+            return \App\Support\SessionCookie::clear($response, \App\Support\SessionCookie::COMPANY);
         } catch (\Exception $e) {
             Log::error('Company portal logout error', ['error' => $e->getMessage()]);
             

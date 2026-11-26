@@ -34,7 +34,7 @@ class PermissionController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch roles',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }
@@ -60,7 +60,7 @@ class PermissionController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch modules',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }
@@ -99,7 +99,7 @@ class PermissionController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch permissions',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }
@@ -150,7 +150,7 @@ class PermissionController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch user permissions',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }
@@ -205,7 +205,7 @@ class PermissionController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update permissions',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }
@@ -258,7 +258,7 @@ class PermissionController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to grant permission',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }
@@ -311,7 +311,7 @@ class PermissionController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to revoke permission',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }
@@ -356,7 +356,7 @@ class PermissionController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create role',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }
@@ -403,7 +403,7 @@ class PermissionController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create module',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }

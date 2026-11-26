@@ -90,7 +90,7 @@ class GlobalUploadService
                     'file' => $file->getClientOriginalName(),
                 ]);
                 $results[] = [
-                    'error' => $e->getMessage(),
+                    'error' => 'Upload failed',
                     'file_name' => $file->getClientOriginalName(),
                 ];
             }
@@ -117,6 +117,25 @@ class GlobalUploadService
 
         // Remove any double slashes
         $path = preg_replace('#/+#', '/', $path);
+
+        $allowedPrefixes = [
+            'uploads/profiles/',
+            'uploads/branches/',
+            'uploads/certificates/',
+            'uploads/documents/',
+            'uploads/resumes/',
+            'uploads/attachments/',
+        ];
+        $allowed = false;
+        foreach ($allowedPrefixes as $prefix) {
+            if (str_starts_with($path, $prefix)) {
+                $allowed = true;
+                break;
+            }
+        }
+        if (! $allowed) {
+            $path = 'uploads/attachments/'.basename($path);
+        }
 
         return $path;
     }

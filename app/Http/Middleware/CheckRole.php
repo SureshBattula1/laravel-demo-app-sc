@@ -23,7 +23,7 @@ class CheckRole
         if (!in_array($request->user()->role, $roles)) {
             return response()->json([
                 'success' => false,
-                'message' => 'Unauthorized. Required role: ' . implode(' or ', $roles)
+                'message' => 'Unauthorized'
             ], 403);
         }
 

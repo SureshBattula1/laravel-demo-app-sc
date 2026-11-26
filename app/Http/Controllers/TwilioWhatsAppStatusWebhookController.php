@@ -11,6 +11,17 @@ class TwilioWhatsAppStatusWebhookController extends Controller
 {
     public function __invoke(Request $request): JsonResponse
     {
+        $token = (string) config('twilio.token');
+        $signature = (string) $request->header('X-Twilio-Signature', '');
+        if ($token === '' || $signature === '') {
+            return response()->json(['success' => false, 'message' => 'Invalid signature'], 403);
+        }
+
+        $validator = new \Twilio\Security\RequestValidator($token);
+        if (! $validator->validate($signature, $request->fullUrl(), $request->post())) {
+            return response()->json(['success' => false, 'message' => 'Invalid signature'], 403);
+        }
+
         $sid = trim((string) $request->input('MessageSid', ''));
         $rawStatus = strtolower(trim((string) $request->input('MessageStatus', '')));
         $errorCode = trim((string) $request->input('ErrorCode', ''));

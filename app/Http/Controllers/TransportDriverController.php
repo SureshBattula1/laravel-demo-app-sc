@@ -80,7 +80,7 @@ class TransportDriverController extends Controller
                 $lastName = $parts[1] ?? 'Staff';
                 $password = $request->filled('password') ? $request->password : 'Driver@123';
 
-                $user = User::create([
+                $user = User::createExplicit([
                     'first_name' => $firstName,
                     'last_name' => $lastName,
                     'email' => $email,
@@ -194,7 +194,7 @@ class TransportDriverController extends Controller
                 $password = $request->filled('password') ? $request->password : 'Driver@123';
                 $schoolId = $driver->school_id ?? $this->getCurrentSchoolId($request);
 
-                $user = User::create([
+                $user = User::createExplicit([
                     'first_name' => $firstName,
                     'last_name' => $lastName,
                     'email' => $email,

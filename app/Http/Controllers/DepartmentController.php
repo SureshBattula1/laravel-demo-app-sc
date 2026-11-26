@@ -114,7 +114,7 @@ class DepartmentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch departments',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }
@@ -142,6 +142,13 @@ class DepartmentController extends Controller
                     'success' => false,
                     'errors' => $validator->errors()
                 ], 422);
+            }
+
+            if (! $this->canAccessBranch($request, (int) $request->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You do not have access to the selected branch',
+                ], 403);
             }
 
             DB::beginTransaction();
@@ -182,7 +189,7 @@ class DepartmentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create department',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }
@@ -227,7 +234,7 @@ class DepartmentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch department',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }
@@ -316,7 +323,7 @@ class DepartmentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update department',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }
@@ -379,7 +386,7 @@ class DepartmentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to delete department',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }
@@ -438,7 +445,7 @@ class DepartmentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update department status',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }

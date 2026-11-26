@@ -36,7 +36,7 @@ class AcademicYearController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch current academic year',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -89,7 +89,7 @@ class AcademicYearController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch academic years',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -136,6 +136,15 @@ class AcademicYearController extends Controller
                 'success' => false,
                 'message' => 'Company context is required to create an academic year.',
             ], 422);
+        }
+
+        if ($request->filled('company_id')
+            && (int) $request->company_id !== (int) $companyId
+            && ! $request->user()?->isSuperAdmin()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You can only manage academic years for your own company',
+            ], 403);
         }
 
         $validated['company_id'] = $companyId;

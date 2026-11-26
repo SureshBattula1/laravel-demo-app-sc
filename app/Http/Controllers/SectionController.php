@@ -187,7 +187,7 @@ class SectionController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch sections',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }
@@ -225,6 +225,13 @@ class SectionController extends Controller
                     'success' => false,
                     'errors' => $validator->errors()
                 ], 422);
+            }
+
+            if (! $this->canAccessBranch($request, (int) $request->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You do not have access to the selected branch',
+                ], 403);
             }
 
             DB::beginTransaction();
@@ -274,7 +281,7 @@ class SectionController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create section',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }
@@ -320,7 +327,7 @@ class SectionController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch section',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }
@@ -332,6 +339,14 @@ class SectionController extends Controller
     {
         try {
             $section = Section::findOrFail($id);
+
+            if (! $this->canAccessBranch($request, (int) $section->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You do not have access to the selected branch',
+                ], 403);
+            }
+
             $schoolId = $section->school_id;
 
             $validator = Validator::make($request->all(), [
@@ -407,12 +422,19 @@ class SectionController extends Controller
     /**
      * Delete section
      */
-    public function destroy($id)
+    public function destroy(Request $request, $id)
     {
         try {
             DB::beginTransaction();
 
             $section = Section::findOrFail($id);
+
+            if (! $this->canAccessBranch($request, (int) $section->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You do not have access to the selected branch',
+                ], 403);
+            }
             
             // Check if section has students
             if ($section->current_strength > 0) {
@@ -537,7 +559,7 @@ class SectionController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to export sections',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }

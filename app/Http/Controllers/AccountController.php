@@ -171,7 +171,7 @@ class AccountController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to load dashboard',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -245,7 +245,7 @@ class AccountController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch categories',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -291,7 +291,7 @@ class AccountController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Category not found',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 404);
         }
     }
@@ -401,7 +401,7 @@ class AccountController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create category',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -499,7 +499,7 @@ class AccountController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update category',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -542,7 +542,7 @@ class AccountController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to delete category',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -579,7 +579,7 @@ class AccountController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to toggle status',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }

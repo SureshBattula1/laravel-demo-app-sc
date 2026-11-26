@@ -118,7 +118,7 @@ class ImportController extends Controller
             ]);
 
             $validator = Validator::make($request->all(), [
-                'file' => 'required|file|max:10240', // 10MB max - Accept any file type for now
+                'file' => 'required|file|mimes:xlsx,xls,csv|max:10240',
                 'branch_id' => 'required|exists:branches,id',
                 'grade' => $entity === 'student' ? 'required|string' : 'nullable|string',
                 'section' => 'nullable|string',
@@ -269,7 +269,7 @@ class ImportController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Upload failed',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -414,7 +414,7 @@ class ImportController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Validation failed',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -682,6 +682,13 @@ class ImportController extends Controller
             }
 
             $role = \App\Models\Role::findOrFail($request->role_id);
+            $importHistory = ImportHistory::where('batch_id', $batchId)->first();
+            if (! $importHistory || ! $this->canAccessBranch($request, (int) $importHistory->branch_id)) {
+                return $this->forbiddenResponse('You do not have access to this import batch');
+            }
+            if (! $this->canAssignRole($request, $role)) {
+                return $this->forbiddenResponse('You cannot assign this role');
+            }
             $roleName = $request->input('role_name', $role->name);
 
             if ($entity === 'teacher') {
@@ -696,8 +703,6 @@ class ImportController extends Controller
                 ]);
             }
 
-            // Update batch context
-            $importHistory = ImportHistory::where('batch_id', $batchId)->first();
             if ($importHistory) {
                 $context = $importHistory->import_context ?? [];
                 $context['default_role_id'] = $role->id;
@@ -719,7 +724,7 @@ class ImportController extends Controller
 
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to assign role to batch: '.$e->getMessage(),
+                'message' => 'Failed to assign role to batch',
             ], 500);
         }
     }
@@ -731,6 +736,10 @@ class ImportController extends Controller
     {
         try {
             $importHistory = ImportHistory::where('batch_id', $batchId)->firstOrFail();
+
+            if (! $this->canAccessBranch($request, (int) $importHistory->branch_id)) {
+                return $this->forbiddenResponse('You do not have access to this import batch');
+            }
 
             $validator = Validator::make($request->all(), [
                 'skip_invalid' => 'boolean',
@@ -747,6 +756,12 @@ class ImportController extends Controller
 
             $skipInvalid = $request->get('skip_invalid', true);
             $roleId = $request->get('role_id') ?? $request->get('default_role_id');
+            if ($roleId) {
+                $role = \App\Models\Role::find($roleId);
+                if (! $role || ! $this->canAssignRole($request, $role)) {
+                    return $this->forbiddenResponse('You cannot assign this role');
+                }
+            }
 
             // Update status to importing
             $importHistory->update([
@@ -793,7 +808,7 @@ class ImportController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Import failed',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }

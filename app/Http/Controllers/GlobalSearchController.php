@@ -70,7 +70,7 @@ class GlobalSearchController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to perform search',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -125,7 +125,7 @@ class GlobalSearchController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to export search results',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }

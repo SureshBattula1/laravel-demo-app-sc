@@ -87,7 +87,7 @@ class TimetableController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch timetables',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -199,7 +199,7 @@ class TimetableController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create timetable',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -335,7 +335,7 @@ class TimetableController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update timetable',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -368,7 +368,7 @@ class TimetableController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to delete timetable',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -416,7 +416,7 @@ class TimetableController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch class timetable',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }

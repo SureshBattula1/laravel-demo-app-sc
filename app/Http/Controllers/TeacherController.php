@@ -204,7 +204,7 @@ class TeacherController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch teachers',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -224,6 +224,18 @@ class TeacherController extends Controller
             // 🔒 A Teacher may only ever view their OWN record (own-record isolation)
             $authUser = auth()->user();
             if ($authUser && $authUser->role === 'Teacher' && (int) $teacher->user_id !== (int) $authUser->id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Teacher not found',
+                ], 404);
+            }
+            if ($authUser && strcasecmp((string) $authUser->role, 'Student') === 0) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Teacher not found',
+                ], 404);
+            }
+            if ($teacher->branch_id && ! $this->canAccessBranch(request(), (int) $teacher->branch_id)) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Teacher not found',
@@ -280,6 +292,10 @@ class TeacherController extends Controller
                 ], 422);
             }
 
+            if (! $this->canAccessBranch($request, (int) $request->branch_id)) {
+                return $this->forbiddenResponse('You do not have access to this branch');
+            }
+
             DB::beginTransaction();
 
             // Map category_type to user role: Teaching→Teacher, Staff/Non-Teaching→Staff, Account→Accountant
@@ -298,7 +314,7 @@ class TeacherController extends Controller
             $roleSlug = $roleSlugMap[$userRole] ?? 'teacher';
 
             // Create user
-            $user = User::create([
+            $user = User::createExplicit([
                 'first_name' => strip_tags((string) $request->first_name),
                 'last_name' => strip_tags((string) $request->last_name),
                 'email' => $request->email,
@@ -349,7 +365,7 @@ class TeacherController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create teacher',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -368,13 +384,16 @@ class TeacherController extends Controller
 
             $teacher = Teacher::with(['user', 'branch', 'department'])->findOrFail($id);
 
-            // 🔒 A Teacher may only ever update their OWN record (own-record isolation)
             $authUser = $request->user();
-            if ($authUser && $authUser->role === 'Teacher' && (int) $teacher->user_id !== (int) $authUser->id) {
+            $isOwnTeacher = $authUser && (int) $teacher->user_id === (int) $authUser->id;
+            if ($authUser && $authUser->role === 'Teacher' && ! $isOwnTeacher) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Access denied',
                 ], 403);
+            }
+            if (! $isOwnTeacher && ! $this->canAccessBranch($request, (int) $teacher->branch_id)) {
+                return $this->forbiddenResponse('You do not have access to this teacher');
             }
 
             $validator = Validator::make($request->all(), [
@@ -490,7 +509,7 @@ class TeacherController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update teacher',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -1165,10 +1184,14 @@ class TeacherController extends Controller
         return $value;
     }
 
-    public function destroy($id)
+    public function destroy(Request $request, $id)
     {
         try {
             $teacher = Teacher::findOrFail($id);
+
+            if (! $this->canAccessBranch($request, (int) $teacher->branch_id)) {
+                return $this->forbiddenResponse('You do not have access to this teacher');
+            }
 
             // Soft delete the teacher (sets deleted_at timestamp)
             $teacher->delete();
@@ -1187,7 +1210,7 @@ class TeacherController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to deactivate teacher',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -1195,7 +1218,7 @@ class TeacherController extends Controller
     /**
      * Restore soft-deleted teacher (reactivate)
      */
-    public function restore($id)
+    public function restore(Request $request, $id)
     {
         try {
             // Find teacher with trashed records
@@ -1206,6 +1229,10 @@ class TeacherController extends Controller
                     'success' => false,
                     'message' => 'Teacher not found',
                 ], 404);
+            }
+
+            if (! $this->canAccessBranch($request, (int) $teacher->branch_id)) {
+                return $this->forbiddenResponse('You do not have access to this teacher');
             }
 
             if (! $teacher->trashed()) {
@@ -1233,7 +1260,7 @@ class TeacherController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to restore teacher',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -1287,6 +1314,29 @@ class TeacherController extends Controller
     public function uploadProfilePicture(Request $request, $id)
     {
         try {
+            $teacher = Teacher::find($id);
+            if (! $teacher) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Teacher not found',
+                ], 404);
+            }
+
+            $actor = $request->user();
+            $owns = $actor && (int) $teacher->user_id === (int) $actor->id;
+            if ($actor && $actor->role === 'Teacher' && ! $owns) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Access denied',
+                ], 403);
+            }
+            if (! $owns && (! $actor || ! $actor->hasPermission('teachers.edit') || ! $this->canAccessBranch($request, (int) $teacher->branch_id))) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Access denied',
+                ], 403);
+            }
+
             $validator = Validator::make($request->all(), [
                 'profile_picture' => 'required|image|mimes:jpeg,jpg,png,gif,svg,webp,bmp|max:1024',
             ]);
@@ -1298,8 +1348,6 @@ class TeacherController extends Controller
                     'errors' => $validator->errors(),
                 ], 422);
             }
-
-            $teacher = Teacher::findOrFail($id);
 
             $filePath = $this->handleFileUpload($request, $teacher, 'profile_picture', 'profile_picture');
 
@@ -1330,7 +1378,7 @@ class TeacherController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to upload profile picture',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -1409,7 +1457,7 @@ class TeacherController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to export teachers',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }

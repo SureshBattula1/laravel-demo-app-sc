@@ -28,14 +28,21 @@ class ImpersonationController extends Controller
                 ], 403);
             }
 
-            // Get user to impersonate (remote access: any company admin can impersonate any school user)
             $impersonatedUser = User::with('branch')->findOrFail($userId);
 
-            // Check if user is a company admin (cannot impersonate other company admins)
-            if ($impersonatedUser->user_type === 'CompanyAdmin') {
+            $actorCompanyId = $this->resolveCompanyId($companyAdmin);
+            $targetCompanyId = $this->resolveCompanyId($impersonatedUser);
+            if ($actorCompanyId === 0 || $actorCompanyId !== $targetCompanyId) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Cannot impersonate company admin users'
+                    'message' => 'You can only impersonate users in your own company',
+                ], 403);
+            }
+
+            if (in_array($impersonatedUser->user_type, ['CompanyAdmin', 'SupportStaff'], true) || $impersonatedUser->isSuperAdmin()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'This account cannot be impersonated',
                 ], 403);
             }
 
@@ -66,7 +73,7 @@ class ImpersonationController extends Controller
             $impersonationToken = $impersonatedUser->createToken(
                 'impersonation_token',
                 ['impersonated'],
-                now()->addHours(8) // Impersonation sessions expire in 8 hours
+                now()->addHour()
             )->plainTextToken;
 
             DB::commit();
@@ -84,16 +91,18 @@ class ImpersonationController extends Controller
                 'session_id' => $session->id
             ]);
 
-            return response()->json([
+            $response = response()->json([
                 'success' => true,
                 'message' => 'Impersonation session started',
                 'data' => [
                     'session' => $session,
                     'impersonated_user' => $impersonatedUser,
                     'impersonation_token' => $impersonationToken,
-                    'expires_at' => now()->addHours(8)->toDateTimeString()
+                    'expires_at' => now()->addHour()->toDateTimeString()
                 ]
             ]);
+
+            return \App\Support\SessionCookie::attach($response, $request, \App\Support\SessionCookie::SCHOOL, $impersonationToken, 60);
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Impersonation start error', ['error' => $e->getMessage()]);
@@ -148,10 +157,12 @@ class ImpersonationController extends Controller
                 'company_admin_id' => $companyAdmin->id
             ]);
 
-            return response()->json([
+            $response = response()->json([
                 'success' => true,
                 'message' => 'Impersonation session ended successfully'
             ]);
+
+            return \App\Support\SessionCookie::clear($response, \App\Support\SessionCookie::SCHOOL);
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Impersonation stop error', ['error' => $e->getMessage()]);
@@ -271,6 +282,24 @@ class ImpersonationController extends Controller
                 'message' => 'Failed to log action'
             ], 500);
         }
+    }
+
+    private function resolveCompanyId(User $user): int
+    {
+        if ($user->company_id) {
+            return (int) $user->company_id;
+        }
+
+        if (! $user->branch_id) {
+            return 0;
+        }
+
+        $companyId = DB::table('branches')
+            ->join('schools', 'branches.school_id', '=', 'schools.id')
+            ->where('branches.id', $user->branch_id)
+            ->value('schools.company_id');
+
+        return $companyId ? (int) $companyId : 0;
     }
 }
 

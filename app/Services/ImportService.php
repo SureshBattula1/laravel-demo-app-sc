@@ -606,7 +606,7 @@ class ImportService
                     $companyId = $companyIdBySchool[$schoolId];
 
                     // Create user account
-                    $user = User::create([
+                    $user = User::createExplicit([
                         'first_name' => $record->first_name,
                         'last_name' => $record->last_name,
                         'email' => $record->email,
@@ -880,7 +880,7 @@ class ImportService
                     $userType = ($userRole === 'Teacher') ? 'Teacher' : 'Staff';
 
                     // Create user account
-                    $user = User::create([
+                    $user = User::createExplicit([
                         'first_name' => $record->first_name,
                         'last_name' => $record->last_name,
                         'email' => $record->email,

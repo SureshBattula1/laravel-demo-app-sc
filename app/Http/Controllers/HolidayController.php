@@ -101,7 +101,7 @@ class HolidayController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch holidays',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -113,16 +113,6 @@ class HolidayController extends Controller
     {
         try {
             $user = Auth::user();
-            // Use academic_year_id from request body (form selection) or fall back to context/toolbar
-            $academicYearId = $request->filled('academic_year_id')
-                ? (int) $request->academic_year_id
-                : $this->academicYearContext->id(false);
-            $academicYearModel = $academicYearId
-                ? \App\Models\AcademicYear::query()->find($academicYearId)
-                : null;
-            $academicYearName = $academicYearModel?->name;
-
-            // Check role permissions
             if (! in_array($user->role, ['SuperAdmin', 'BranchAdmin'])) {
                 return response()->json([
                     'success' => false,
@@ -148,6 +138,15 @@ class HolidayController extends Controller
                     'errors' => $validator->errors(),
                 ], 422);
             }
+
+            // Use academic_year_id from request body (form selection) or fall back to context/toolbar
+            $academicYearId = $request->filled('academic_year_id')
+                ? (int) $request->academic_year_id
+                : $this->academicYearContext->id(false);
+            $academicYearModel = $academicYearId
+                ? \App\Models\AcademicYear::query()->find($academicYearId)
+                : null;
+            $academicYearName = $academicYearModel?->name;
 
             DB::beginTransaction();
 
@@ -196,7 +195,6 @@ class HolidayController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create holiday',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
             ], 500);
         }
     }
@@ -208,6 +206,12 @@ class HolidayController extends Controller
     {
         try {
             $holiday = Holiday::with(['branch', 'createdBy'])->findOrFail($id);
+            if ($holiday->branch_id && ! $this->canAccessBranch(request(), (int) $holiday->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Holiday not found',
+                ], 404);
+            }
             $holiday->append('duration');
 
             return response()->json([
@@ -530,7 +534,7 @@ class HolidayController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to export holidays',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }

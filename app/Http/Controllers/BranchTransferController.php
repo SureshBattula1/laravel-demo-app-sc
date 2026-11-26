@@ -191,7 +191,7 @@ class BranchTransferController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create transfer request',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }

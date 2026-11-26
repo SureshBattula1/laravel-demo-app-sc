@@ -9,6 +9,10 @@ class ImpersonationSession extends Model
 {
     use HasFactory;
 
+    protected $hidden = [
+        'token',
+    ];
+
     protected $fillable = [
         'company_admin_id',
         'impersonated_user_id',

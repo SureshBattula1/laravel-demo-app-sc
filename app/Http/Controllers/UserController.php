@@ -137,7 +137,7 @@ class UserController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to export users',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -351,7 +351,7 @@ class UserController extends Controller
         ];
         $roleName = $role ? ($roleMapping[$role->name] ?? $role->name) : 'Student';
 
-        $user = User::create([
+        $user = User::createExplicit([
             'first_name' => $request->first_name,
             'last_name' => $request->last_name,
             'email' => $request->email,
@@ -459,7 +459,7 @@ class UserController extends Controller
             $data['password'] = Hash::make($request->password);
         }
 
-        $user->update($data);
+        $user->forceFill($data)->save();
 
         $userData = $user->fresh()->toArray();
         // Add role_id to response
@@ -821,7 +821,7 @@ class UserController extends Controller
 
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to update roles: '.$e->getMessage(),
+                'message' => 'Failed to update roles',
             ], 500);
         }
     }

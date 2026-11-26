@@ -117,7 +117,6 @@ class Handler extends ExceptionHandler
                 return response()->json([
                     'success' => false,
                     'message' => 'Server error occurred',
-                    'error' => app()->environment('local') ? $e->getMessage() : 'Internal server error'
                 ], 500);
             }
         });

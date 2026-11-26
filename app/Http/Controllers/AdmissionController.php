@@ -148,7 +148,7 @@ class AdmissionController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch admission applications',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -224,7 +224,7 @@ class AdmissionController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to load admission dashboard',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -366,7 +366,7 @@ class AdmissionController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create admission application',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -410,7 +410,7 @@ class AdmissionController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Admission application not found',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 404);
         }
     }
@@ -530,7 +530,7 @@ class AdmissionController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update admission application',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -578,7 +578,7 @@ class AdmissionController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to delete admission application',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -629,7 +629,7 @@ class AdmissionController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update application status',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -720,7 +720,7 @@ class AdmissionController extends Controller
             $defaultPassword = $request->get('password', Str::random(12));
 
             // Step 3: Create User account (User is created FIRST, then Student is linked to it)
-            $user = User::create([
+            $user = User::createExplicit([
                 'first_name' => $application->first_name,
                 'last_name' => $application->last_name,
                 'email' => $application->email,
@@ -857,7 +857,6 @@ class AdmissionController extends Controller
                     'grade' => $grade,
                     'section' => $section,
                     'email' => $user->email,
-                    'default_password' => app()->environment('local') ? $defaultPassword : null, // Only return in development
                 ],
             ], 201);
 
@@ -872,7 +871,7 @@ class AdmissionController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to convert application to student',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -963,7 +962,7 @@ class AdmissionController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to export admission applications',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }

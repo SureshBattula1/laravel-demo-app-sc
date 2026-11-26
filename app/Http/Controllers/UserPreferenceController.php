@@ -21,10 +21,7 @@ class UserPreferenceController extends Controller
             $user = Auth::user();
             
             // Get or create preferences
-            $preferences = UserPreference::firstOrCreate(
-                ['user_id' => $user->id],
-                UserPreference::getDefaults()
-            );
+            $preferences = UserPreference::forUser((int) $user->id);
 
             return response()->json([
                 'success' => true,
@@ -84,10 +81,7 @@ class UserPreferenceController extends Controller
             }
 
             // Get or create preferences
-            $preferences = UserPreference::firstOrCreate(
-                ['user_id' => $user->id],
-                UserPreference::getDefaults()
-            );
+            $preferences = UserPreference::forUser((int) $user->id);
 
             // Update preferences
             $preferences->updatePreferences($request->all());
@@ -157,10 +151,7 @@ class UserPreferenceController extends Controller
             }
 
             // Get or create preferences
-            $preferences = UserPreference::firstOrCreate(
-                ['user_id' => $user->id],
-                UserPreference::getDefaults()
-            );
+            $preferences = UserPreference::forUser((int) $user->id);
 
             // Update the specific preference
             $preferences->updatePreference($key, $request->value);
@@ -201,10 +192,7 @@ class UserPreferenceController extends Controller
         try {
             $user = Auth::user();
 
-            $preferences = UserPreference::firstOrCreate(
-                ['user_id' => $user->id],
-                UserPreference::getDefaults()
-            );
+            $preferences = UserPreference::forUser((int) $user->id);
 
             // Reset to defaults
             $preferences->update(UserPreference::getDefaults());

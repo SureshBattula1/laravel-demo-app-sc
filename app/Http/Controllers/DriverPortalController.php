@@ -18,6 +18,15 @@ class DriverPortalController extends Controller
     /**
      * Resolve the authenticated driver profile.
      */
+    private function denyUnlessDriver(Request $request)
+    {
+        if (strcasecmp((string) $request->user()?->role, 'Driver') !== 0) {
+            return response()->json(['success' => false, 'message' => 'Unauthorized'], 403);
+        }
+
+        return null;
+    }
+
     private function resolveDriver(Request $request): ?TransportDriver
     {
         $user = $request->user();
@@ -31,7 +40,10 @@ class DriverPortalController extends Controller
             return $driver;
         }
 
-        // 2. Fallback: match by email
+        if (strcasecmp((string) $user->role, 'Driver') !== 0) {
+            return null;
+        }
+
         if ($user->email) {
             $driver = TransportDriver::where('email', $user->email)->first();
             if ($driver) {
@@ -41,21 +53,8 @@ class DriverPortalController extends Controller
             }
         }
 
-        // 3. Fallback: match by phone
         if ($user->phone) {
             $driver = TransportDriver::where('phone', $user->phone)->first();
-            if ($driver) {
-                $driver->update(['user_id' => $user->id]);
-
-                return $driver;
-            }
-        }
-
-        // 4. Fallback: match by name in same branch
-        if ($user->first_name) {
-            $driver = TransportDriver::where('branch_id', $user->branch_id)
-                ->where('name', 'like', $user->first_name.'%')
-                ->first();
             if ($driver) {
                 $driver->update(['user_id' => $user->id]);
 
@@ -386,6 +385,10 @@ class DriverPortalController extends Controller
      */
     public function startShift(Request $request)
     {
+        if ($denied = $this->denyUnlessDriver($request)) {
+            return $denied;
+        }
+
         try {
             $user = $request->user();
             $today = now()->toDateString();
@@ -448,6 +451,9 @@ class DriverPortalController extends Controller
      */
     public function clockIn(Request $request)
     {
+        if ($denied = $this->denyUnlessDriver($request)) {
+            return $denied;
+        }
         return $this->startShift($request);
     }
 
@@ -456,6 +462,9 @@ class DriverPortalController extends Controller
      */
     public function stopShift(Request $request)
     {
+        if ($denied = $this->denyUnlessDriver($request)) {
+            return $denied;
+        }
         try {
             $user = $request->user();
 
@@ -513,6 +522,9 @@ class DriverPortalController extends Controller
      */
     public function clockOut(Request $request)
     {
+        if ($denied = $this->denyUnlessDriver($request)) {
+            return $denied;
+        }
         return $this->stopShift($request);
     }
 
@@ -579,6 +591,9 @@ class DriverPortalController extends Controller
      */
     public function generateTrip(Request $request)
     {
+        if ($denied = $this->denyUnlessDriver($request)) {
+            return $denied;
+        }
         try {
             $user = $request->user();
             $driver = $this->resolveDriver($request);
@@ -665,6 +680,9 @@ class DriverPortalController extends Controller
      */
     public function updateLocation(Request $request, string $tripId)
     {
+        if ($denied = $this->denyUnlessDriver($request)) {
+            return $denied;
+        }
         try {
             $trip = TransportTrip::findOrFail($tripId);
             $trip->update([

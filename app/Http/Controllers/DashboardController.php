@@ -92,7 +92,7 @@ class DashboardController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error loading dashboard statistics',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }

@@ -1659,8 +1659,8 @@ class NotificationCampaignService
             NotificationCampaign::query()
                 ->where('id', $campaign->id)
                 ->update([
-                    'sent_count' => DB::raw('sent_count + '.$sent),
-                    'failed_count' => DB::raw('failed_count + '.$failed),
+                    'sent_count' => DB::raw('sent_count + '.(int) $sent),
+                    'failed_count' => DB::raw('failed_count + '.(int) $failed),
                 ]);
         }
 

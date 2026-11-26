@@ -38,9 +38,10 @@ return [
     | Expiration Minutes
     |--------------------------------------------------------------------------
     |
-    | This value controls the number of minutes until an issued token will be
-    | considered expired. This will override any values set in the token's
-    | "expires_at" attribute, but first-party sessions are not affected.
+    | Left null so each token's expires_at is honored. Login tokens are created
+    | for 12 hours and impersonation tokens for 1 hour. A global minute value
+    | replaces expires_at and would keep impersonation tokens alive for the
+    | full login window.
     |
     */
 

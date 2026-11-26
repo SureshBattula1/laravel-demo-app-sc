@@ -522,7 +522,7 @@ class ExamController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to record result',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }
@@ -563,7 +563,7 @@ class ExamController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch results',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }
@@ -622,7 +622,7 @@ class ExamController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch student results',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }

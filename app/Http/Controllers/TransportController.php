@@ -78,7 +78,7 @@ class TransportController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch routes',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }
@@ -147,7 +147,7 @@ class TransportController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create route',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }
@@ -239,7 +239,7 @@ class TransportController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update route',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }
@@ -278,7 +278,7 @@ class TransportController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to delete route',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }
@@ -308,7 +308,7 @@ class TransportController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch route students',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }
@@ -379,7 +379,7 @@ class TransportController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch vehicles',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }
@@ -444,7 +444,7 @@ class TransportController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create vehicle',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }

@@ -115,7 +115,7 @@ class StudentGroupController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch student groups',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -186,7 +186,7 @@ class StudentGroupController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create student group',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }

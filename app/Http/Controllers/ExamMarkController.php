@@ -247,7 +247,7 @@ class ExamMarkController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch student marks overview',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }

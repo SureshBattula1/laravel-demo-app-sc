@@ -748,7 +748,7 @@ class FeeController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error fetching today\'s payments dashboard',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -1060,7 +1060,6 @@ class FeeController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error recording payment',
-                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -1513,7 +1512,7 @@ class FeeController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Unable to generate receipt PDF',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -1640,7 +1639,7 @@ class FeeController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error fetching student fees by class',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }

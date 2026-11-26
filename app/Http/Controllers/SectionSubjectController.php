@@ -194,7 +194,7 @@ class SectionSubjectController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch section subjects',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }
@@ -284,7 +284,7 @@ class SectionSubjectController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to assign subject',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }
@@ -394,7 +394,7 @@ class SectionSubjectController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to assign subjects',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }
@@ -527,7 +527,7 @@ class SectionSubjectController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to copy subjects',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }
@@ -568,7 +568,7 @@ class SectionSubjectController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to remove subject',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }
@@ -622,7 +622,7 @@ class SectionSubjectController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update assignment',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error'
+
             ], 500);
         }
     }

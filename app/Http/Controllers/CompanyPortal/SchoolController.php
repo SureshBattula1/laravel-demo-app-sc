@@ -259,7 +259,7 @@ class SchoolController extends Controller
 
             // Create SuperAdmin for the school (always SuperAdmin from company portal)
             $adminData = $request->admin_user;
-            $adminUser = User::create([
+            $adminUser = User::createExplicit([
                 'first_name' => $adminData['first_name'],
                 'last_name' => $adminData['last_name'],
                 'email' => $adminData['email'],
@@ -275,7 +275,7 @@ class SchoolController extends Controller
 
             // Create BranchAdmin from principal name/email + password
             [$branchFirstName, $branchLastName] = $this->splitPersonName($branch->principal_name);
-            $branchAdmin = User::create([
+            $branchAdmin = User::createExplicit([
                 'first_name' => $branchFirstName,
                 'last_name' => $branchLastName,
                 'email' => $branch->principal_email,
@@ -882,7 +882,7 @@ class SchoolController extends Controller
             return;
         }
 
-        $created = User::create([
+        $created = User::createExplicit([
             'first_name' => $firstName,
             'last_name' => $lastName,
             'email' => $mainBranch->principal_email,

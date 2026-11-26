@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\UniversalAttachment;
+use App\Models\User;
 use App\Services\GlobalUploadService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -18,8 +19,55 @@ class GlobalUploadController extends Controller
     /**
      * Upload single file
      */
+    private function canUpload(Request $request): bool
+    {
+        $user = $request->user();
+        if (! $user) {
+            return false;
+        }
+
+        foreach (['branches.edit', 'import.upload', 'students.create', 'teachers.create', 'assignments.create', 'notifications.create'] as $permission) {
+            if ($user->hasPermission($permission)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function uploadForbidden()
+    {
+        return response()->json([
+            'success' => false,
+            'message' => 'You do not have permission to perform this action',
+        ], 403);
+    }
+
+    private function canAccessStoredFile(Request $request, ?UniversalAttachment $attachment): bool
+    {
+        $user = $request->user();
+        if (! $user || ! $attachment) {
+            return false;
+        }
+        if ((int) $attachment->uploaded_by === (int) $user->id || $user->isSuperAdmin()) {
+            return true;
+        }
+
+        $owner = User::find($attachment->uploaded_by);
+        if (! $owner || ! $owner->branch_id) {
+            return false;
+        }
+
+        return $user->hasPermission('branches.edit')
+            && $this->canAccessBranch($request, (int) $owner->branch_id);
+    }
+
     public function upload(Request $request)
     {
+        if (! $this->canUpload($request)) {
+            return $this->uploadForbidden();
+        }
+
         $validator = Validator::make($request->all(), [
             'file' => 'required|file|mimes:jpeg,png,jpg,gif,pdf,doc,docx,xls,xlsx,txt,csv|max:10240',
             'upload_path' => 'required|string',
@@ -54,7 +102,7 @@ class GlobalUploadController extends Controller
 
             return response()->json([
                 'success' => false,
-                'message' => $e->getMessage(),
+                'message' => 'Request failed',
             ], 500);
         }
     }
@@ -64,6 +112,10 @@ class GlobalUploadController extends Controller
      */
     public function uploadMultiple(Request $request)
     {
+        if (! $this->canUpload($request)) {
+            return $this->uploadForbidden();
+        }
+
         $validator = Validator::make($request->all(), [
             'files' => 'required|array',
             'files.*' => 'required|file|mimes:jpeg,png,jpg,gif,pdf,doc,docx,xls,xlsx,txt,csv|max:10240',
@@ -96,7 +148,7 @@ class GlobalUploadController extends Controller
 
             return response()->json([
                 'success' => false,
-                'message' => $e->getMessage(),
+                'message' => 'Request failed',
             ], 500);
         }
     }
@@ -106,6 +158,10 @@ class GlobalUploadController extends Controller
      */
     public function delete(Request $request)
     {
+        if (! $this->canUpload($request)) {
+            return $this->uploadForbidden();
+        }
+
         $validator = Validator::make($request->all(), [
             'file_path' => 'required|string',
         ]);
@@ -119,18 +175,12 @@ class GlobalUploadController extends Controller
         }
 
         try {
-            $user = $request->user();
-            $isAdmin = $user && in_array($user->role, ['SuperAdmin', 'BranchAdmin'], true);
-            if (! $isAdmin) {
-                $ownsAttachment = UniversalAttachment::where('file_path', $request->file_path)
-                    ->where('uploaded_by', $user?->id)
-                    ->exists();
-                if (! $ownsAttachment) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'You do not have permission to delete this file',
-                    ], 403);
-                }
+            $attachment = UniversalAttachment::where('file_path', $request->file_path)->first();
+            if (! $this->canAccessStoredFile($request, $attachment)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You do not have permission to delete this file',
+                ], 403);
             }
 
             $deleted = $this->uploadService->deleteFile($request->file_path);
@@ -157,6 +207,10 @@ class GlobalUploadController extends Controller
      */
     public function getFileInfo(Request $request)
     {
+        if (! $this->canUpload($request)) {
+            return $this->uploadForbidden();
+        }
+
         $validator = Validator::make($request->all(), [
             'file_path' => 'required|string',
         ]);
@@ -170,6 +224,11 @@ class GlobalUploadController extends Controller
         }
 
         try {
+            $attachment = UniversalAttachment::where('file_path', $request->file_path)->first();
+            if (! $this->canAccessStoredFile($request, $attachment)) {
+                return $this->uploadForbidden();
+            }
+
             $info = $this->uploadService->getFileInfo($request->file_path);
 
             return response()->json([
@@ -179,7 +238,7 @@ class GlobalUploadController extends Controller
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => $e->getMessage(),
+                'message' => 'Request failed',
             ], 404);
         }
     }
@@ -189,6 +248,10 @@ class GlobalUploadController extends Controller
      */
     public function checkFileExists(Request $request)
     {
+        if (! $this->canUpload($request)) {
+            return $this->uploadForbidden();
+        }
+
         $validator = Validator::make($request->all(), [
             'file_path' => 'required|string',
         ]);
@@ -199,6 +262,11 @@ class GlobalUploadController extends Controller
                 'message' => 'Validation failed',
                 'errors' => $validator->errors(),
             ], 422);
+        }
+
+        $attachment = UniversalAttachment::where('file_path', $request->file_path)->first();
+        if (! $this->canAccessStoredFile($request, $attachment)) {
+            return $this->uploadForbidden();
         }
 
         $exists = $this->uploadService->fileExists($request->file_path);
@@ -214,6 +282,10 @@ class GlobalUploadController extends Controller
      */
     public function saveAttachment(Request $request)
     {
+        if (! $this->canUpload($request)) {
+            return $this->uploadForbidden();
+        }
+
         $validator = Validator::make($request->all(), [
             'module' => 'required|string',
             'module_id' => 'required|integer',
@@ -267,8 +339,12 @@ class GlobalUploadController extends Controller
     /**
      * Get attachments for a module
      */
-    public function getAttachments($module, $moduleId)
+    public function getAttachments(Request $request, $module, $moduleId)
     {
+        if (! $this->canUpload($request)) {
+            return $this->uploadForbidden();
+        }
+
         try {
             $attachments = UniversalAttachment::where('module', $module)
                 ->where('module_id', $moduleId)
@@ -297,9 +373,13 @@ class GlobalUploadController extends Controller
     /**
      * Delete an attachment
      */
-    public function deleteAttachment($module, $moduleId, $attachmentId)
+    public function deleteAttachment(Request $request, $module, $moduleId, $attachmentId)
     {
         try {
+            if (! $this->canUpload($request)) {
+                return $this->uploadForbidden();
+            }
+
             $attachment = UniversalAttachment::where('module', $module)
                 ->where('module_id', $moduleId)
                 ->where('id', $attachmentId)
@@ -310,6 +390,10 @@ class GlobalUploadController extends Controller
                     'success' => false,
                     'message' => 'Attachment not found',
                 ], 404);
+            }
+
+            if (! $this->canAccessStoredFile($request, $attachment)) {
+                return $this->uploadForbidden();
             }
 
             // Delete physical file if exists
@@ -340,7 +424,7 @@ class GlobalUploadController extends Controller
     /**
      * Download an attachment
      */
-    public function downloadAttachment($module, $moduleId, $attachmentId)
+    public function downloadAttachment(Request $request, $module, $moduleId, $attachmentId)
     {
         try {
             $attachment = UniversalAttachment::where('module', $module)
@@ -353,6 +437,10 @@ class GlobalUploadController extends Controller
                     'success' => false,
                     'message' => 'Attachment not found',
                 ], 404);
+            }
+
+            if (! $this->canAccessStoredFile($request, $attachment)) {
+                return $this->uploadForbidden();
             }
 
             $filePath = storage_path('app/public/'.$attachment->file_path);

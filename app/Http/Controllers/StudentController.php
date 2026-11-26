@@ -274,7 +274,7 @@ class StudentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch students',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -410,7 +410,7 @@ class StudentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch student',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -515,7 +515,7 @@ class StudentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch student profile',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -576,10 +576,14 @@ class StudentController extends Controller
                 ], 422);
             }
 
+            if (! $this->canAccessBranch($request, (int) $request->branch_id)) {
+                return $this->forbiddenResponse('You do not have access to this branch');
+            }
+
             DB::beginTransaction();
 
             // Create user
-            $user = User::create([
+            $user = User::createExplicit([
                 'first_name' => $request->first_name,
                 'last_name' => $request->last_name,
                 'email' => $request->email,
@@ -660,7 +664,7 @@ class StudentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create student',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -680,13 +684,25 @@ class StudentController extends Controller
                 ], 404);
             }
 
-            // 🔒 A Student may only ever update their OWN record (own-record isolation)
             $user = $request->user();
-            if ($user && $user->role === 'Student' && (int) $student->user_id !== (int) $user->id) {
+            $isOwnStudent = $user && (int) $student->user_id === (int) $user->id;
+            if ($user && strcasecmp((string) $user->role, 'Student') === 0 && ! $isOwnStudent) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Access denied',
                 ], 403);
+            }
+            if (! $isOwnStudent && ! $this->canAccessBranch($request, (int) $student->branch_id)) {
+                return $this->forbiddenResponse('You do not have access to this student');
+            }
+            if ($user && strcasecmp((string) $user->role, 'Student') === 0) {
+                $blocked = [
+                    'student_status', 'transport_required', 'transport_route', 'transport_fee', 'transport_due_date',
+                    'pickup_point', 'drop_point', 'vehicle_number', 'pickup_time', 'drop_time',
+                    'hostel_required', 'hostel_name', 'hostel_room_number', 'hostel_fee', 'hostel_due_date',
+                    'fee_concession_applicable', 'concession_type', 'concession_percentage', 'scholarship_name',
+                ];
+                $request->replace($request->except($blocked));
             }
 
             $validator = Validator::make($request->all(), [
@@ -776,7 +792,7 @@ class StudentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update student',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -784,7 +800,7 @@ class StudentController extends Controller
     /**
      * Delete student (soft delete)
      */
-    public function destroy($id)
+    public function destroy(Request $request, $id)
     {
         try {
             $student = DB::table('students')->where('id', $id)->first();
@@ -794,6 +810,10 @@ class StudentController extends Controller
                     'success' => false,
                     'message' => 'Student not found',
                 ], 404);
+            }
+
+            if (! $this->canAccessBranch($request, (int) $student->branch_id)) {
+                return $this->forbiddenResponse('You do not have access to this student');
             }
 
             DB::beginTransaction();
@@ -824,7 +844,7 @@ class StudentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to delete student',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -832,7 +852,7 @@ class StudentController extends Controller
     /**
      * Restore soft-deleted student (reactivate)
      */
-    public function restore($id)
+    public function restore(Request $request, $id)
     {
         try {
             // Find student with trashed records
@@ -843,6 +863,10 @@ class StudentController extends Controller
                     'success' => false,
                     'message' => 'Student not found',
                 ], 404);
+            }
+
+            if (! $this->canAccessBranch($request, (int) $student->branch_id)) {
+                return $this->forbiddenResponse('You do not have access to this student');
             }
 
             if (! $student->trashed()) {
@@ -882,7 +906,7 @@ class StudentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to restore student',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -1045,7 +1069,7 @@ class StudentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to promote students',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -1150,7 +1174,7 @@ class StudentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to promote students',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -1261,7 +1285,7 @@ class StudentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to preview promotion',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -1324,7 +1348,7 @@ class StudentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to revert promotion',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -1368,7 +1392,7 @@ class StudentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to get promotion history',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -1443,7 +1467,7 @@ class StudentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to retrieve promotion batches',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -1480,7 +1504,7 @@ class StudentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to retrieve promotion batch details',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -1528,7 +1552,7 @@ class StudentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to revert promotion batch',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -1571,7 +1595,7 @@ class StudentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to retrieve promotion dashboard statistics',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -1604,7 +1628,7 @@ class StudentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to get student dues',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -1661,7 +1685,7 @@ class StudentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to export students',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
@@ -1863,6 +1887,29 @@ class StudentController extends Controller
     public function uploadProfilePicture(Request $request, $id)
     {
         try {
+            $student = Student::find($id);
+            if (! $student) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Student not found',
+                ], 404);
+            }
+
+            $actor = $request->user();
+            $owns = $actor && (int) $student->user_id === (int) $actor->id;
+            if ($actor && strcasecmp((string) $actor->role, 'Student') === 0 && ! $owns) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Access denied',
+                ], 403);
+            }
+            if (! $owns && (! $actor || ! $actor->hasPermission('students.edit') || ! $this->canAccessBranch($request, (int) $student->branch_id))) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Access denied',
+                ], 403);
+            }
+
             $validator = Validator::make($request->all(), [
                 'profile_picture' => 'required|image|mimes:jpeg,jpg,png,gif,svg,webp,bmp|max:1024',
             ]);
@@ -1874,8 +1921,6 @@ class StudentController extends Controller
                     'errors' => $validator->errors(),
                 ], 422);
             }
-
-            $student = Student::findOrFail($id);
 
             $filePath = $this->handleFileUpload($request, $student, 'profile_picture', 'profile_picture');
 
@@ -1909,7 +1954,7 @@ class StudentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to upload profile picture',
-                'error' => app()->environment('local') ? $e->getMessage() : 'Server error',
+
             ], 500);
         }
     }
