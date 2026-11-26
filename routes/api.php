@@ -675,12 +675,14 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
     // Route::apiResource('holidays', EventController::class);
     // Route::get('holidays/year/{year}', [EventController::class, 'getHolidaysByYear']);
 
-    // Timetable Routes
-    Route::apiResource('timetables', TimetableController::class)->only(['index', 'show']);
-    Route::apiResource('timetables', TimetableController::class)->only(['store'])->middleware('permission:grades.create');
-    Route::apiResource('timetables', TimetableController::class)->only(['update'])->middleware('permission:grades.edit');
-    Route::apiResource('timetables', TimetableController::class)->only(['destroy'])->middleware('permission:grades.delete');
-    Route::get('timetables/class/{grade}/{section}', [TimetableController::class, 'getByClass']);
+    // Timetable Routes. Literal paths stay before the resource so "class" and "bulk-upsert" are not read as ids.
+    Route::post('timetables/bulk-upsert', [TimetableController::class, 'bulkUpsert'])->middleware('permission:timetable.edit');
+    Route::get('timetables/class/{grade}/{section}', [TimetableController::class, 'getByClass'])->middleware('permission:timetable.view');
+    Route::delete('timetables/class/{grade}/{section}', [TimetableController::class, 'destroyClass'])->middleware('permission:timetable.delete');
+    Route::apiResource('timetables', TimetableController::class)->only(['index', 'show'])->middleware('permission:timetable.view');
+    Route::apiResource('timetables', TimetableController::class)->only(['store'])->middleware('permission:timetable.create');
+    Route::apiResource('timetables', TimetableController::class)->only(['update'])->middleware('permission:timetable.edit');
+    Route::apiResource('timetables', TimetableController::class)->only(['destroy'])->middleware('permission:timetable.delete');
 
     // Dashboard Routes (Secure - Role-Based Access)
     Route::get('dashboard', [DashboardController::class, 'getStats']); // Main dashboard endpoint

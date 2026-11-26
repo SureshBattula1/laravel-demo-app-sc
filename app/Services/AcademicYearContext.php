@@ -115,7 +115,7 @@ class AcademicYearContext
         }
 
         // 2. If user is tied to a branch, resolve the active/current year for that branch's school
-        if ($user?->branch_id) {
+        if ($user?->branch_id && \Illuminate\Support\Facades\Schema::hasColumn('academic_years', 'school_id')) {
             $schoolId = \Illuminate\Support\Facades\DB::table('branches')->where('id', $user->branch_id)->value('school_id');
             if ($schoolId) {
                 $schoolAy = AcademicYear::query()

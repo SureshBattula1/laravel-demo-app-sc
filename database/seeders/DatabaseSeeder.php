@@ -352,6 +352,14 @@ class DatabaseSeeder extends Seeder
                 'permissions' => ['view', 'create', 'edit', 'delete'],
             ],
             [
+                'name' => 'Timetable',
+                'slug' => 'timetable',
+                'icon' => 'schedule',
+                'route' => '/timetable',
+                'order' => 14,
+                'permissions' => ['view', 'create', 'edit', 'delete', 'manage', 'export'],
+            ],
+            [
                 'name' => 'Holidays',
                 'slug' => 'holidays',
                 'icon' => 'event',
@@ -552,6 +560,7 @@ class DatabaseSeeder extends Seeder
             'sections.view', 'sections.create', 'sections.edit', 'sections.delete', 'sections.export',
             'subjects.view', 'subjects.create', 'subjects.edit', 'subjects.delete',
             'departments.view', 'departments.create', 'departments.edit', 'departments.delete',
+            'timetable.view', 'timetable.create', 'timetable.edit', 'timetable.delete', 'timetable.manage', 'timetable.export',
             'groups.view', 'groups.create', 'groups.edit', 'groups.delete',
             'bulk_management.view', 'bulk_management.create', 'bulk_management.edit', 'bulk_management.delete',
             'notifications.view', 'notifications.create', 'notifications.edit', 'notifications.delete',
@@ -583,6 +592,7 @@ class DatabaseSeeder extends Seeder
             'grades.view',
             'sections.view',
             'subjects.view',
+            'timetable.view', 'timetable.create', 'timetable.edit',
             'holidays.view',
             'groups.view',
             'bulk_management.view',
@@ -611,6 +621,7 @@ class DatabaseSeeder extends Seeder
             'notifications.view', 'notifications.create',
             'leaves.view', 'leaves.create', 'leaves.edit', 'leaves.approve', 'leaves.reject', // Staff can manage leaves
             'assignments.view',
+            'timetable.view', 'timetable.create', 'timetable.edit', 'timetable.manage',
             'import.view', 'import.upload', 'import.validate', 'import.commit', 'import.cancel', 'import.template', // Staff can manage imports
             'library.view', 'library.issue', 'library.return', // Staff run the library desk
             'transport.view', 'transport.create', 'transport.edit', 'transport.assign', // Staff manage transport
@@ -639,6 +650,7 @@ class DatabaseSeeder extends Seeder
             'holidays.view',                 // read-only (no create/edit/delete granted)
             'students.view', 'students.edit', // own record only (scoped in StudentController)
             'assignments.view',
+            'timetable.view',
             'notifications.view',
         ])->pluck('id')->toArray();
         $student->permissions()->sync($studentPerms);

@@ -54,6 +54,17 @@ else
     php artisan db:seed --force || true
 fi
 
+php artisan storage:link --force 2>/dev/null || true
+chmod -R ug+rwx storage bootstrap/cache 2>/dev/null || true
+
+if [ -n "${APP_URL:-}" ]; then
+    if grep -q "^APP_URL=" .env 2>/dev/null; then
+        sed -i "s|^APP_URL=.*|APP_URL=${APP_URL}|" .env
+    else
+        echo "APP_URL=${APP_URL}" >> .env
+    fi
+fi
+
 php artisan config:clear
 
 # Serve the API (PHP built-in server is fine for a dev/learning setup).
