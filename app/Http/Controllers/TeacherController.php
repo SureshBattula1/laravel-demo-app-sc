@@ -271,25 +271,10 @@ class TeacherController extends Controller
     public function store(Request $request)
     {
         try {
-            $validator = Validator::make($request->all(), [
-                'first_name' => 'required|string|max:255',
-                'last_name' => 'required|string|max:255',
-                'email' => 'required|email|unique:users,email',
-                'password' => 'required|string|min:8',
-                'branch_id' => 'required|exists:branches,id',
-                'employee_id' => 'required|string|max:50|unique:teachers,employee_id',
-                'category_type' => 'required|in:Teaching,Staff,Account,Non-Teaching',
-                'designation' => 'required|string|max:255',
-                'gender' => 'required|in:Male,Female,Other',
-                'date_of_birth' => 'required|date',
-            ]);
+            $validator = Validator::make($request->all(), $this->teacherFieldRules(true));
 
             if ($validator->fails()) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Validation failed',
-                    'errors' => $validator->errors(),
-                ], 422);
+                return \App\Support\FieldErrorResponse::validation($validator->errors());
             }
 
             if (! $this->canAccessBranch($request, (int) $request->branch_id)) {
@@ -358,14 +343,29 @@ class TeacherController extends Controller
                 'data' => $teacher->fresh()->load(['user', 'branch', 'department']),
             ], 201);
 
-        } catch (\Exception $e) {
-            DB::rollBack();
-            Log::error('Create teacher error', ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
+        } catch (\Illuminate\Database\QueryException $e) {
+            if (DB::transactionLevel() > 0) {
+                DB::rollBack();
+            }
+            Log::error('Create teacher error', ['error' => $e->getMessage()]);
+            $fieldError = \App\Support\FieldErrorResponse::fromQueryException($e);
+            if ($fieldError) {
+                return $fieldError;
+            }
 
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create teacher',
+            ], 500);
+        } catch (\Exception $e) {
+            if (DB::transactionLevel() > 0) {
+                DB::rollBack();
+            }
+            Log::error('Create teacher error', ['error' => $e->getMessage()]);
 
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to create teacher',
             ], 500);
         }
     }
@@ -373,15 +373,6 @@ class TeacherController extends Controller
     public function update(Request $request, $id)
     {
         try {
-            // Ensure JSON body is merged for PUT requests
-            $content = $request->getContent();
-            if (! empty($content) && (str_contains($request->header('Content-Type', ''), 'application/json') || $request->isJson())) {
-                $decoded = json_decode($content, true);
-                if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
-                    $request->merge($decoded);
-                }
-            }
-
             $teacher = Teacher::with(['user', 'branch', 'department'])->findOrFail($id);
 
             $authUser = $request->user();
@@ -396,20 +387,10 @@ class TeacherController extends Controller
                 return $this->forbiddenResponse('You do not have access to this teacher');
             }
 
-            $validator = Validator::make($request->all(), [
-                'first_name' => 'sometimes|string|max:255',
-                'last_name' => 'sometimes|string|max:255',
-                'email' => 'sometimes|email|unique:users,email,'.$teacher->user_id,
-                'employee_id' => 'sometimes|string|max:50|unique:teachers,employee_id,'.$id,
-                'category_type' => 'sometimes|in:Teaching,Staff,Account,Non-Teaching',
-            ]);
+            $validator = Validator::make($request->all(), $this->teacherFieldRules(false, (int) $teacher->user_id, (int) $teacher->id));
 
             if ($validator->fails()) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Validation failed',
-                    'errors' => $validator->errors(),
-                ], 422);
+                return \App\Support\FieldErrorResponse::validation($validator->errors());
             }
 
             DB::beginTransaction();
@@ -500,18 +481,79 @@ class TeacherController extends Controller
                 'data' => $freshTeacher,
             ]);
 
-        } catch (\Exception $e) {
+        } catch (\Illuminate\Database\QueryException $e) {
             if (DB::transactionLevel() > 0) {
                 DB::rollBack();
             }
-            Log::error('Teacher update error', ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
+            Log::error('Teacher update error', ['error' => $e->getMessage()]);
+            $fieldError = \App\Support\FieldErrorResponse::fromQueryException($e);
+            if ($fieldError) {
+                return $fieldError;
+            }
 
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update teacher',
+            ], 500);
+        } catch (\Exception $e) {
+            if (DB::transactionLevel() > 0) {
+                DB::rollBack();
+            }
+            Log::error('Teacher update error', ['error' => $e->getMessage()]);
 
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update teacher',
             ], 500);
         }
+    }
+
+    /**
+     * Field rules shared by teacher create and update. Keys match the Angular form controls.
+     *
+     * @return array<string, mixed>
+     */
+    private function teacherFieldRules(bool $creating, ?int $userId = null, ?int $teacherId = null): array
+    {
+        $required = $creating ? 'required' : 'sometimes|required';
+        $emailUnique = 'unique:users,email'.($userId ? ','.$userId : '');
+        $employeeUnique = 'unique:teachers,employee_id'.($teacherId ? ','.$teacherId : '');
+
+        return [
+            'first_name' => $required.'|string|max:255',
+            'last_name' => $required.'|string|max:255',
+            'email' => $required.'|email|max:255|'.$emailUnique,
+            'alternate_email' => 'nullable|email|max:255',
+            'spouse_email' => 'nullable|email|max:255',
+            'phone' => 'nullable|string|max:20',
+            'alternate_phone' => 'nullable|string|max:20',
+            'whatsapp_number' => 'nullable|string|max:20',
+            'password' => ($creating ? 'required' : 'nullable').'|string|min:8',
+            'branch_id' => $required.'|integer|exists:branches,id',
+            'department_id' => 'nullable|integer|exists:departments,id',
+            'reporting_manager_id' => 'nullable|integer|exists:users,id',
+            'employee_id' => $required.'|string|max:50|'.$employeeUnique,
+            'category_type' => $required.'|in:Teaching,Staff,Account,Non-Teaching',
+            'designation' => $required.'|string|max:255',
+            'gender' => $required.'|in:Male,Female,Other',
+            'date_of_birth' => $required.'|date',
+            'joining_date' => 'nullable|date',
+            'leaving_date' => 'nullable|date',
+            'probation_end_date' => 'nullable|date',
+            'confirmation_date' => 'nullable|date',
+            'spouse_date_of_birth' => 'nullable|date',
+            'passport_expiry' => 'nullable|date',
+            'driving_license_expiry' => 'nullable|date',
+            'last_medical_checkup' => 'nullable|date',
+            'pan_number' => ['nullable', 'regex:/^[A-Za-z]{5}[0-9]{4}[A-Za-z]$/'],
+            'aadhaar_number' => 'nullable|digits:12',
+            'experience_years' => 'nullable|numeric|min:0|max:50',
+            'teaching_experience_years' => 'nullable|numeric|min:0|max:50',
+            'industry_experience_years' => 'nullable|numeric|min:0|max:50',
+            'basic_salary' => 'nullable|numeric|min:0',
+            'ctc' => 'nullable|numeric|min:0',
+            'number_of_children' => 'nullable|integer|min:0|max:20',
+        ];
     }
 
     /**

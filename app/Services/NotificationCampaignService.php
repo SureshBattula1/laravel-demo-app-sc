@@ -24,6 +24,9 @@ class NotificationCampaignService
 
     private ?int $branchSchoolContextBranchId = null;
 
+    /** @var \Illuminate\Support\Collection<string, string>|null */
+    private ?Collection $gradeLabelCache = null;
+
     public function __construct(
         protected SmsTemplateTagRenderer $renderer,
         protected SmsTemplateTagContextFactory $tagContextFactory,
@@ -1264,13 +1267,16 @@ class NotificationCampaignService
         return (int) ($campaign->recipient_count ?? 0);
     }
 
-    /**
-     * @return list<string>
-     */
+    /** @return \Illuminate\Support\Collection<string, string> */
+    private function gradeLabels(): Collection
+    {
+        return $this->gradeLabelCache ??= DB::table('grades')->pluck('label', 'value');
+    }
+
     public function customCampaignSectionLabels(NotificationCampaign $campaign): array
     {
         $campaign->loadMissing('targets');
-        $gradeLabels = DB::table('grades')->pluck('label', 'value');
+        $gradeLabels = $this->gradeLabels();
         $labels = [];
         foreach ($campaign->targets as $target) {
             $className = (string) ($gradeLabels[$target->grade] ?? ('Grade '.$target->grade));
@@ -1677,8 +1683,11 @@ class NotificationCampaignService
     public function progressSnapshot(NotificationCampaign $campaign): array
     {
         $materialized = (int) $campaign->recipient_count;
-        $pending = $campaign->recipients()->where('delivery_status', 'pending')->count();
-        $processing = $campaign->recipients()->where('delivery_status', 'processing')->count();
+        $delivery = $campaign->recipients()
+            ->selectRaw("SUM(delivery_status = 'pending') as pending_count, SUM(delivery_status = 'processing') as processing_count")
+            ->first();
+        $pending = (int) ($delivery->pending_count ?? 0);
+        $processing = (int) ($delivery->processing_count ?? 0);
 
         return [
             'status' => $campaign->status,

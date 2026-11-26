@@ -1,8 +1,8 @@
 {
     "info": {
         "_postman_id": "school-management-api-collection",
-        "name": "School Management API",
-        "description": "Complete API collection for School Management System including Login, Dashboard, Branches, Teachers, Students, Attendance, and Leaves",
+        "name": "Education Management System API",
+        "description": "Complete API collection for Education Management System including Login, Dashboard, Branches, Teachers, Students, Attendance, and Leaves",
         "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
     },
     "item": [

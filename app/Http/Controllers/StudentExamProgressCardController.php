@@ -74,6 +74,10 @@ class StudentExamProgressCardController extends Controller
             return true;
         }
 
+        if ($user->isStudent()) {
+            return false;
+        }
+
         $student = $this->resolveStudent($studentUserId);
         if (! $student) {
             return false;

@@ -89,6 +89,12 @@ class LeaveController extends Controller
             // Exclude soft-deleted rows (the query builder bypasses the model's SoftDeletes scope).
             $query->whereNull($type.'_leaves.deleted_at');
 
+            // A student or teacher without leaves.view only sees their own rows.
+            if (! $this->canReadAllLeaves($request)) {
+                $ownerColumn = $type === 'student' ? 'student_leaves.student_id' : 'teacher_leaves.teacher_id';
+                $query->where($ownerColumn, (int) $request->user()->id);
+            }
+
             // Apply branch filtering
             $accessibleBranchIds = $this->getAccessibleBranchIds($request);
             if ($accessibleBranchIds !== 'all') {
@@ -272,6 +278,12 @@ class LeaveController extends Controller
                     ], 422);
                 }
 
+                if ($denied = $this->denyUnlessCanSubmitLeave($request, 'student', (int) $request->student_id)) {
+                    DB::rollBack();
+
+                    return $denied;
+                }
+
                 // Derive branch from the student when not supplied, so the leave is visible
                 // in the branch-scoped list — and verify the user may manage that branch.
                 $branchId = $request->branch_id
@@ -331,6 +343,12 @@ class LeaveController extends Controller
                         'success' => false,
                         'errors' => $validator->errors(),
                     ], 422);
+                }
+
+                if ($denied = $this->denyUnlessCanSubmitLeave($request, 'teacher', (int) $request->teacher_id)) {
+                    DB::rollBack();
+
+                    return $denied;
                 }
 
                 $branchId = $request->branch_id
@@ -471,6 +489,14 @@ class LeaveController extends Controller
                 ], 404);
             }
 
+            $ownerId = (int) ($type === 'student' ? $leave->student_id : $leave->teacher_id);
+            if (! $this->canReadLeaveOwner(request(), $type, $ownerId)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You do not have permission to perform this action',
+                ], 403);
+            }
+
             // Tenant guard: don't leak leaves from other branches/schools.
             if (! $this->canAccessLeaveBranch(request(), isset($leave->branch_id) ? (int) $leave->branch_id : null)) {
                 return response()->json([
@@ -551,6 +577,10 @@ class LeaveController extends Controller
                     'success' => false,
                     'message' => 'Leave record not found',
                 ], 404);
+            }
+
+            if ($denied = $this->denyUnlessCanUpdateLeave($request, $type, $leave)) {
+                return $denied;
             }
 
             // Tenant guard: only manage leaves in branches the user can manage.
@@ -663,6 +693,13 @@ class LeaveController extends Controller
     public function getStudentLeaves($studentId)
     {
         try {
+            if (! $this->canReadLeaveOwner(request(), 'student', (int) $studentId)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You do not have permission to perform this action',
+                ], 403);
+            }
+
             // Tenant guard: only view leaves of a student in an accessible branch.
             $studentBranch = DB::table('users')->where('id', $studentId)->value('branch_id');
             if (! $this->canAccessLeaveBranch(request(), $studentBranch !== null ? (int) $studentBranch : null)) {
@@ -737,6 +774,13 @@ class LeaveController extends Controller
     public function getTeacherLeaves($teacherId)
     {
         try {
+            if (! $this->canReadLeaveOwner(request(), 'teacher', (int) $teacherId)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You do not have permission to perform this action',
+                ], 403);
+            }
+
             // Tenant guard: only view leaves of a teacher in an accessible branch.
             $teacherBranch = DB::table('users')->where('id', $teacherId)->value('branch_id');
             if (! $this->canAccessLeaveBranch(request(), $teacherBranch !== null ? (int) $teacherBranch : null)) {
@@ -874,6 +918,79 @@ class LeaveController extends Controller
         }
 
         return $branchId !== null && in_array((int) $branchId, array_map('intval', (array) $accessible), true);
+    }
+
+    private function canReadAllLeaves(Request $request): bool
+    {
+        return (bool) $request->user()?->hasPermission('leaves.view');
+    }
+
+    /**
+     * leaves.view sees every leave in the caller's branches. A student or teacher
+     * without that permission can read only their own applications.
+     */
+    private function canReadLeaveOwner(Request $request, string $type, int $ownerUserId): bool
+    {
+        if ($this->canReadAllLeaves($request)) {
+            return true;
+        }
+
+        return $this->callerOwnsLeave($request, $type, $ownerUserId);
+    }
+
+    private function callerOwnsLeave(Request $request, string $type, int $ownerUserId): bool
+    {
+        $user = $request->user();
+        if (! $user || $ownerUserId <= 0) {
+            return false;
+        }
+
+        $isStudent = $user->role === 'Student' || $user->user_type === 'Student';
+        $isTeacher = $user->role === 'Teacher' || $user->user_type === 'Teacher';
+
+        if ($type === 'student') {
+            return $isStudent && (int) $user->id === $ownerUserId;
+        }
+
+        return $isTeacher && (int) $user->id === $ownerUserId;
+    }
+
+    private function denyUnlessCanSubmitLeave(Request $request, string $type, int $ownerUserId)
+    {
+        if ($request->user()?->hasPermission('leaves.create') || $this->callerOwnsLeave($request, $type, $ownerUserId)) {
+            return null;
+        }
+
+        return response()->json([
+            'success' => false,
+            'message' => 'You do not have permission to perform this action',
+        ], 403);
+    }
+
+    /**
+     * Staff with leaves.edit can change any leave. The owner can only cancel their own.
+     */
+    private function denyUnlessCanUpdateLeave(Request $request, string $type, object $leave)
+    {
+        $ownerColumn = $type === 'student' ? 'student_id' : 'teacher_id';
+        $ownerId = (int) ($leave->{$ownerColumn} ?? 0);
+
+        if ($request->user()?->hasPermission('leaves.edit')) {
+            return null;
+        }
+
+        $status = $request->input('status');
+        $cancellingOwn = $this->callerOwnsLeave($request, $type, $ownerId)
+            && ($status === null || $status === 'Cancelled');
+
+        if ($cancellingOwn) {
+            return null;
+        }
+
+        return response()->json([
+            'success' => false,
+            'message' => 'You do not have permission to perform this action',
+        ], 403);
     }
 
     /**

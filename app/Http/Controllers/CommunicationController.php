@@ -77,9 +77,9 @@ class CommunicationController extends Controller
 
             $period = $request->get('period');
             if ($period === 'today') {
-                $query->whereDate('created_at', now()->toDateString());
+                $query->where('created_at', '>=', now()->startOfDay());
             } elseif ($period === 'older') {
-                $query->whereDate('created_at', '<', now()->toDateString());
+                $query->where('created_at', '<', now()->startOfDay());
             }
 
             $module = strip_tags((string) $request->get('module', ''));
@@ -87,13 +87,23 @@ class CommunicationController extends Controller
                 app(InboxNotificationService::class)->applyModuleFilter($query, $module);
             }
 
-            $query->orderBy('created_at', 'desc');
+            $query->orderByDesc('id');
 
-            $perPage = $request->get('per_page', 15);
-            $notifications = $query->with(['branch', 'user', 'createdBy'])->paginate($perPage);
+            $perPage = min(max((int) $request->get('per_page', 15), 1), 50);
+            // No COUNT(*). "All" used to scan every matching row just to print a total.
+            $notifications = $query->simplePaginate($perPage);
+            $notificationIds = collect($notifications->items())->pluck('id')->filter()->values();
+            $likedIds = $notificationIds->isEmpty()
+                ? collect()
+                : NotificationCampaignRecipient::query()
+                    ->where('user_id', $user->id)
+                    ->whereIn('notification_id', $notificationIds)
+                    ->whereNotNull('liked_at')
+                    ->pluck('notification_id')
+                    ->flip();
 
-            $items = collect($notifications->items())->map(function ($notification) use ($user) {
-                return $this->presentInboxItem($notification, $user);
+            $items = collect($notifications->items())->map(function ($notification) use ($likedIds) {
+                return $this->presentInboxListItem($notification, $likedIds->has($notification->id));
             })->values();
 
             return response()->json([
@@ -102,8 +112,6 @@ class CommunicationController extends Controller
                 'meta' => [
                     'current_page' => $notifications->currentPage(),
                     'per_page' => $notifications->perPage(),
-                    'total' => $notifications->total(),
-                    'last_page' => $notifications->lastPage(),
                     'has_more_pages' => $notifications->hasMorePages(),
                 ],
             ]);
@@ -224,6 +232,50 @@ class CommunicationController extends Controller
 
             return response()->json(['success' => false, 'message' => 'Failed to load views'], 500);
         }
+    }
+
+    /**
+     * List row. Skips assignment, attachment, and per-row recipient lookups.
+     *
+     * @param  \Illuminate\Support\Collection<int, int>|array<int, mixed>  $likedLookup
+     */
+    private function presentInboxListItem(Notification $notification, bool $liked): array
+    {
+        $meta = is_array($notification->metadata) ? $notification->metadata : [];
+        $source = $meta['source'] ?? null;
+        $groupKey = $meta['group_key'] ?? null;
+        if (! $groupKey && ! empty($meta['assignment_id'])) {
+            $groupKey = 'assignment:'.$meta['assignment_id'];
+        }
+
+        return [
+            'id' => $notification->id,
+            'title' => $notification->title,
+            'message' => $notification->message,
+            'type' => $notification->type,
+            'priority' => $notification->priority,
+            'status' => $notification->status,
+            'read_at' => $notification->read_at,
+            'is_read' => $notification->read_at !== null,
+            'created_at' => optional($notification->created_at)?->toDateTimeString(),
+            'date' => optional($notification->created_at)?->toDateTimeString(),
+            'branch_id' => $notification->branch_id,
+            'user_id' => $notification->user_id,
+            'action_url' => $notification->action_url,
+            'source' => $source,
+            'module' => $meta['module'] ?? null,
+            'event' => $meta['event'] ?? null,
+            'assignment_id' => $meta['assignment_id'] ?? null,
+            'group_key' => $groupKey,
+            'grade' => $meta['grade'] ?? null,
+            'section' => $meta['section'] ?? null,
+            'description' => $notification->message,
+            'attachments' => [],
+            'liked' => $liked,
+            'campaign_viewed' => $notification->read_at !== null,
+            'campaign_id' => isset($meta['campaign_id']) ? (int) $meta['campaign_id'] : null,
+            'status_key' => $meta['status_key'] ?? null,
+        ];
     }
 
     private function presentInboxItem(Notification $notification, $user): array

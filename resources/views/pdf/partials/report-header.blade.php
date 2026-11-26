@@ -9,7 +9,7 @@
                 <tr>
                     <td class="logo-cell">
                         @if(!empty($school['logo_data_uri']))
-                            <img src="{{ $school['logo_data_uri'] }}" class="logo-img" alt="School logo">
+                            <img src="{{ $school['logo_data_uri'] }}" class="logo-img" alt="Campus logo">
                         @endif
                     </td>
                     <td>

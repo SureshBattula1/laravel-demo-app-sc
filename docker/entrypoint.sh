@@ -44,14 +44,26 @@ until php -r '
 done
 echo "Database is up."
 
-# Run migrations. Seed only when migrations actually ran (i.e. a fresh database).
-MIGRATE_OUTPUT="$(php artisan migrate --force 2>&1)"
-echo "$MIGRATE_OUTPUT"
-if echo "$MIGRATE_OUTPUT" | grep -q "Nothing to migrate"; then
-    echo "Database already migrated - skipping seed."
-else
+# Seed only on a database that has never been migrated. A later migration must not reseed.
+MIGRATION_ROWS="$(php -r '
+    try {
+        $pdo = new PDO(
+            "mysql:host=".getenv("DB_HOST").";port=".getenv("DB_PORT").";dbname=".getenv("DB_DATABASE"),
+            getenv("DB_USERNAME"),
+            getenv("DB_PASSWORD")
+        );
+        $count = $pdo->query("SELECT COUNT(*) FROM migrations")->fetchColumn();
+        echo (int) $count;
+    } catch (Throwable $e) {
+        echo "0";
+    }
+' 2>/dev/null || echo 0)"
+php artisan migrate --force
+if [ "${MIGRATION_ROWS:-0}" = "0" ]; then
     echo "Fresh database detected - seeding."
     php artisan db:seed --force || true
+else
+    echo "Existing database - skipping seed."
 fi
 
 php artisan storage:link --force 2>/dev/null || true
@@ -66,6 +78,10 @@ if [ -n "${APP_URL:-}" ]; then
 fi
 
 php artisan config:clear
+
+if [ "${1:-serve}" = "queue" ]; then
+    exec php artisan queue:work database --queue=campaigns,campaigns-materialize,campaigns-send --sleep=1 --tries=3 --timeout=120
+fi
 
 # Serve the API (PHP built-in server is fine for a dev/learning setup).
 exec php artisan serve --host=0.0.0.0 --port=8000

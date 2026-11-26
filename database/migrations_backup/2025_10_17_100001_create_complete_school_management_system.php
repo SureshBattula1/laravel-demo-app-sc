@@ -7,7 +7,7 @@ use Illuminate\Support\Facades\Schema;
 return new class extends Migration
 {
     /**
-     * COMPLETE SCHOOL MANAGEMENT SYSTEM - PROPER ARCHITECTURE
+     * COMPLETE EDUCATION MANAGEMENT SYSTEM - PROPER ARCHITECTURE
      * Separate tables for each user type for better organization
      */
     public function up(): void

@@ -40,7 +40,7 @@ Route::middleware(['auth:sanctum', 'company.auth', 'throttle:120,1'])->group(fun
         Route::delete('/{id}', [CompanyController::class, 'destroy']);
     });
     
-    // School management routes
+    // Education management system routes
     Route::prefix('schools')->group(function () {
         Route::get('/', [SchoolController::class, 'index']);
         Route::post('/', [SchoolController::class, 'store']);

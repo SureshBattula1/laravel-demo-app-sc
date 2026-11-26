@@ -620,6 +620,10 @@ class AttendanceController extends Controller
                 ], 404);
             }
 
+            if ($this->studentIsReadingSomeoneElse(request(), $student->user_id)) {
+                return $this->otherStudentHiddenResponse();
+            }
+
             // Build base query with filters
             // Filter by academic_year_id when toolbar year is set (from X-Academic-Year-Id header)
             $baseQuery = DB::table('student_attendance')
@@ -706,6 +710,10 @@ class AttendanceController extends Controller
                     'success' => false,
                     'message' => 'Student not found',
                 ], 404);
+            }
+
+            if ($this->studentIsReadingSomeoneElse(request(), $student->user_id)) {
+                return $this->otherStudentHiddenResponse();
             }
 
             $baseQuery = DB::table('student_attendance')->where('student_id', $studentId);

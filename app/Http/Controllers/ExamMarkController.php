@@ -25,9 +25,13 @@ class ExamMarkController extends Controller
                 return response()->json(['success' => false, 'message' => 'Schedule not found'], 404);
             }
 
-            $marks = ExamMark::where('exam_schedule_id', $scheduleId)
-                ->with(['student:id,first_name,last_name', 'subject:id,name'])
-                ->get();
+            $marksQuery = ExamMark::where('exam_schedule_id', $scheduleId)
+                ->with(['student:id,first_name,last_name', 'subject:id,name']);
+            $user = $request->user();
+            if ($user && strcasecmp((string) $user->role, 'Student') === 0) {
+                $marksQuery->where('student_id', $user->id);
+            }
+            $marks = $marksQuery->get();
 
             return response()->json(['success' => true, 'data' => $marks]);
         } catch (\Exception $e) {
@@ -129,6 +133,9 @@ class ExamMarkController extends Controller
             if (!$student) {
                 return response()->json(['success' => true, 'data' => []]);
             }
+            if ($this->studentIsReadingSomeoneElse(request(), $student->user_id)) {
+                return $this->otherStudentHiddenResponse();
+            }
 
             // Only show marks for exams in the same branch as the student (company/school scoping)
             $marksQuery = ExamMark::where('exam_marks.student_id', $studentId)
@@ -207,6 +214,9 @@ class ExamMarkController extends Controller
             $student = Student::where('user_id', $studentId)->whereNull('deleted_at')->first();
             if (!$student) {
                 return response()->json(['success' => false, 'message' => 'Student not found'], 404);
+            }
+            if ($this->studentIsReadingSomeoneElse(request(), $student->user_id)) {
+                return $this->otherStudentHiddenResponse();
             }
 
             $overallSummary = $this->summarizeStudentExamMarks(

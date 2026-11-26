@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Permission System Setup Script
-# This script sets up the RBAC permission system for the School Management System
+# This script sets up the RBAC permission system for the Education Management System
 
 echo "🔐 Setting up RBAC Permission System..."
 echo "========================================"

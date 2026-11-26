@@ -294,6 +294,55 @@ abstract class Controller
     }
 
     /**
+     * Fee reads for one student. Accountants and admins use fees.view.
+     * A student may read only their own record. Everyone else is denied.
+     */
+    protected function deniesStudentFeeRead(Request $request, $student): bool
+    {
+        $user = $request->user();
+        if (! $user || ! $student) {
+            return true;
+        }
+
+        if ($user->hasPermission('fees.view')) {
+            return false;
+        }
+
+        $isStudent = $user->role === 'Student' || $user->user_type === 'Student';
+
+        return ! ($isStudent && (int) $user->id === (int) $student->user_id);
+    }
+
+    protected function studentFeeReadDeniedResponse()
+    {
+        return response()->json([
+            'success' => false,
+            'message' => 'You do not have permission to perform this action',
+        ], 403);
+    }
+
+    /**
+     * A student may read only their own user id. Office roles are unchanged.
+     */
+    protected function studentIsReadingSomeoneElse(Request $request, $ownerUserId): bool
+    {
+        $user = $request->user();
+        if (! $user || strcasecmp((string) $user->role, 'Student') !== 0) {
+            return false;
+        }
+
+        return (int) $user->id !== (int) $ownerUserId;
+    }
+
+    protected function otherStudentHiddenResponse()
+    {
+        return response()->json([
+            'success' => false,
+            'message' => 'Student not found',
+        ], 404);
+    }
+
+    /**
      * Apply academic year filter to a query that has both academic_year_id and academic_year columns.
      * Matches academic_year_id OR legacy rows with null academic_year_id and matching academic_year name.
      */

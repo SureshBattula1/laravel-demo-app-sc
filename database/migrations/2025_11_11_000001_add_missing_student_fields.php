@@ -8,7 +8,7 @@ return new class extends Migration
 {
     /**
      * Add only the MISSING comprehensive fields to students table
-     * Based on real Indian school management system requirements
+     * Based on real Indian Education management system requirements
      */
     public function up(): void
     {

@@ -1077,6 +1077,10 @@ class FeeController extends Controller
                 }
             }
 
+            if ($student && $this->deniesStudentFeeRead(request(), $student)) {
+                return $this->studentFeeReadDeniedResponse();
+            }
+
             // If no student record exists, return empty data instead of error
             if (! $student) {
                 Log::warning('No student record found for user_id or student id', ['identifier' => $studentId]);
@@ -1403,10 +1407,14 @@ class FeeController extends Controller
     {
         try {
             $payment = FeePayment::with(['feeStructure', 'student', 'creator'])->findOrFail($id);
+            $isOwner = (int) $payment->student_id === (int) $request->user()->id;
+            if (! $isOwner && ! $request->user()->hasPermission('fees.view')) {
+                return response()->json(['success' => false, 'message' => 'You do not have permission to perform this action'], 403);
+            }
 
-            // Tenant guard — don't leak another school's receipt PDF.
+            // Tenant guard — don't leak another school's receipt PDF. The payer can download their own receipt.
             $payBranch = $payment->branch_id ?? $payment->feeStructure?->branch_id;
-            if (! $this->canAccessBranch($request, (int) $payBranch)) {
+            if (! $isOwner && ! $this->canAccessBranch($request, (int) $payBranch)) {
                 return response()->json(['success' => false, 'message' => 'Fee payment not found'], 404);
             }
 

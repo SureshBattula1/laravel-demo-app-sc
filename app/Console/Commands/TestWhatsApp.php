@@ -29,7 +29,7 @@ class TestWhatsApp extends Command
     public function handle()
     {
         $mobileNumber = $this->argument('mobile_number');
-        $message = $this->argument('message') ?? 'This is a test message from your school management system.';
+        $message = $this->argument('message') ?? 'This is a test message from your Education management system.';
 
         // Format mobile number to +91 format if needed
         if (!str_starts_with($mobileNumber, '+91')) {

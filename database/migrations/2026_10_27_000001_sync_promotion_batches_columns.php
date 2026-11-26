@@ -31,7 +31,9 @@ return new class extends Migration
                 }
             });
 
-            DB::statement("ALTER TABLE `promotion_batches` MODIFY COLUMN `status` VARCHAR(50) NOT NULL DEFAULT 'completed'");
+            if (DB::getDriverName() === 'mysql') {
+                DB::statement("ALTER TABLE `promotion_batches` MODIFY COLUMN `status` VARCHAR(50) NOT NULL DEFAULT 'completed'");
+            }
         }
     }
 

@@ -112,7 +112,7 @@
         <div class="content">
             <p>Hello <strong>{{ $user->first_name }} {{ $user->last_name }}</strong>,</p>
             
-            <p>We received a request to reset the password for your School Management System account.</p>
+            <p>We received a request to reset the password for your Education Management System account.</p>
 
             <div class="button-container">
                 <a href="{{ $resetUrl }}" class="reset-button">Reset Password</a>
@@ -133,11 +133,11 @@
             </div>
 
             <p>Best regards,<br>
-            <strong>School Management System Team</strong></p>
+            <strong>Education Management System Team</strong></p>
         </div>
 
         <div class="footer">
-            <p>&copy; {{ date('Y') }} School Management System. All rights reserved.</p>
+            <p>&copy; {{ date('Y') }} Education Management System. All rights reserved.</p>
             <p>This is an automated email. Please do not reply to this message.</p>
         </div>
     </div>

@@ -82,6 +82,9 @@ class ExamController extends Controller
                 $query->where('is_active', $request->boolean('is_active'));
             }
 
+            // Students keep the exams for their own grade. Office roles are unchanged.
+            $this->limitExamsToStudentGrade($query, $request);
+
             // Sorting
             $sortBy = $request->get('sort_by', 'created_at');
             $sortDir = strtolower($request->get('sort_direction', 'desc')) === 'asc' ? 'asc' : 'desc';
@@ -232,6 +235,13 @@ class ExamController extends Controller
 
             // Tenant guard: don't leak exams from branches the user can't access.
             if (!$this->canAccessBranch($request, (int) $exam->branch_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Exam not found'
+                ], 404);
+            }
+
+            if ($this->studentCannotSeeExam($request, (int) $exam->id)) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Exam not found'
@@ -576,6 +586,9 @@ class ExamController extends Controller
         try {
             // Get student's academic year for filtering
             $student = \App\Models\Student::where('user_id', $studentId)->first();
+            if ($this->studentIsReadingSomeoneElse(request(), $student?->user_id ?? $studentId)) {
+                return $this->otherStudentHiddenResponse();
+            }
             $academicYear = ($student?->academic_year) ?? request('academic_year');
             
             $resultsQuery = \App\Models\ExamResult::where('exam_results.student_id', $studentId)
@@ -639,5 +652,53 @@ class ExamController extends Controller
         if ($percentage >= 50) return 'C';
         if ($percentage >= 40) return 'D';
         return 'F';
+    }
+
+    /**
+     * A student still receives every exam that has a paper for their grade.
+     * Teachers and office staff keep the full branch list.
+     */
+    private function limitExamsToStudentGrade($query, Request $request): void
+    {
+        $user = $request->user();
+        if (! $user || strcasecmp((string) $user->role, 'Student') !== 0) {
+            return;
+        }
+
+        $student = Student::where('user_id', $user->id)->first();
+        if (! $student || $student->grade === null || $student->grade === '') {
+            $query->whereRaw('1 = 0');
+
+            return;
+        }
+
+        $grade = (string) $student->grade;
+        $section = $student->section;
+        $query->whereExists(function ($schedule) use ($grade, $section) {
+            $schedule->select(DB::raw(1))
+                ->from('exam_schedules')
+                ->whereColumn('exam_schedules.exam_id', 'exams.id')
+                ->where('exam_schedules.grade', $grade)
+                ->where(function ($sectionQuery) use ($section) {
+                    $sectionQuery->whereNull('exam_schedules.section')
+                        ->orWhere('exam_schedules.section', '');
+                    if ($section !== null && $section !== '') {
+                        $sectionQuery->orWhere('exam_schedules.section', $section);
+                    }
+                });
+        });
+    }
+
+    private function studentCannotSeeExam(Request $request, int $examId): bool
+    {
+        $user = $request->user();
+        if (! $user || strcasecmp((string) $user->role, 'Student') !== 0) {
+            return false;
+        }
+
+        $query = Exam::query()->where('exams.id', $examId);
+        $this->limitExamsToStudentGrade($query, $request);
+
+        return ! $query->exists();
     }
 }

@@ -119,6 +119,10 @@ class FeeDuesController extends Controller
                 ], 404);
             }
 
+            if ($this->deniesStudentFeeRead(request(), $student)) {
+                return $this->studentFeeReadDeniedResponse();
+            }
+
             $result = $this->duesService->getStudentDues($student->user_id, request()->all());
 
             return response()->json([

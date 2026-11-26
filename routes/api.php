@@ -28,6 +28,7 @@ use App\Http\Controllers\GlobalSearchController;
 use App\Http\Controllers\GlobalUploadController;
 use App\Http\Controllers\GradeController;
 use App\Http\Controllers\HolidayController;
+use App\Http\Controllers\IdCardController;
 use App\Http\Controllers\InvoiceController;
 use App\Http\Controllers\LeaveController;
 use App\Http\Controllers\Library\LibraryCatalogController;
@@ -128,7 +129,7 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
         Route::get('export', [BranchController::class, 'export'])->middleware('permission:branches.export');
 
         // Deleted branches (soft deleted - status = Closed)
-        Route::get('deleted', [BranchController::class, 'getDeleted']);
+        Route::get('deleted', [BranchController::class, 'getDeleted'])->middleware('permission:branches.view');
 
         // Bulk operations
         Route::post('bulk-delete', [BranchController::class, 'bulkDelete'])->middleware('permission:branches.delete');
@@ -138,7 +139,7 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
         Route::get('hierarchy', [BranchController::class, 'getHierarchy']);
         Route::get('hierarchy/{id}', [BranchController::class, 'getHierarchy']);
         Route::get('locations', [BranchController::class, 'getBranchLocations']);
-        Route::get('comparative-analytics', [BranchController::class, 'getComparativeAnalytics']);
+        Route::get('comparative-analytics', [BranchController::class, 'getComparativeAnalytics'])->middleware('permission:branches.stats');
 
         // Branch SMS gateway configs (bulk messaging; credentials encrypted at rest)
         Route::get('{id}/sms-gateway-config', [BranchSmsGatewayConfigController::class, 'index'])
@@ -148,13 +149,16 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
         Route::post('{id}/sms-gateway-config/send-test', [BranchSmsGatewayConfigController::class, 'sendTest'])
             ->middleware(['permission:bulk_management.edit', 'throttle:5,1']);
 
-        // Bulk delivery logs (all accessible branches + academic year; optional ?branch_id=)
-        Route::get('sms-bulk-logs', [SmsBulkQueueLogController::class, 'indexAll']);
-        Route::get('whatsapp-bulk-logs', [WhatsAppBulkQueueLogController::class, 'indexAll']);
+        Route::get('sms-bulk-logs', [SmsBulkQueueLogController::class, 'indexAll'])
+            ->middleware('permission:bulk_management.view');
+        Route::get('whatsapp-bulk-logs', [WhatsAppBulkQueueLogController::class, 'indexAll'])
+            ->middleware('permission:bulk_management.view');
 
         // SMS templates & bulk send (personalized #tags#)
-        Route::get('sms-templates', [SmsTemplateController::class, 'indexAll']);
-        Route::get('sms-templates/tag-catalog', [SmsTemplateController::class, 'tagCatalog']);
+        Route::get('sms-templates', [SmsTemplateController::class, 'indexAll'])
+            ->middleware('permission:bulk_management.view');
+        Route::get('sms-templates/tag-catalog', [SmsTemplateController::class, 'tagCatalog'])
+            ->middleware('permission:bulk_management.view');
         Route::get('{id}/sms-templates', [SmsTemplateController::class, 'index'])
             ->middleware('permission:bulk_management.view');
         Route::post('{id}/sms-templates', [SmsTemplateController::class, 'store'])
@@ -242,39 +246,37 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
         ->middleware('permission:search.global');
 
     // Teacher Routes
-    Route::get('teachers', [TeacherController::class, 'index']);
+    Route::get('teachers', [TeacherController::class, 'index'])->middleware('permission:teachers.view');
     Route::post('teachers', [TeacherController::class, 'store'])->middleware('permission:teachers.create');
-    Route::get('teachers/export', [TeacherController::class, 'export']);
-    Route::get('teachers/{id}', [TeacherController::class, 'show']);
+        Route::get('teachers/export', [TeacherController::class, 'export'])->middleware('permission:teachers.export');
+    Route::get('teachers/{id}', [TeacherController::class, 'show'])->middleware('permission:teachers.view');
     Route::put('teachers/{id}', [TeacherController::class, 'update'])->middleware('permission:teachers.edit');
     Route::delete('teachers/{id}', [TeacherController::class, 'destroy'])->middleware('permission:teachers.delete');
     Route::post('teachers/{id}/restore', [TeacherController::class, 'restore'])->middleware('permission:teachers.delete');
     Route::post('teachers/{id}/upload-profile-picture', [TeacherController::class, 'uploadProfilePicture']);
 
     // Student Routes
-    Route::get('students', [StudentController::class, 'index']);
+    Route::get('students', [StudentController::class, 'index'])->middleware('permission:students.view');
     Route::post('students', [StudentController::class, 'store'])->middleware('permission:students.create');
-    Route::get('students/export', [StudentController::class, 'export']);
+        Route::get('students/export', [StudentController::class, 'export'])->middleware('permission:students.export');
     Route::get('students/by-user/{userId}', [StudentController::class, 'getByUserId']);
-    Route::get('students/{studentUserId}/exam-progress-card.pdf', [\App\Http\Controllers\StudentExamProgressCardController::class, 'download'])
-        ->whereNumber('studentUserId');
-    Route::get('students/{studentUserId}/fee-statement.pdf', [\App\Http\Controllers\StudentFeeStatementController::class, 'download'])
-        ->whereNumber('studentUserId');
+    Route::get('students/{studentUserId}/exam-progress-card.pdf', [\App\Http\Controllers\StudentExamProgressCardController::class, 'download']);
+    Route::get('students/{studentUserId}/fee-statement.pdf', [\App\Http\Controllers\StudentFeeStatementController::class, 'download']);
 
     // Promotion routes - MUST come before students/{id} to avoid route conflicts
-    Route::get('students/promotion-dashboard-stats', [StudentController::class, 'getPromotionDashboardStats']);
-    Route::get('students/promotion-batches', [StudentController::class, 'getPromotionBatches']);
-    Route::get('students/promotion-batches/{batchId}', [StudentController::class, 'getPromotionBatchDetails']);
-    Route::post('students/promotion-batches/{batchId}/revert', [StudentController::class, 'revertPromotionBatch']);
-    Route::post('students/promote', [StudentController::class, 'promote']);
-    Route::post('students/promote-with-fee-handling', [StudentController::class, 'promoteWithFeeHandling']);
-    Route::post('students/preview-promotion', [StudentController::class, 'previewPromotion']);
-    Route::post('students/revert-promotion', [StudentController::class, 'revertPromotion']);
-    Route::get('students/{id}/promotion-history', [StudentController::class, 'getPromotionHistory']);
+    Route::get('students/promotion-dashboard-stats', [StudentController::class, 'getPromotionDashboardStats'])->middleware('permission:students.promote');
+    Route::get('students/promotion-batches', [StudentController::class, 'getPromotionBatches'])->middleware('permission:students.promote');
+    Route::get('students/promotion-batches/{batchId}', [StudentController::class, 'getPromotionBatchDetails'])->middleware('permission:students.promote');
+    Route::post('students/promotion-batches/{batchId}/revert', [StudentController::class, 'revertPromotionBatch'])->middleware('permission:students.promote');
+    Route::post('students/promote', [StudentController::class, 'promote'])->middleware('permission:students.promote');
+    Route::post('students/promote-with-fee-handling', [StudentController::class, 'promoteWithFeeHandling'])->middleware('permission:students.promote');
+    Route::post('students/preview-promotion', [StudentController::class, 'previewPromotion'])->middleware('permission:students.promote');
+    Route::post('students/revert-promotion', [StudentController::class, 'revertPromotion'])->middleware('permission:students.promote');
+    Route::get('students/{id}/promotion-history', [StudentController::class, 'getPromotionHistory'])->middleware('permission:students.view');
     Route::get('students/{id}/dues', [StudentController::class, 'getStudentDues']);
 
     // Student CRUD routes with parameters
-    Route::get('students/{id}', [StudentController::class, 'show']);
+    Route::get('students/{id}', [StudentController::class, 'show'])->middleware('permission:students.view');
     Route::put('students/{id}', [StudentController::class, 'update'])->middleware('permission:students.edit');
     Route::delete('students/{id}', [StudentController::class, 'destroy'])->middleware('permission:students.delete');
     Route::post('students/{id}/restore', [StudentController::class, 'restore'])->middleware('permission:students.delete');
@@ -293,7 +295,7 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
     });
 
     // Grade Routes - Full CRUD
-    Route::get('grades/export', [GradeController::class, 'export']);
+    Route::get('grades/export', [GradeController::class, 'export'])->middleware('permission:grades.view');
     Route::apiResource('grades', GradeController::class)->only(['index', 'show'])->parameters([
         'grades' => 'value',
     ]);
@@ -354,16 +356,16 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
     Route::apiResource('exams', ExamController::class)->only(['store'])->middleware('permission:exams.create');
     Route::apiResource('exams', ExamController::class)->only(['update'])->middleware('permission:exams.edit');
     Route::apiResource('exams', ExamController::class)->only(['destroy'])->middleware('permission:exams.delete');
-    Route::get('exams/{id}/statistics', [ExamController::class, 'statistics']);
+    Route::get('exams/{id}/statistics', [ExamController::class, 'statistics'])->middleware('permission:exams.view');
     Route::post('exam-results', [ExamController::class, 'storeResult'])->middleware('permission:exams.results');
-    Route::get('exams/{id}/results', [ExamController::class, 'getResults']);
+    Route::get('exams/{id}/results', [ExamController::class, 'getResults'])->middleware('permission:exams.view');
     Route::get('students/{studentId}/results', [ExamController::class, 'getStudentResults']);
 
     // Exam Terms
     Route::prefix('exam-terms')->group(function () {
-        Route::get('/', [ExamTermController::class, 'index']);
+        Route::get('/', [ExamTermController::class, 'index'])->middleware('permission:exams.view');
         Route::post('/', [ExamTermController::class, 'store'])->middleware('permission:exams.create');
-        Route::get('{id}', [ExamTermController::class, 'show']);
+        Route::get('{id}', [ExamTermController::class, 'show'])->middleware('permission:exams.view');
         Route::put('{id}', [ExamTermController::class, 'update'])->middleware('permission:exams.edit');
         Route::delete('{id}', [ExamTermController::class, 'destroy'])->middleware('permission:exams.delete');
     });
@@ -409,17 +411,18 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
         Route::get('by-class', [FeeController::class, 'getStudentFeesByClass'])->middleware('permission:fees.view');
         Route::get('/', [FeeController::class, 'indexPayments'])->middleware('permission:fees.view');
         Route::post('/', [FeeController::class, 'recordPayment'])->middleware('permission:fees.collect');
-        Route::get('{id}/receipt', [FeeController::class, 'downloadReceipt'])->middleware('permission:fees.view');
+        Route::get('{id}/receipt', [FeeController::class, 'downloadReceipt']);
         Route::get('{id}', [FeeController::class, 'showPayment'])->middleware('permission:fees.view');
     });
-    Route::get('students/{studentId}/fees', [FeeController::class, 'getStudentFees'])->middleware('permission:fees.view');
+    // Students may read their own fees; other roles still need fees.view (enforced in the controller).
+    Route::get('students/{studentId}/fees', [FeeController::class, 'getStudentFees']);
 
     // Fee Dues routes
     Route::apiResource('fee-dues', FeeDuesController::class)->only(['index', 'show'])->middleware('permission:fees.view');
     Route::apiResource('fee-dues', FeeDuesController::class)->only(['store'])->middleware('permission:fees.create');
     Route::apiResource('fee-dues', FeeDuesController::class)->only(['update'])->middleware('permission:fees.edit');
     Route::apiResource('fee-dues', FeeDuesController::class)->only(['destroy'])->middleware('permission:fees.delete');
-    Route::get('fee-dues/student/{studentId}', [FeeDuesController::class, 'getStudentDues'])->middleware('permission:fees.view');
+    Route::get('fee-dues/student/{studentId}', [FeeDuesController::class, 'getStudentDues']);
     Route::post('fee-dues/{id}/apply-payment', [FeeDuesController::class, 'applyPayment'])->middleware('permission:fees.collect');
     Route::post('fee-dues/{id}/waive', [FeeDuesController::class, 'waiveDue'])->middleware('permission:fees.edit');
     Route::post('fee-dues/{id}/revert', [FeeDuesController::class, 'revertDue'])->middleware('permission:fees.edit');
@@ -465,12 +468,22 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
     Route::apiResource('attendance', AttendanceController::class)->only(['destroy'])->middleware('permission:student_attendance.delete')->parameters(['attendance' => 'id']);
     Route::apiResource('attendance', AttendanceController::class)->only(['store'])->middleware('permission:student_attendance.mark')->parameters(['attendance' => 'id']);
 
+    Route::get('id-cards/me', [IdCardController::class, 'me']);
+    Route::get('id-cards', [IdCardController::class, 'index']);
+    Route::post('id-cards/issue', [IdCardController::class, 'issue']);
+    Route::post('id-cards/verify', [IdCardController::class, 'verify']);
+    Route::get('id-cards/{id}/scans', [IdCardController::class, 'scans']);
+    Route::get('id-cards/{id}/print.pdf', [IdCardController::class, 'print']);
+    Route::post('id-cards/{id}/status', [IdCardController::class, 'updateStatus']);
+
     // Leave Routes (specific routes MUST come before apiResource)
     Route::get('leaves/student/{studentId}', [LeaveController::class, 'getStudentLeaves']);
     Route::get('leaves/teacher/{teacherId}', [LeaveController::class, 'getTeacherLeaves']);
     Route::apiResource('leaves', LeaveController::class)->only(['index', 'show']);
-    Route::apiResource('leaves', LeaveController::class)->only(['store'])->middleware('permission:leaves.create');
-    Route::apiResource('leaves', LeaveController::class)->only(['update'])->middleware('permission:leaves.edit');
+    // Own applications are allowed without leaves.create / leaves.edit. The controller
+    // still requires those permissions to apply or change someone else's leave.
+    Route::apiResource('leaves', LeaveController::class)->only(['store']);
+    Route::apiResource('leaves', LeaveController::class)->only(['update']);
     Route::apiResource('leaves', LeaveController::class)->only(['destroy'])->middleware('permission:leaves.delete');
 
     // Library Routes (permission-gated; literal routes before {id} routes so
@@ -721,6 +734,8 @@ Route::middleware(['auth:sanctum', 'school.account.active', 'throttle:180,1'])->
     // Invoice Routes - Advanced with transaction integration
     Route::prefix('invoices')->group(function () {
         Route::get('/', [InvoiceController::class, 'index'])->middleware('permission:invoices.view');
+        Route::get('mine', [InvoiceController::class, 'mine']);
+        Route::get('{id}/print.pdf', [InvoiceController::class, 'printPdf']);
         Route::post('/', [InvoiceController::class, 'store'])->middleware('permission:invoices.create');
         Route::get('stats', [InvoiceController::class, 'getStats'])->middleware('permission:invoices.view');
         Route::get('search-transactions', [InvoiceController::class, 'searchTransactions'])->middleware('permission:invoices.view');

@@ -123,14 +123,6 @@ return new class extends Migration
 
     private function indexExists(string $table, string $index): bool
     {
-        $connection = Schema::getConnection();
-        $db = $connection->getDatabaseName();
-
-        $rows = DB::select(
-            'SELECT 1 FROM information_schema.statistics WHERE table_schema = ? AND table_name = ? AND index_name = ? LIMIT 1',
-            [$db, $table, $index]
-        );
-
-        return count($rows) > 0;
+        return Schema::hasIndex($table, $index);
     }
 };

@@ -63,7 +63,11 @@ class ExamScheduleController extends Controller
 
             // Student view: show only schedules for this student's branch, grade, and section
             if ($request->has('student_id')) {
-                $student = \App\Models\Student::find($request->student_id);
+                $studentKey = $request->input('student_id');
+                $student = \App\Models\Student::find($studentKey);
+                if (! $student) {
+                    $student = \App\Models\Student::where('user_id', $studentKey)->first();
+                }
                 if ($student) {
                     $query->whereHas('exam', function ($q) use ($student) {
                         $q->where('branch_id', $student->branch_id);
@@ -437,6 +441,11 @@ class ExamScheduleController extends Controller
                 ->join('users', 'students.user_id', '=', 'users.id')
                 ->whereNull('students.deleted_at')
                 ->where('students.student_status', 'Active');
+
+            $user = $request->user();
+            if ($user && strcasecmp((string) $user->role, 'Student') === 0) {
+                $query->where('students.user_id', $user->id);
+            }
 
             $academicYearId = $schedule->exam?->academic_year_id;
             StudentEnrollmentScope::whereInClass(

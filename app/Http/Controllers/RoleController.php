@@ -405,9 +405,13 @@ class RoleController extends Controller
             return $this->forbiddenResponse('You do not have permission to modify permissions for this role');
         }
 
+        $request->merge([
+            'permissions' => $this->permissionIds($request->input('permissions', [])),
+        ]);
+
         $validator = Validator::make($request->all(), [
             'permissions' => 'required|array',
-            'permissions.*' => 'exists:permissions,id',
+            'permissions.*' => 'integer|exists:permissions,id',
         ]);
 
         if ($validator->fails()) {
@@ -462,9 +466,39 @@ class RoleController extends Controller
 
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to update permissions: '.$e->getMessage(),
+                'message' => 'Failed to update permissions',
             ], 500);
         }
+    }
+
+    /**
+     * Permission ids arrive as hash tokens. Decode them before the exists check.
+     *
+     * @param  mixed  $permissions
+     * @return array<int, mixed>
+     */
+    private function permissionIds(mixed $permissions): array
+    {
+        if (! is_array($permissions)) {
+            return [];
+        }
+
+        $hasher = app(\App\Support\IdHasher::class);
+
+        return array_map(function ($permissionId) use ($hasher) {
+            if (is_int($permissionId) || (is_string($permissionId) && ctype_digit($permissionId))) {
+                return (int) $permissionId;
+            }
+
+            if ($hasher->enabled() && is_string($permissionId)) {
+                $decoded = $hasher->decode($permissionId);
+                if ($decoded !== null) {
+                    return $decoded;
+                }
+            }
+
+            return $permissionId;
+        }, $permissions);
     }
 
     /**

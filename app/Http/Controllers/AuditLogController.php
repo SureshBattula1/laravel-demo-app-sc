@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Traits\PaginatesAndSorts;
 use App\Models\AuditLog;
+use App\Services\AuditLogValueNamer;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -69,6 +70,39 @@ class AuditLogController extends Controller
     }
 
     /**
+     * Roles grouped the way the audit screen filters people.
+     *
+     * @return array<string, list<string>>
+     */
+    protected function actorCategoryRoles(): array
+    {
+        return [
+            'admin' => ['SuperAdmin', 'BranchAdmin', 'Admin', 'CompanyAdmin'],
+            'teacher' => ['Teacher'],
+            'staff' => ['Staff', 'Accountant', 'Librarian'],
+            'students_parents' => ['Student', 'Parent'],
+            'driver' => ['Driver'],
+        ];
+    }
+
+    protected function applyActorCategoryFilter($query, string $category): void
+    {
+        $groups = $this->actorCategoryRoles();
+        if ($category === 'others') {
+            $known = array_merge(...array_values($groups));
+            $query->where(function ($q) use ($known) {
+                $q->whereNull('user_role')->orWhereNotIn('user_role', $known);
+            });
+
+            return;
+        }
+
+        if (isset($groups[$category])) {
+            $query->whereIn('user_role', $groups[$category]);
+        }
+    }
+
+    /**
      * Apply tenant (company / school / branch) and request filters to an AuditLog query.
      */
     protected function buildFilteredQuery(Request $request)
@@ -83,11 +117,17 @@ class AuditLogController extends Controller
 
         if ($accessibleBranchIds === 'all') {
             if ($schoolId) {
-                $query->where(function ($q) use ($schoolId, $companyId) {
+                $query->where(function ($q) use ($schoolId, $companyId, $user) {
                     $q->where('school_id', $schoolId);
                     if ($companyId) {
                         $q->orWhere(function ($cq) use ($companyId) {
                             $cq->whereNull('school_id')->where('company_id', $companyId);
+                        });
+                    }
+                    // Sign-in rows for this person stay visible even when no campus was known yet.
+                    if ($user) {
+                        $q->orWhere(function ($uq) use ($user) {
+                            $uq->where('module', 'auth')->where('user_id', $user->id);
                         });
                     }
                 });
@@ -141,6 +181,10 @@ class AuditLogController extends Controller
 
         if ($request->filled('user_role')) {
             $query->where('user_role', $request->user_role);
+        }
+
+        if ($request->filled('actor_category')) {
+            $this->applyActorCategoryFilter($query, (string) $request->actor_category);
         }
 
         if ($request->filled('auditable_type')) {
@@ -241,6 +285,7 @@ class AuditLogController extends Controller
             $items = collect($logs->items())->map(function (AuditLog $log) {
                 return $log->toArray();
             })->all();
+            app(AuditLogValueNamer::class)->apply($items);
 
             return response()->json([
                 'success' => true,
@@ -387,13 +432,20 @@ class AuditLogController extends Controller
                     ->limit(25)
                     ->get([
                         'id', 'uuid', 'action', 'severity', 'description',
-                        'user_name', 'user_role', 'changed_fields', 'created_at',
+                        'user_name', 'user_role', 'changed_fields', 'record_label',
+                        'auditable_type', 'auditable_id', 'created_at',
                     ]);
             }
 
             $data = $log->toArray();
             $data['signature_valid'] = $log->verifySignature();
-            $data['entity_timeline'] = $entityTimeline;
+            $timeline = collect($entityTimeline)->map(fn ($entry) => $entry->toArray())->all();
+            $rows = [$data];
+            $namer = app(AuditLogValueNamer::class);
+            $namer->apply($rows);
+            $namer->apply($timeline);
+            $data = $rows[0];
+            $data['entity_timeline'] = $timeline;
 
             return response()->json([
                 'success' => true,

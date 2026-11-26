@@ -11,6 +11,16 @@ abstract class TestCase extends BaseTestCase
     use CreatesApplication, RefreshDatabase, WithFaker;
 
     /**
+     * SQLite rejects migrate:fresh when --drop-types is present, even as false.
+     */
+    protected function migrateFreshUsing()
+    {
+        return [
+            '--seed' => false,
+        ];
+    }
+
+    /**
      * Helper method to create an authenticated user
      */
     protected function createAuthenticatedUser($role = 'BranchAdmin', $attributes = [])

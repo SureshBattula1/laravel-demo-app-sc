@@ -346,7 +346,7 @@ class NotificationCampaignController extends Controller
     {
         $this->applyBranchFilter($query, $request, 'branch_id');
 
-        $branchId = (int) $request->query('branch_id', 0);
+        $branchId = $this->resolveBranchIdFromRequest($request) ?? 0;
         if ($branchId > 0) {
             $query->where('branch_id', $branchId);
         }
@@ -373,45 +373,34 @@ class NotificationCampaignController extends Controller
             ->where('module', $module);
         $this->applyBranchFilter($query, $request, 'branch_id');
 
-        $branchId = (int) $request->query('branch_id', 0);
+        $branchId = $this->resolveBranchIdFromRequest($request) ?? 0;
         if ($branchId > 0) {
             $query->where('branch_id', $branchId);
         }
 
-        $gradeFilter = trim((string) $request->query('grade', ''));
-        $sectionFilter = trim((string) $request->query('section', ''));
-        $statusFilter = strtolower(trim((string) $request->query('status', '')));
         $includesTeam = trim((string) $request->query('includes_team', ''));
         $teamRole = trim((string) $request->query('team_role', ''));
-        $search = mb_strtolower(trim((string) $request->query('search', '')));
+        $this->constrainCampaignIndexQuery($query, $request);
 
-        $campaigns = $query->orderByDesc('id')->get();
+        $page = max(1, (int) $request->query('page', 1));
+        $perPage = max(1, min(100, (int) $request->query('per_page', 25)));
+        $query->orderByDesc('scheduled_at')->orderByDesc('id');
 
-        if ($module === 'custom') {
-            return $this->indexCustomCampaignsResponse($request, $campaigns);
+        if ($teamRole !== '') {
+            $matched = $query->get()->filter(
+                fn ($campaign) => $this->campaigns->campaignMatchesTeamListFilters($campaign, $includesTeam, $teamRole)
+            )->values();
+            $total = $matched->count();
+            $campaigns = $matched->slice(($page - 1) * $perPage, $perPage);
+        } else {
+            $total = (clone $query)->count();
+            $campaigns = $query->forPage($page, $perPage)->get();
         }
 
         $flat = [];
         foreach ($campaigns as $campaign) {
-            if (! $this->campaigns->campaignMatchesTeamListFilters($campaign, $includesTeam, $teamRole)) {
-                continue;
-            }
-            if (! $this->campaigns->campaignMatchesTargetFilters($campaign, $gradeFilter, $sectionFilter)) {
-                continue;
-            }
-
             $scopeLabel = $this->campaigns->campaignListScopeLabel($campaign);
             $rowStatus = $this->campaigns->customCampaignListStatus($campaign);
-
-            if ($statusFilter === 'pending') {
-                $pending = in_array($rowStatus, ['pending', 'sending', 'materializing', 'queued'], true);
-                if (! $pending) {
-                    continue;
-                }
-            }
-            if (in_array($statusFilter, ['sent', 'send'], true) && $rowStatus !== 'sent') {
-                continue;
-            }
 
             $row = [
                 'id' => $campaign->id,
@@ -432,40 +421,17 @@ class NotificationCampaignController extends Controller
                 'failed_count' => (int) $campaign->failed_count,
             ];
 
-            if ($search !== '') {
-                $sectionLabels = implode(' ', $this->campaigns->customCampaignSectionLabels($campaign));
-                $haystack = mb_strtolower(implode(' ', [
-                    (string) $row['branch'],
-                    $scopeLabel,
-                    $sectionLabels,
-                    (string) $row['status'],
-                    (string) $campaign->id,
-                    (string) $row['event_date'],
-                ]));
-                if (! str_contains($haystack, $search)) {
-                    continue;
-                }
-            }
-
             $flat[] = $row;
         }
 
-        usort($flat, function (array $a, array $b): int {
-            return strcmp((string) ($b['scheduled_at'] ?? ''), (string) ($a['scheduled_at'] ?? ''));
-        });
-
-        $page = max(1, (int) $request->query('page', 1));
-        $perPage = max(1, min(100, (int) $request->query('per_page', 25)));
-        $slice = array_slice($flat, ($page - 1) * $perPage, $perPage);
-
         return response()->json([
             'success' => true,
-            'data' => array_values($slice),
+            'data' => array_values($flat),
             'meta' => [
                 'current_page' => $page,
                 'per_page' => $perPage,
-                'total' => count($flat),
-                'last_page' => (int) max(1, ceil(count($flat) / $perPage)),
+                'total' => $total,
+                'last_page' => (int) max(1, ceil($total / $perPage)),
             ],
         ]);
     }
@@ -478,6 +444,9 @@ class NotificationCampaignController extends Controller
         }
 
         $gradeLabels = DB::table('grades')->pluck('label', 'value');
+        $engagement = $campaign->recipients()
+            ->selectRaw('SUM(viewed_at IS NOT NULL) as viewed_count, SUM(liked_at IS NOT NULL) as liked_count')
+            ->first();
 
         return response()->json([
             'success' => true,
@@ -493,8 +462,8 @@ class NotificationCampaignController extends Controller
                 'recipient_count' => $campaign->recipient_count,
                 'sent_count' => $campaign->sent_count,
                 'failed_count' => $campaign->failed_count,
-                'viewed_count' => $campaign->recipients()->whereNotNull('viewed_at')->count(),
-                'liked_count' => $campaign->recipients()->whereNotNull('liked_at')->count(),
+                'viewed_count' => (int) ($engagement->viewed_count ?? 0),
+                'liked_count' => (int) ($engagement->liked_count ?? 0),
                 'expected_recipient_count' => (int) $campaign->expected_recipient_count,
                 'targets' => $campaign->targets->map(function ($target) use ($gradeLabels) {
                     return [
@@ -625,7 +594,7 @@ class NotificationCampaignController extends Controller
 
     public function templates(Request $request)
     {
-        $branchId = (int) $request->query('branch_id');
+        $branchId = $this->resolveBranchIdFromRequest($request) ?? 0;
         if ($branchId <= 0 || ! $this->canAccessBranch($request, $branchId)) {
             return response()->json(['success' => false, 'message' => 'Branch is required'], 422);
         }
@@ -644,7 +613,7 @@ class NotificationCampaignController extends Controller
 
     public function markedAttendance(Request $request)
     {
-        $branchId = (int) $request->query('branch_id');
+        $branchId = $this->resolveBranchIdFromRequest($request) ?? 0;
         $date = (string) $request->query('date', '');
         if ($branchId <= 0 || ! $this->canAccessBranch($request, $branchId)) {
             return response()->json(['success' => false, 'message' => 'Branch is required'], 422);
@@ -847,7 +816,11 @@ class NotificationCampaignController extends Controller
             if (! in_array($key, $allowed, true) || ! $templateId) {
                 continue;
             }
-            $map[$key] = (int) $templateId;
+            $resolvedTemplateId = $this->intId($templateId);
+            if ($resolvedTemplateId === null) {
+                continue;
+            }
+            $map[$key] = $resolvedTemplateId;
         }
         $staffUserIds = $this->campaigns->filterValidStaffUserIds(
             $branchId,
@@ -857,8 +830,7 @@ class NotificationCampaignController extends Controller
             $branchId,
             array_map('intval', $request->input('teacher_user_ids', []) ?? [])
         );
-        $staffTemplateId = $request->input('staff_template_id');
-        $staffTemplateId = $staffTemplateId !== null && $staffTemplateId !== '' ? (int) $staffTemplateId : null;
+        $staffTemplateId = $this->intId($request->input('staff_template_id'));
         $module = (string) $request->module;
         $eventDate = $request->event_date ? (string) $request->event_date : null;
 
@@ -890,6 +862,22 @@ class NotificationCampaignController extends Controller
             }
         } elseif ($targets === [] && $staffUserIds === []) {
             return response()->json(['success' => false, 'message' => 'Select at least one class section or staff member'], 422);
+        }
+
+        if ($module === 'holidays') {
+            if ($targets === []) {
+                return response()->json(['success' => false, 'message' => 'Select at least one class section'], 422);
+            }
+            $teacherIds = array_values(array_intersect(
+                $staffUserIds,
+                $this->campaigns->staffUserIdsForTeamRole($branchId, 'teachers')
+            ));
+            if ($teacherIds === []) {
+                return response()->json(['success' => false, 'message' => 'Select at least one teacher'], 422);
+            }
+            if ($staffTemplateId === null || $staffTemplateId <= 0) {
+                $staffTemplateId = (int) ($map['announcement'] ?? 0);
+            }
         }
 
         if ($targets !== [] && $map === []) {
@@ -1100,26 +1088,22 @@ class NotificationCampaignController extends Controller
 
     private function resolveBranchIdFromRequest(Request $request): ?int
     {
-        $raw = $request->query('branch_id') ?? $request->input('branch_id');
-        if ($raw === null || $raw === '') {
-            return null;
-        }
-        if (is_string($raw) && ! ctype_digit($raw)) {
-            $decoded = app(\App\Support\IdHasher::class)->decode($raw);
-
-            return $decoded ?: null;
-        }
-
-        $id = (int) $raw;
-
-        return $id > 0 ? $id : null;
+        return $this->intId($request->query('branch_id') ?? $request->input('branch_id'));
     }
 
     private function resolveExamIdFromRequest(Request $request): ?int
     {
-        $raw = $request->query('exam_id') ?? $request->input('exam_id');
+        return $this->intId($request->query('exam_id') ?? $request->input('exam_id'));
+    }
+
+    /** Integer id, or a hashid token from the SPA. Status keys in template_map are not id fields, so the hash decoder leaves those values as tokens. */
+    private function intId(mixed $raw): ?int
+    {
         if ($raw === null || $raw === '') {
             return null;
+        }
+        if (is_int($raw)) {
+            return $raw > 0 ? $raw : null;
         }
         if (is_string($raw) && ! ctype_digit($raw)) {
             $decoded = app(\App\Support\IdHasher::class)->decode($raw);
@@ -1131,95 +1115,47 @@ class NotificationCampaignController extends Controller
         return $id > 0 ? $id : null;
     }
 
-    /**
-     * Custom campaigns: one list row per notification (not per class section).
-     *
-     * @param  \Illuminate\Support\Collection<int, NotificationCampaign>  $campaigns
-     */
-    private function indexCustomCampaignsResponse(Request $request, $campaigns): \Illuminate\Http\JsonResponse
+    private function constrainCampaignIndexQuery($query, Request $request): void
     {
-        $statusFilter = strtolower(trim((string) $request->query('status', '')));
-        $includesTeam = trim((string) $request->query('includes_team', ''));
-        $teamRole = trim((string) $request->query('team_role', ''));
-        $search = mb_strtolower(trim((string) $request->query('search', '')));
-        $flat = [];
-
         $gradeFilter = trim((string) $request->query('grade', ''));
         $sectionFilter = trim((string) $request->query('section', ''));
-
-        foreach ($campaigns as $campaign) {
-            if (! $this->campaigns->campaignMatchesTeamListFilters($campaign, $includesTeam, $teamRole)) {
-                continue;
-            }
-            if (! $this->campaigns->campaignMatchesTargetFilters($campaign, $gradeFilter, $sectionFilter)) {
-                continue;
-            }
-            $scopeLabel = $this->campaigns->customCampaignScopeLabel($campaign);
-            $rowStatus = $this->campaigns->customCampaignListStatus($campaign);
-
-            if ($statusFilter === 'pending') {
-                $pending = in_array($rowStatus, ['pending', 'sending', 'materializing', 'queued'], true);
-                if (! $pending) {
-                    continue;
+        if ($gradeFilter !== '' || $sectionFilter !== '') {
+            $query->whereHas('targets', function ($targets) use ($gradeFilter, $sectionFilter) {
+                if ($gradeFilter !== '') {
+                    $targets->where('grade', $gradeFilter);
                 }
-            }
-            if (in_array($statusFilter, ['sent', 'send'], true) && $rowStatus !== 'sent') {
-                continue;
-            }
-
-            $row = [
-                'id' => $campaign->id,
-                'target_id' => null,
-                'module' => 'custom',
-                'branch' => $campaign->branch?->name,
-                'branch_id' => $campaign->branch_id,
-                'grade' => null,
-                'section' => null,
-                'class_name' => null,
-                'class_display' => $scopeLabel,
-                'event_date' => optional($campaign->event_date)->toDateString(),
-                'scheduled_at' => optional($campaign->scheduled_at)?->utc()->toIso8601String(),
-                'student_count' => $this->campaigns->campaignListStudentCount($campaign),
-                'status' => $rowStatus,
-                'campaign_status' => $campaign->status,
-                'sent_count' => (int) $campaign->sent_count,
-                'failed_count' => (int) $campaign->failed_count,
-            ];
-
-            if ($search !== '') {
-                $sectionLabels = implode(' ', $this->campaigns->customCampaignSectionLabels($campaign));
-                $haystack = mb_strtolower(implode(' ', [
-                    (string) $row['branch'],
-                    $scopeLabel,
-                    $sectionLabels,
-                    (string) $row['status'],
-                    (string) $campaign->id,
-                ]));
-                if (! str_contains($haystack, $search)) {
-                    continue;
+                if ($sectionFilter !== '') {
+                    $targets->where('section', $sectionFilter);
                 }
-            }
-
-            $flat[] = $row;
+            });
         }
 
-        usort($flat, function (array $a, array $b): int {
-            return strcmp((string) ($b['scheduled_at'] ?? ''), (string) ($a['scheduled_at'] ?? ''));
+        $statusFilter = strtolower(trim((string) $request->query('status', '')));
+        if ($statusFilter === 'pending') {
+            $query->whereIn('status', ['pending', 'sending', 'materializing', 'queued']);
+        } elseif (in_array($statusFilter, ['sent', 'send'], true)) {
+            $query->where('status', 'sent');
+        }
+
+        $includesTeam = trim((string) $request->query('includes_team', ''));
+        if ($includesTeam === '1') {
+            $query->whereJsonLength('staff_user_ids', '>', 0);
+        } elseif ($includesTeam === '0') {
+            $query->where(function ($inner) {
+                $inner->whereNull('staff_user_ids')->orWhereJsonLength('staff_user_ids', 0);
+            });
+        }
+
+        $search = trim((string) $request->query('search', ''));
+        if ($search === '') {
+            return;
+        }
+        $like = '%'.addcslashes($search, '%_\\').'%';
+        $query->where(function ($inner) use ($like) {
+            $inner->whereHas('branch', fn ($branch) => $branch->where('name', 'like', $like))
+                ->orWhereHas('targets', function ($targets) use ($like) {
+                    $targets->where('grade', 'like', $like)->orWhere('section', 'like', $like);
+                });
         });
-
-        $page = max(1, (int) $request->query('page', 1));
-        $perPage = max(1, min(100, (int) $request->query('per_page', 25)));
-        $slice = array_slice($flat, ($page - 1) * $perPage, $perPage);
-
-        return response()->json([
-            'success' => true,
-            'data' => array_values($slice),
-            'meta' => [
-                'current_page' => $page,
-                'per_page' => $perPage,
-                'total' => count($flat),
-                'last_page' => (int) max(1, ceil(count($flat) / $perPage)),
-            ],
-        ]);
     }
 }

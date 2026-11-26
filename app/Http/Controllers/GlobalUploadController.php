@@ -26,7 +26,7 @@ class GlobalUploadController extends Controller
             return false;
         }
 
-        foreach (['branches.edit', 'import.upload', 'students.create', 'teachers.create', 'assignments.create', 'notifications.create'] as $permission) {
+        foreach (['branches.edit', 'import.upload', 'students.create', 'students.edit', 'teachers.create', 'teachers.edit', 'assignments.create', 'notifications.create'] as $permission) {
             if ($user->hasPermission($permission)) {
                 return true;
             }

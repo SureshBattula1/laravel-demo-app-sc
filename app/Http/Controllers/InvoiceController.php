@@ -5,7 +5,9 @@ namespace App\Http\Controllers;
 use App\Http\Traits\PaginatesAndSorts;
 use App\Models\Invoice;
 use App\Models\InvoiceItem;
+use App\Models\Student;
 use App\Models\Transaction;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -546,6 +548,63 @@ class InvoiceController extends Controller
     /**
      * Get single invoice
      */
+    public function mine(Request $request)
+    {
+        $student = Student::query()->where('user_id', $request->user()->id)->first();
+        if (! $student) {
+            return response()->json(['success' => true, 'data' => []]);
+        }
+
+        $rows = Invoice::query()
+            ->with('items:id,invoice_id,description,quantity,unit_price,amount')
+            ->where('student_id', $student->id)
+            ->latest('id')
+            ->limit(50)
+            ->get();
+
+        return response()->json(['success' => true, 'data' => $rows]);
+    }
+
+    public function printPdf($id)
+    {
+        $invoice = Invoice::with(['branch', 'items'])->findOrFail($id);
+        if (! $this->canReadInvoice(request(), $invoice)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You do not have permission to perform this action',
+            ], 403);
+        }
+
+        $rows = '';
+        foreach ($invoice->items as $item) {
+            $rows .= '<tr><td>'.e($item->description).'</td><td>'.e($item->quantity).'</td><td>'.e($item->unit_price).'</td><td>'.e($item->amount).'</td></tr>';
+        }
+        $html = '<html><body style="font-family:sans-serif"><h1>Invoice '.e($invoice->invoice_number).'</h1>'
+            .'<p>'.e($invoice->branch?->name).'</p>'
+            .'<p>Bill to: '.e($invoice->customer_name).'</p>'
+            .'<p>Date: '.e(optional($invoice->invoice_date)->toDateString()).' · Due: '.e(optional($invoice->due_date)->toDateString()).'</p>'
+            .'<p>Status: '.e($invoice->status).' · '.e($invoice->payment_status).'</p>'
+            .'<table width="100%" cellpadding="6" border="1" cellspacing="0"><tr><th>Description</th><th>Qty</th><th>Price</th><th>Amount</th></tr>'.$rows.'</table>'
+            .'<p>Total: '.e($invoice->total_amount).'</p><p>Paid: '.e($invoice->paid_amount).'</p><p>Balance: '.e($invoice->balance_amount).'</p>'
+            .'</body></html>';
+
+        return Pdf::loadHTML($html)->download('invoice-'.$invoice->invoice_number.'.pdf');
+    }
+
+    private function canReadInvoice(Request $request, Invoice $invoice): bool
+    {
+        $user = $request->user();
+        $student = Student::query()->where('user_id', $user->id)->first();
+        if ($student && (int) $invoice->student_id === (int) $student->id) {
+            return true;
+        }
+        if (! $user->hasPermission('invoices.view')) {
+            return false;
+        }
+
+        return ! $invoice->branch_id || $this->canAccessBranch($request, (int) $invoice->branch_id);
+    }
+
     public function show($id)
     {
         try {

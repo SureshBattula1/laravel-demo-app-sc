@@ -244,9 +244,10 @@ class SystemAuditLogger
             return;
         }
 
-        // Ignore failed validation (422) or 4xx/5xx on non-login mutations so failed form submits don't create false update logs
-        $isLoginEndpoint = str_ends_with($path, '/login') || $path === 'api/login';
-        if (! $isLoginEndpoint && $statusCode >= 400) {
+        // Ignore failed validation (422) or 4xx/5xx on non-auth mutations so failed form submits don't create false update logs.
+        // Auth calls (login, logout, password reset) are always recorded, including failures.
+        $authKind = $this->authKindFromPath($path);
+        if ($authKind === null && $statusCode >= 400) {
             $this->bufferedModelEvents = [];
             $this->preRequestTarget = null;
 
@@ -257,6 +258,14 @@ class SystemAuditLogger
 
         $this->isRecording = true;
         try {
+            // Auth has no authenticated user on the request yet (login) or must not be
+            // swallowed by a password field change on the User model.
+            if ($authKind !== null) {
+                $this->persistEntry(array_merge($context, $this->buildAuthEntry($request, $authKind, $statusCode)));
+
+                return;
+            }
+
             // 1. If we captured a pre-request snapshot for this route target, compute the exact before/after diff
             if ($this->preRequestTarget !== null) {
                 $snapshotEntry = $this->buildSnapshotDiffEntry($request, $method);
@@ -888,6 +897,131 @@ class SystemAuditLogger
         ];
     }
 
+    /**
+     * Sign-in, sign-out, and password actions. Matched on the last path segment so
+     * both /api/login and /api/company-portal/auth/logout are included.
+     */
+    protected function authKindFromPath(string $path): ?string
+    {
+        $clean = preg_replace('#^api/(company-portal/)?#', '', ltrim($path, '/'));
+        $segments = array_values(array_filter(explode('/', (string) $clean)));
+        $last = $segments[count($segments) - 1] ?? '';
+
+        return match ($last) {
+            'login' => 'login',
+            'logout' => 'logout',
+            'forgot-password' => 'password_reset_requested',
+            'reset-password' => 'password_reset',
+            'change-password' => 'password_changed',
+            'register' => 'registered',
+            default => null,
+        };
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function buildAuthEntry(Request $request, string $kind, int $statusCode): array
+    {
+        $failed = $statusCode >= 400;
+        $identifier = trim((string) ($request->input('email') ?? $request->input('login') ?? $request->input('phone') ?? ''));
+        $actor = in_array($kind, ['login', 'password_reset_requested', 'registered'], true)
+            ? $this->actorFieldsForIdentifier($identifier)
+            : [];
+
+        $routeUserId = $request->route('id') ?? $request->route('userId');
+        if ($kind === 'password_reset' && $routeUserId) {
+            $targetUser = \App\Models\User::query()->find($routeUserId);
+            if ($targetUser) {
+                $targetName = trim(($targetUser->first_name ?? '').' '.($targetUser->last_name ?? ''));
+                $actor['record_label'] = $targetName !== '' ? $targetName : $targetUser->email;
+                $actor['auditable_type'] = 'User';
+                $actor['auditable_id'] = (string) $targetUser->id;
+            }
+        }
+
+        $description = match ($kind) {
+            'login' => $failed
+                ? 'Failed login attempt'.($identifier !== '' ? " for {$identifier}" : '')
+                : 'User logged in',
+            'logout' => 'User logged out',
+            'password_reset_requested' => 'Password reset requested',
+            'password_reset' => $failed ? 'Password reset failed' : 'Password was reset',
+            'password_changed' => $failed ? 'Password change failed' : 'Password was changed',
+            'registered' => $failed ? 'Account registration failed' : 'Account registered',
+            default => 'Authentication action',
+        };
+
+        $label = $actor['record_label'] ?? ($identifier !== '' ? $identifier : null);
+
+        return array_merge($actor, [
+            'module' => 'auth',
+            'action' => $kind === 'login' && $failed ? 'login_failed' : $kind,
+            'severity' => $failed ? 'warning' : 'info',
+            'description' => $label && ! str_contains($description, (string) $label)
+                ? "{$description} ({$label})"
+                : $description,
+            'record_label' => $label,
+            'new_values' => [
+                'status_code' => $statusCode,
+            ],
+        ]);
+    }
+
+    /**
+     * Login has no authenticated user on the request, so tenant fields must be
+     * resolved from the account or the row is hidden from the audit list.
+     *
+     * @return array<string, mixed>
+     */
+    protected function actorFieldsForIdentifier(string $identifier): array
+    {
+        $identifier = trim($identifier);
+        if ($identifier === '') {
+            return [];
+        }
+
+        $query = \App\Models\User::query();
+        if (filter_var($identifier, FILTER_VALIDATE_EMAIL)) {
+            $user = $query->whereRaw('LOWER(email) = ?', [Str::lower($identifier)])->first();
+        } else {
+            $user = $query->where('phone', $identifier)->orWhere('email', $identifier)->first();
+        }
+
+        if (! $user) {
+            return [];
+        }
+
+        $name = trim(($user->first_name ?? '').' '.($user->last_name ?? ''));
+        if ($name === '') {
+            $name = (string) ($user->email ?? $identifier);
+        }
+
+        $schoolId = null;
+        if ($user->branch_id) {
+            $schoolId = Branch::query()->where('id', $user->branch_id)->value('school_id');
+        }
+        if (! $schoolId) {
+            $schoolIds = DB::table('schools')->limit(2)->pluck('id');
+            if ($schoolIds->count() === 1) {
+                $schoolId = (int) $schoolIds->first();
+            }
+        }
+
+        return [
+            'user_id' => $user->id,
+            'user_name' => $name,
+            'user_email' => $user->email,
+            'user_role' => $user->role,
+            'company_id' => $user->company_id ? (int) $user->company_id : null,
+            'school_id' => $schoolId ? (int) $schoolId : null,
+            'branch_id' => $user->branch_id ? (int) $user->branch_id : null,
+            'auditable_type' => 'User',
+            'auditable_id' => (string) $user->id,
+            'record_label' => $name,
+        ];
+    }
+
     protected function inferRequestAction(Request $request, string $path, string $method, int $statusCode, bool $isExportOrDownload): ?array
     {
         $cleanPath = preg_replace('#^api/(company-portal/)?#', '', $path);
@@ -897,29 +1031,8 @@ class SystemAuditLogger
 
         $payload = $this->sanitizeArray($request->except(['_token', '_method', 'file', 'files']));
 
-        if ($first === 'login') {
-            $failed = $statusCode >= 400;
-            $loginIdentifier = (string) ($request->input('email') ?? $request->input('login') ?? 'unknown');
-
-            return [
-                'module' => 'auth',
-                'action' => $failed ? 'login_failed' : 'login',
-                'severity' => $failed ? 'warning' : 'info',
-                'record_label' => $loginIdentifier,
-                'description' => $failed
-                    ? "Failed login attempt for {$loginIdentifier}"
-                    : "User logged in ({$loginIdentifier})",
-                'new_values' => ['login' => $loginIdentifier, 'status_code' => $statusCode],
-            ];
-        }
-
-        if ($first === 'logout') {
-            return [
-                'module' => 'auth',
-                'action' => 'logout',
-                'severity' => 'info',
-                'description' => 'User logged out of the session',
-            ];
+        if ($this->authKindFromPath($path) !== null) {
+            return $this->buildAuthEntry($request, (string) $this->authKindFromPath($path), $statusCode);
         }
 
         if ($isExportOrDownload) {

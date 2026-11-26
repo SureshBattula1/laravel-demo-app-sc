@@ -418,6 +418,7 @@ class AuthController extends Controller
                 $user->load(['transportDriver.vehicles.route', 'transportDriver.branch']);
             }
             $user->permissions = $user->getPermissionSlugs($user->branch_id);
+            $this->attachStudentProfileAvatar($user);
 
             return response()->json([
                 'success' => true,
@@ -494,6 +495,9 @@ class AuthController extends Controller
             DB::commit();
 
             Log::info('Profile updated', ['user_id' => $user->id]);
+
+            $user->refresh();
+            $this->attachStudentProfileAvatar($user);
 
             return response()->json([
                 'success' => true,

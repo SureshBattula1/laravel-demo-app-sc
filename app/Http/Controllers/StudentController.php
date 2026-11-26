@@ -421,6 +421,14 @@ class StudentController extends Controller
     public function getByUserId(Request $request, $userId)
     {
         try {
+            $user = $request->user();
+            if ($user && strcasecmp((string) $user->role, 'Student') === 0 && (int) $userId !== (int) $user->id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Student profile not found',
+                ], 404);
+            }
+
             $student = DB::table('students')
                 ->join('users', 'students.user_id', '=', 'users.id')
                 ->leftJoin('branches', 'students.branch_id', '=', 'branches.id')
@@ -544,36 +552,10 @@ class StudentController extends Controller
     public function store(Request $request)
     {
         try {
-            $validator = Validator::make($request->all(), [
-                'first_name' => 'required|string|max:255',
-                'last_name' => 'required|string|max:255',
-                'email' => 'required|email|unique:users,email',
-                'phone' => 'nullable|string|max:20',
-                'password' => 'required|string|min:8',
-                'branch_id' => 'required|exists:branches,id',
-                'admission_number' => 'required|string|unique:students,admission_number',
-                'admission_date' => 'required|date',
-                'grade' => 'required|string',
-                'section' => 'nullable|string',
-                'academic_year_id' => 'required|integer|exists:academic_years,id',
-                'date_of_birth' => 'required|date',
-                'gender' => 'required|in:Male,Female,Other',
-                'current_address' => 'required|string',
-                'city' => 'required|string',
-                'state' => 'required|string',
-                'pincode' => 'required|string',
-                'father_name' => 'required|string',
-                'father_phone' => 'required|string',
-                'mother_name' => 'required|string',
-                'emergency_contact_name' => 'required|string',
-                'emergency_contact_phone' => 'required|string',
-            ]);
+            $validator = Validator::make($request->all(), $this->studentFieldRules(true));
 
             if ($validator->fails()) {
-                return response()->json([
-                    'success' => false,
-                    'errors' => $validator->errors(),
-                ], 422);
+                return \App\Support\FieldErrorResponse::validation($validator->errors());
             }
 
             if (! $this->canAccessBranch($request, (int) $request->branch_id)) {
@@ -657,14 +639,29 @@ class StudentController extends Controller
                 ],
             ], 201);
 
+        } catch (\Illuminate\Database\QueryException $e) {
+            if (DB::transactionLevel() > 0) {
+                DB::rollBack();
+            }
+            Log::error('Create student error', ['error' => $e->getMessage()]);
+            $fieldError = \App\Support\FieldErrorResponse::fromQueryException($e);
+            if ($fieldError) {
+                return $fieldError;
+            }
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to create student',
+            ], 500);
         } catch (\Exception $e) {
-            DB::rollBack();
+            if (DB::transactionLevel() > 0) {
+                DB::rollBack();
+            }
             Log::error('Create student error', ['error' => $e->getMessage()]);
 
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to create student',
-
             ], 500);
         }
     }
@@ -705,26 +702,10 @@ class StudentController extends Controller
                 $request->replace($request->except($blocked));
             }
 
-            $validator = Validator::make($request->all(), [
-                'section' => 'sometimes|string',
-                'roll_number' => ['sometimes', 'nullable', function ($attr, $value, $fail) {
-                    if ($value !== null && $value !== '' && ! is_string($value) && ! is_numeric($value)) {
-                        $fail('The roll number must be a string or number.');
-                    }
-                }],
-                'current_address' => 'sometimes|string',
-                'city' => 'sometimes|string',
-                'state' => 'sometimes|string',
-                'pincode' => 'sometimes|string',
-                'student_status' => 'sometimes|in:Active,Graduated,Left,Suspended,Expelled',
-                'profile_picture' => 'sometimes|string|nullable', // Allow profile_picture path to be updated
-            ]);
+            $validator = Validator::make($request->all(), $this->studentFieldRules(false, (int) $student->user_id, (int) $id));
 
             if ($validator->fails()) {
-                return response()->json([
-                    'success' => false,
-                    'errors' => $validator->errors(),
-                ], 422);
+                return \App\Support\FieldErrorResponse::validation($validator->errors());
             }
 
             DB::beginTransaction();
@@ -785,16 +766,78 @@ class StudentController extends Controller
                 'message' => 'Student updated successfully',
             ]);
 
+        } catch (\Illuminate\Database\QueryException $e) {
+            if (DB::transactionLevel() > 0) {
+                DB::rollBack();
+            }
+            Log::error('Update student error', ['error' => $e->getMessage()]);
+            $fieldError = \App\Support\FieldErrorResponse::fromQueryException($e);
+            if ($fieldError) {
+                return $fieldError;
+            }
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update student',
+            ], 500);
         } catch (\Exception $e) {
-            DB::rollBack();
+            if (DB::transactionLevel() > 0) {
+                DB::rollBack();
+            }
             Log::error('Update student error', ['error' => $e->getMessage()]);
 
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update student',
-
             ], 500);
         }
+    }
+
+    /**
+     * Field rules shared by student create and update. Keys match the Angular form controls.
+     *
+     * @return array<string, mixed>
+     */
+    private function studentFieldRules(bool $creating, ?int $userId = null, ?int $studentId = null): array
+    {
+        $required = $creating ? 'required' : 'sometimes|required';
+        $emailUnique = 'unique:users,email'.($userId ? ','.$userId : '');
+        $admissionUnique = 'unique:students,admission_number'.($studentId ? ','.$studentId : '');
+
+        return [
+            'first_name' => $required.'|string|max:255',
+            'last_name' => $required.'|string|max:255',
+            'email' => $required.'|email|max:255|'.$emailUnique,
+            'phone' => 'nullable|string|max:20',
+            'password' => ($creating ? 'required' : 'nullable').'|string|min:8',
+            'branch_id' => $required.'|integer|exists:branches,id',
+            'admission_number' => $required.'|string|max:50|'.$admissionUnique,
+            'admission_date' => $required.'|date',
+            'roll_number' => 'nullable',
+            'grade' => $required.'|string|max:50',
+            'section' => 'nullable|string|max:50',
+            'academic_year_id' => $required.'|integer|exists:academic_years,id',
+            'date_of_birth' => $required.'|date',
+            'gender' => $required.'|in:Male,Female,Other',
+            'current_address' => $required.'|string|max:1000',
+            'city' => $required.'|string|max:255',
+            'state' => $required.'|string|max:255',
+            'pincode' => $required.'|string|max:20',
+            'father_name' => $required.'|string|max:255',
+            'father_phone' => $required.'|string|max:20',
+            'father_email' => 'nullable|email|max:255',
+            'mother_name' => $required.'|string|max:255',
+            'mother_email' => 'nullable|email|max:255',
+            'emergency_contact_name' => $required.'|string|max:255',
+            'emergency_contact_phone' => $required.'|string|max:20',
+            'aadhaar_number' => 'nullable|digits:12',
+            'height_cm' => 'nullable|numeric|min:0|max:300',
+            'weight_kg' => 'nullable|numeric|min:0|max:200',
+            'passport_expiry' => 'nullable|date',
+            'last_health_checkup' => 'nullable|date',
+            'student_status' => 'sometimes|nullable|in:Active,Graduated,Left,Suspended,Expelled',
+            'profile_picture' => 'nullable|string',
+        ];
     }
 
     /**
@@ -1612,6 +1655,10 @@ class StudentController extends Controller
                     'success' => false,
                     'message' => 'Student not found',
                 ], 404);
+            }
+
+            if ($this->deniesStudentFeeRead($request, $student)) {
+                return $this->studentFeeReadDeniedResponse();
             }
 
             $duesService = new \App\Services\FeeDuesService;

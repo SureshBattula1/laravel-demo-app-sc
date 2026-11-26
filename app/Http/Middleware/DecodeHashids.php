@@ -27,6 +27,13 @@ class DecodeHashids
 
         $this->decodeHeaders($request);
         $this->decodeRouteParameters($request);
+
+        // The SPA sends Content-Type: application/json on GET requests. For those,
+        // replace() writes into the JSON body and leaves the query string hashed,
+        // so controllers that read query('branch_id') cast the token to 0.
+        // Decode the query string in place, then keep the previous merge into the
+        // body so input() still sees query fields on JSON requests.
+        $request->query->replace($this->decodeArray($request->query->all()));
         $request->replace($this->decodeArray($request->all()));
 
         return $next($request);
